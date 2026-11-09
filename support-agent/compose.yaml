@@ -1,0 +1,67 @@
+# 채팅 서비스와 그 DB. 모델은 호스트의 Ollama가 돌린다(GPU가 필요하다):
+#   ollama pull qwen3.5:4b          (.env에 MODEL=qwen2.5:7b-instruct를 두면 이전 모델로 돌아간다)
+#   docker compose up --build
+# 채팅: http://127.0.0.1:8062   관리 화면: http://127.0.0.1:8062/admin (토큰: ADMIN_TOKEN, 기본값 "local-admin")
+# 두 포트 모두 127.0.0.1에서만 듣는다. 아래 기본값은 로컬 시연용이다. 자기 값은 .env에 둔다.
+name: support-agent
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: support
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-support-local}
+      POSTGRES_DB: support
+    ports:
+      - "127.0.0.1:${DB_PORT:-55462}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SUPPORT_AGENT_DATABASE_URL: postgresql+psycopg://support:${POSTGRES_PASSWORD:-support-local}@db:5432/support
+      SUPPORT_AGENT_OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      SUPPORT_AGENT_MODEL: ${MODEL:-qwen3.5:4b}
+      # 비워 두면 qwen3.5:4b에는 off, 다른 모델에는 보내지 않는다(service/settings.py)
+      SUPPORT_AGENT_THINK: ${THINK:-}
+      SUPPORT_AGENT_ADMIN_TOKEN: ${ADMIN_TOKEN:-local-admin}
+      SUPPORT_AGENT_APPROVAL_REFUND_WON: ${APPROVAL_REFUND_WON:-100000}
+      # 모델을 메모리(GPU)에 두는 시간과 시작 때 미리 올리기(service/settings.py의 keep_alive·preload). 기본은
+      # 이 설정이 생기기 전 동작 그대로(60분, 미리 올리지 않음): GPU를 다른 작업과 나눠 쓰므로 고객이 없을 때
+      # 모델이 자리를 오래 쥐지 않게 한다. 그래서 띄운 직후와 오래 쉰 뒤의 첫 메시지는 모델을 올리는 시간만큼
+      # 늦다(docs/service.md "실행")
+      SUPPORT_AGENT_KEEP_ALIVE: ${KEEP_ALIVE:-60m}
+      SUPPORT_AGENT_PRELOAD: ${PRELOAD:-0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${APP_PORT:-8062}:8000"
+    # 권한 축소. 앱은 비루트 사용자(uid 10001, Dockerfile)로 8000번에서 듣고 DB와 Ollama에는 네트워크로만 닿으므로
+    # Linux capability가 하나도 필요 없다(cap_drop: ALL). no-new-privileges는 setuid 실행 파일로 권한을 얻는 길을
+    # 막는다. 루트 파일 시스템은 읽기 전용이고 쓸 수 있는 곳은 메모리 위의 /tmp뿐이다: 이 구성의 앱은 저장할
+    # 것을 모두 PostgreSQL에 쓰고 파일은 쓰지 않는다(SQLite 파일 모드는 호스트에서 띄운다, docs/service.md).
+    # 메모리 한도(2 GB)는 폭주한 요청이 호스트 메모리를 다 쓰지 못하게 한다. 음성 그룹은 이 이미지에 없다(음성
+    # 모드도 호스트에서 띄운다, docs/voice.md).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+volumes:
+  pgdata:

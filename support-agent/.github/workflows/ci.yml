@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 이 워크플로의 GITHUB_TOKEN은 저장소 내용을 읽기만 한다. 적어 두지 않으면 저장소 설정의 기본 권한을 따르므로,
+# 그 기본값이 쓰기로 바뀌어도 이 작업은 읽기 전용으로 남게 여기서 정한다. 작업은 코드를 받아 린트·테스트만 한다.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.11"
+      # tests/test_postgres.py는 이 값이 있을 때만 돈다(이 작업에서만 쓰고 버리는 서버)
+      SUPPORT_AGENT_TEST_PG_URL: postgresql+psycopg://support:ci-only@127.0.0.1:5432/support
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: support
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: support
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U support -d support"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      # 액션은 태그가 아니라 커밋 SHA로 부른다. 태그는 다른 커밋으로 옮길 수 있어, 옮겨지면 검토하지 않은 코드가
+      # 이 작업에서 돈다. 줄 끝 주석은 그 SHA를 가리키는 릴리스 태그다. 올릴 때는 새 태그가 가리키는 SHA를
+      # `git ls-remote https://github.com/<소유자>/<저장소> refs/tags/<태그>`로 확인해 SHA와 주석을 함께 바꾼다.
+      # persist-credentials: false: 토큰을 .git/config에 남기지 않는다. 뒤 단계는 git으로 원격에 닿지 않는다.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # setup-uv는 v10 같은 큰 버전 태그를 내지 않아 정확한 릴리스로 고정해 왔다. 그 릴리스의 커밋 SHA로 부른다.
+      # cache-suffix: 캐시 키 끝에 붙는 이름이다. setup-uv의 캐시 키는 러너 OS·해석기 판·pyproject.toml·uv.lock
+      # 해시로 만들어져, 이름을 붙이지 않으면 같은 러너에서 캐시를 켠 다른 작업과 키가 같아진다. 2026-11-01부터
+      # audit 작업이 기본값(켬)으로 같은 키에 pip-audit만 든 캐시를 먼저 저장했고, 이 작업은 그 캐시에 적중한 뒤
+      # 정확히 같은 키라 자기 캐시를 저장하지 않아 실행마다 의존성을 다시 받았다(아래 audit 작업은 이제 캐시를
+      # 쓰지 않는다). 이름을 붙이면 이 작업은 audit이 남긴 그 캐시를 더는 받지 않고, 이름이 붙은 새 키로 첫 실행이
+      # 자기 캐시를 저장한 뒤 다음 실행부터 그것을 받는다.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          enable-cache: true
+          cache-suffix: test
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest -q
+
+  # 공개 보안 권고 대조(2026-11-01부터). uv.lock의 기본 그룹(본체 + dev. 위 test 작업이 `uv sync --frozen`으로
+  # 설치하는 것이고, 서비스 Docker 이미지는 `uv sync --frozen --no-dev`라 그중 본체만 설치한다)의 고정 판을 PyPI의
+  # 권고 정보(pip-audit 기본)와 대조한다. 패키지를 설치하지 않고(--disable-pip, --no-deps) 잠금에 고정된
+  # `이름==판`만 본다.
+  # - continue-on-error: 새 권고가 공개된 날 코드와 상관없는 push·PR이 막히지 않게, 이 작업이 실패해도 워크플로는
+  #   통과한다. 이 작업만 실패로 표시되므로, 보면 판단해서 올리거나(`uv lock --upgrade-package <패키지>`) 이유를
+  #   적고 `--ignore-vuln <ID>`로 이 단계에 더한다(지금은 없음)
+  # - 줄 고르기: uv export 줄에서 환경 표시(`; sys_platform == 'win32'` 등)를 떼어 러너와 상관없이 모든 플랫폼의
+  #   항목을 본다. --strict는 대조하지 못한 패키지가 하나라도 있으면 실패하게 해, 조용히 빠지는 패키지가 없게 한다.
+  #   프로젝트 자신은 PyPI에 없으므로 내보내지 않는다(--no-emit-project)
+  # - 음성 그룹(voice)은 대조하지 않는다. MeloTTS가 묶은 판(transformers 4.27.4 등)의 권고가 남아 있어 늘 실패하기
+  #   때문이다. 남은 권고와 이유는 docs/voice.md "정한 것과 이유"의 2026-10-29·2026-11-01 보탬에 있다
+  # - shell: bash는 pipefail을 켠다(기본 셸은 bash -e뿐이라 파이프 앞쪽 명령이 실패해도 지나간다). 그래서 내보내기가
+  #   실패하거나 비어 grep이 아무것도 못 고르면 이 단계가 실패한다
+  # - pip-audit 판은 고정한다(2.10.1). 결과 표는 이 단계의 로그에 남는다
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      # 액션 SHA 고정과 persist-credentials는 test 작업과 같은 이유다(위 주석).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 캐시를 쓰지 않는다. 적지 않으면 setup-uv의 기본값(auto)이 GitHub 호스트 러너에서 캐시를 켜고, 키가 test
+      # 작업과 같은 재료(러너 OS·해석기 판·pyproject.toml·uv.lock 해시)로 만들어진다. 몇 초 만에 끝나는 이 작업이
+      # pip-audit만 든 캐시를 먼저 저장하면 test 작업이 그 캐시에 적중하고 자기 캐시를 저장하지 못한다(2026-11-01~
+      # 11-05 실제로 그랬다). 이 작업이 받는 것은 pip-audit 하나라 캐시 이득도 작다.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          enable-cache: false
+
+      - name: Audit the locked default group
+        shell: bash
+        run: |
+          uv export --frozen --format requirements-txt --no-hashes --no-emit-project > "$RUNNER_TEMP/locked.txt"
+          grep -E '^[A-Za-z0-9]' "$RUNNER_TEMP/locked.txt" | sed -E 's/[[:space:]]*;.*$//' > "$RUNNER_TEMP/pinned.txt"
+          echo "== $(wc -l < "$RUNNER_TEMP/pinned.txt") packages"
+          uvx pip-audit==2.10.1 -r "$RUNNER_TEMP/pinned.txt" --no-deps --disable-pip --strict --progress-spinner off
