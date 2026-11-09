@@ -1,4 +1,4 @@
-# CI: main에 push할 때와 pull request마다 돈다. Actions 탭의 'Run workflow'로 손으로도 돌릴 수 있다(workflow_dispatch).
+# CI: main에 push할 때와 pull request마다(아래 paths) 돈다. Actions 탭의 'Run workflow'로 손으로도 돌릴 수 있다(workflow_dispatch).
 # 세 작업은 서로 기다리지 않고 나란히 돈다.
 # - test: 기본 의존성과 dev 그룹(uv가 기본으로 설치하는 그룹)으로 ruff 린트·포맷 확인과 pytest. 학습용 train 그룹(torch
 #   등)·모델·GPU는 쓰지 않는다
@@ -13,15 +13,37 @@
 #   `gh api repos/<소유자>/<저장소>/commits/<태그> --jq .sha`로 확인하고 SHA와 주석을 함께 고친다
 # - checkout의 persist-credentials: false: checkout이 끝난 뒤 토큰을 git 인증 설정에 남기지 않는다. 뒤 단계는 원격 저장소에
 #   접근하지 않으므로 필요 없고, 남겨 두면 테스트나 uvx로 받아 실행하는 도구 같은 뒤 단계의 프로그램이 읽을 수 있다
-name: CI
+name: call-summary
 
 on:
   push:
     branches: [main]
+    paths:
+      - "call-summary/**"
+      - ".github/workflows/call-summary.yml"
   pull_request:
+    paths:
+      - "call-summary/**"
+      - ".github/workflows/call-summary.yml"
   # 손으로 돌리기: 코드를 바꾸지 않고 audit 작업이 그사이 공개된 권고를 다시 보게 할 때 쓴다. 권고는 저장소가 쉬는 동안에도
   # 공개되지만 push가 없으면 드러나지 않는다. 주기 실행(schedule)은 저장소에 정기 알림을 만드는 지속 설정이라 넣지 않았다
   workflow_dispatch:
+
+# 모노레포 설정(2026-11-10): GitHub는 저장소 맨 위의 .github/workflows만 읽으므로 이 워크플로를
+# call-summary/.github/workflows/ci.yml에서 이 자리로 옮겼다(git mv라 이력이 이어진다). 작업·액션·권한·검사 내용은 그대로다.
+# - on.*.paths: call-summary/ 아래나 이 파일이 바뀐 main push와 pull request에서만 돈다.
+# - defaults.run.working-directory: run 단계를 call-summary/ 안에서 돌린다(옮기기 전의 저장소 맨 위와 같은 자리).
+# - setup-uv의 working-directory: uses 단계에는 defaults.run이 먹지 않는다. 이 값이 pyproject.toml을 찾는 곳,
+#   activate-environment가 만드는 .venv 자리, cache-dependency-glob의 기준을 정한다. 적지 않으면 저장소 맨 위를 봐
+#   캐시 키에 다른 구성 요소의 uv.lock이 섞이고 .venv가 맨 위에 생긴다. cache-suffix는 구성 요소·작업마다 캐시 키를 나눈다.
+# - concurrency: 같은 구성 요소·같은 ref의 실행은 하나씩 돈다(기다리는 실행은 가장 새것 하나만 남는다).
+# - container 작업의 compose 명령은 --file compose.yaml로 작업 폴더(call-summary/)의 파일을 적는다. compose 프로젝트 이름은 폴더 이름 call-summary 그대로다.
+concurrency:
+  group: call-summary-${{ github.ref }}
+
+defaults:
+  run:
+    working-directory: call-summary
 
 permissions:
   contents: read
@@ -44,6 +66,9 @@ jobs:
         with:
           version: "0.13.1"
           enable-cache: true
+          working-directory: call-summary
+          cache-dependency-glob: uv.lock
+          cache-suffix: call-summary-test
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -84,6 +109,9 @@ jobs:
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.13.1"
+          working-directory: call-summary
+          cache-dependency-glob: uv.lock
+          cache-suffix: call-summary-audit
 
       # shell: bash는 pipefail을 켠다(기본 셸은 bash -e뿐이라 파이프 앞쪽 명령이 실패해도 지나간다).
       - name: Audit the locked dependencies
@@ -123,15 +151,15 @@ jobs:
           persist-credentials: false
 
       - name: Build and start the service container
-        run: docker compose up --build --detach --wait --wait-timeout 180
+        run: docker compose --file compose.yaml up --build --detach --wait --wait-timeout 180
 
       - name: Check /health from the host
         run: curl --fail --silent --show-error http://127.0.0.1:8072/health
 
       - name: Container log
         if: always()
-        run: docker compose logs --no-color
+        run: docker compose --file compose.yaml logs --no-color
 
       - name: Remove the container
         if: always()
-        run: docker compose down
+        run: docker compose --file compose.yaml down

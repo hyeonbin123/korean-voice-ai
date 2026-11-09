@@ -13,6 +13,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# 이 구성 요소의 CI 워크플로 파일 위치를 돌려준다. 모노레포에서는 GitHub가 저장소 맨 위의 .github/workflows만
+# 읽으므로 워크플로를 ROOT 한 단계 위(모노레포 맨 위)의 .github/workflows/call-summary.yml로 옮겼다.
+# 그 파일이 있으면 그것을, 없으면 예전 자리 ROOT/.github/workflows/ci.yml을 돌려준다. 예전 자리는 이 폴더만
+# 따로 받았을 때(모노레포 밖)를 위한 것이고, 어느 자리의 파일을 읽든 검사 내용은 그대로다. 둘 다 없으면
+# 예전 자리를 돌려주므로 읽는 쪽이 FileNotFoundError로 실패한다(조용히 건너뛰지 않는다).
+def _workflow_path() -> Path:
+    moved = ROOT.parent / ".github" / "workflows" / "call-summary.yml"
+    if moved.is_file():
+        return moved
+    return ROOT / ".github" / "workflows" / "ci.yml"
+
+
 # 컨테이너는 홈 디렉터리가 없는 시스템 사용자(app)로 돈다. 이때 `uv run`은 캐시 폴더를 만들지 못해 컨테이너가
 # 바로 죽었다(커밋 966276e). 그래서 CMD의 첫 낱말이 uvicorn이고, 가상환경의 bin이 PATH 앞에 있는지
 # 확인한다(가상환경의 uvicorn이 실행되도록).
@@ -61,7 +73,7 @@ def test_uv_version_is_the_same_in_the_image_and_ci_and_meets_the_project_floor(
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     image = re.search(r"^COPY --from=ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", dockerfile, re.M)
     assert image
-    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ci = _workflow_path().read_text(encoding="utf-8")
     # setup-uv 단계 하나 = `- uses: astral-sh/setup-uv@...` 줄과, 그보다 두 칸 더 들여 쓴 줄·빈 줄이 이어지는
     # 데까지 (같은 들여쓰기의 다음 `- ` 단계나 주석 줄에서 끝난다).
     steps = re.findall(r"^( *)- uses: astral-sh/setup-uv@.*\n((?:\1  .*\n|[ \t]*\n)*)", ci, re.M)
