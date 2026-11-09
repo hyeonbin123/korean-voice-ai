@@ -1,4 +1,4 @@
-# [역할] push와 pull request마다 린트(ruff)와 테스트(pytest)를 돌린다. GPU가 없는 GitHub 러너에서 돌므로,
+# [역할] main push와 pull request마다(아래 paths) 린트(ruff)와 테스트(pytest)를 돌린다. GPU가 없는 GitHub 러너에서 돌므로,
 # 모델을 내려받거나 GPU로 측정하는 일은 하지 않는다. 테스트는 작은 무작위 모델, 가짜 모델, 커밋된 리포트의 다시
 # 채점만으로 돈다(tests/ 각 파일 머리 주석).
 # [확인하는 것] 커밋된 리포트(reports/)를 지금 코드로 다시 채점해 기록된 수치와 같은지(tests/test_recorded_reports.py),
@@ -6,11 +6,33 @@
 # faster-whisper 묶음이 실제로 import되는지는 Test 앞 단계가 따로 확인한다.
 # [작업 둘] test(위의 린트·테스트)와 audit(uv.lock에 고정된 모든 패키지를 공개 보안 권고와 대조. 알리기만 하고
 # 워크플로를 막지 않는다. 아래 audit 작업의 설명)는 서로 기다리지 않고 나란히 돈다.
-name: CI
+name: whisper-ko-ft
 
 on:
   push:
+    branches: [main]
+    paths:
+      - "whisper-ko-ft/**"
+      - ".github/workflows/whisper-ko-ft.yml"
   pull_request:
+    paths:
+      - "whisper-ko-ft/**"
+      - ".github/workflows/whisper-ko-ft.yml"
+
+# 모노레포 설정(2026-11-10): GitHub는 저장소 맨 위의 .github/workflows만 읽으므로 이 워크플로를
+# whisper-ko-ft/.github/workflows/ci.yml에서 이 자리로 옮겼다(git mv라 이력이 이어진다). 작업·액션·권한·검사 내용은 그대로다.
+# - on.*.paths: whisper-ko-ft/ 아래나 이 파일이 바뀐 main push와 pull request에서만 돈다.
+# - defaults.run.working-directory: run 단계를 whisper-ko-ft/ 안에서 돌린다(옮기기 전의 저장소 맨 위와 같은 자리).
+# - setup-uv의 working-directory: uses 단계에는 defaults.run이 먹지 않는다. 이 값이 pyproject.toml을 찾는 곳,
+#   activate-environment가 만드는 .venv 자리, cache-dependency-glob의 기준을 정한다. 적지 않으면 저장소 맨 위를 봐
+#   캐시 키에 다른 구성 요소의 uv.lock이 섞이고 .venv가 맨 위에 생긴다. cache-suffix는 구성 요소·작업마다 캐시 키를 나눈다.
+# - concurrency: 같은 구성 요소·같은 ref의 실행은 하나씩 돈다(기다리는 실행은 가장 새것 하나만 남는다).
+concurrency:
+  group: whisper-ko-ft-${{ github.ref }}
+
+defaults:
+  run:
+    working-directory: whisper-ko-ft
 
 jobs:
   test:
@@ -37,6 +59,9 @@ jobs:
         with:
           python-version: "3.11"
           activate-environment: true
+          working-directory: whisper-ko-ft
+          cache-dependency-glob: uv.lock
+          cache-suffix: whisper-ko-ft-test
       # 설치 방식과 이유:
       # - uv.lock은 학습용으로 torch를 CUDA 12.8 빌드로 고정한다. 테스트에는 GPU가 필요 없으므로 잠긴 torch와
       #   같은 버전의 CPU 빌드를 PyTorch CPU 인덱스에서 받는다(`+cu128` 꼬리를 떼고 버전만 남긴다). CUDA 빌드는
@@ -118,6 +143,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          working-directory: whisper-ko-ft
+          cache-dependency-glob: uv.lock
+          cache-suffix: whisper-ko-ft-audit
       # shell: bash는 pipefail을 켠다(기본 셸은 bash -e뿐이라 파이프 앞쪽 명령이 실패해도 지나간다).
       - name: Audit the locked dependencies
         shell: bash
