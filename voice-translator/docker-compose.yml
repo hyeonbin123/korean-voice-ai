@@ -1,0 +1,137 @@
+# 서비스 전체: DB, 실제 모델을 GPU에서 돌리는 API, 빌드한 화면(nginx).
+#   docker compose up --build        그다음 http://localhost:8080 (WEB_HOST_PORT)
+# 첫 시작에 Whisper·MeloTTS·Kokoro 가중치를 hfcache 볼륨으로 받고(몇 GB) 올린다(약 1분). 번역 모델은
+# data/models/ct2에서 읽는다(eval/mt_convert.py). 로컬 개발에서는 `docker compose up -d db`로 DB만 띄운다(README).
+# 내려받는 이미지는 태그와 함께 digest(sha256)로 고정한다(2026-10-15). 태그만 쓰면 같은 파일로 띄워도 언제
+# 받았느냐에 따라 다른 이미지가 돈다. 보안 수정을 받으려면 태그를 다시 받아 digest를 새로 적는다
+# (backend/Dockerfile 머리 주석의 명령).
+services:
+  db:
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d  # PostgreSQL 16.15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vtuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vtpass}
+      POSTGRES_DB: ${POSTGRES_DB:-voicetranslator}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Windows(Hyper-V/WSL)가 호스트 포트 5432~5631을 예약할 수 있어 기본값을 그 범위 밖에 둔다.
+      # POSTGRES_HOST_PORT로 바꾸고, DATABASE_URL도 같은 포트를 써야 한다.
+      # 이 PC에서만 접속된다: 호스트 주소를 빼면 Docker가 모든 네트워크에서 받아, 방화벽이 허용하는 어디서든
+      # 예시 비밀번호로 DB에 들어올 수 있다. POSTGRES_HOST_IP=0.0.0.0은 실제 비밀번호와 함께 일부러만 쓴다.
+      - "${POSTGRES_HOST_IP:-127.0.0.1}:${POSTGRES_HOST_PORT:-55442}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vtuser}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 60s  # 느린 디스크(HDD)의 첫 시작은 위 재시도보다 오래 걸릴 수 있다
+
+  # 영어 글자 입력의 오타 교정(docs/experiments.md 6절): API가 첫 시작에 작은 LLM을 ollama 볼륨으로 받고(약
+  # 1GB, 뒤에서) GPU에 올려 둔다(약 1.3GB). Hy-MT2 번역 시험(docs/experiments.md 15절)의 모델은 이 안에서 공식
+  # GGUF로 만든다:
+  #   docker compose exec ollama ollama create hy-mt2:1.8b-q8_0 -f /models/hy-mt2/Modelfile.q8_0
+  # (파일은 `python -m eval.hymt_setup download`와 `modelfile`로 만든다). Ollama 판은 측정에 쓴 호스트와 같다.
+  ollama:
+    image: ollama/ollama:0.35.1@sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c
+    volumes:
+      - ollama:/root/.ollama
+      - ./data/models/hy-mt2:/models/hy-mt2:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    # .env는 없어도 된다: JWT_SECRET_KEY가 있으면 재시작 뒤에도 로그인이 유지된다. DATABASE_URL은 아래 값이
+    # 이긴다.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vtuser}:${POSTGRES_PASSWORD:-vtpass}@db:5432/${POSTGRES_DB:-voicetranslator}
+      OLLAMA_URL: http://ollama:11434
+      # 동시통역 자막(docs/experiments.md 8절): 자막 전용 스레드와 인식 복제 둘. 측정으로 기본값(끔, 1)을 유지했다.
+      LIVE_UPDATE_THREAD: ${LIVE_UPDATE_THREAD:-false}
+      STT_NUM_WORKERS: ${STT_NUM_WORKERS:-1}
+      # 방향별 번역(docs/experiments.md 15절): 기본 opus. Hy-MT2 시험 설정은 Ollama 모델과 digest가 필요하다.
+      EN_KO_TRANSLATION: ${EN_KO_TRANSLATION:-opus}
+      KO_EN_TRANSLATION: ${KO_EN_TRANSLATION:-opus}
+      # 한→영 opus 번역의 디코딩(docs/experiments.md 20절, docs/api.md): 기본 mbr8(빔 8의 가설 8개에서 문장 chrF
+      # MBR로 고르기, 측정으로 채택). beam4가 2026-11-03 전까지의 설정이다.
+      KO_EN_DECODING: ${KO_EN_DECODING:-mbr8}
+      HYMT_MODEL: ${HYMT_MODEL:-hy-mt2:1.8b-q8_0}
+      HYMT_DIGEST: ${HYMT_DIGEST:-}
+      # 오타 교정 모델의 기대 빌드(docs/api.md): 비우면(기본) 확인하지 않고, 주면 Ollama에 다른 빌드가 있을 때
+      # 교정만 끈다(서버는 뜬다). 측정한 빌드는 .env.example의 예시 값이다.
+      CORRECTION_DIGEST: ${CORRECTION_DIGEST:-}
+    # api는 root가 아닌 uid 10001로 돈다(backend/Dockerfile). 새로 만드는 hfcache·audio 볼륨은 이미지의 마운트
+    # 지점 소유권(10001)을 그대로 받는다. 이 변경 전의 root 이미지로 만든 볼륨은 root 소유라, 한 번 소유자를
+    # 바꿔야 번역 음성을 저장할 수 있다(README '전체 실행 (Docker)').
+    volumes:
+      - ./data/models/ct2:/models/ct2:ro
+      - hfcache:/models/hf
+      - audio:/data/audio
+    depends_on:
+      db:
+        condition: service_healthy
+      # 오타 교정은 없어도 된다: API는 Ollama 없이도 뜨고, 교정 모델이 준비될 때까지 글자 입력을 그대로
+      # 번역한다.
+      ollama:
+        condition: service_started
+        required: false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # 다시 시작 정책(docs/api.md '상태 확인'): 모델 호출이 CUDA 문맥을 망가뜨리는 오류를 내면 서버가 스스로
+    # 종료 코드 1로 끝나고, Docker가 새 프로세스를 띄워 모델을 다시 올린다(그동안은 응답하지 않는다). Docker는
+    # 상태 검사가 unhealthy인 컨테이너를 다시 시작하지 않으므로, 다시 띄우는 것은 이 정책뿐이다.
+    # on-failure는 0이 아닌 코드로 끝났을 때만 다시 띄우고, Docker 데몬이 다시 시작될 때(Docker Desktop을 켤
+    # 때)는 띄우지 않는다(https://docs.docker.com/engine/containers/start-containers-automatically/). 그래서
+    # always·unless-stopped와 달리 Docker Desktop을 켜기만 해서는 모델(VRAM 약 4.6~5.1GB, README)이 GPU에
+    # 올라가지 않는다. 사람이 멈춘 컨테이너(docker compose stop)도 다시 띄우지 않는다.
+    # :3은 사람이 시작(docker compose up·start)한 뒤 자동으로 다시 띄우는 횟수의 상한이다. 오래 잘 돌아도 이
+    # 수는 0으로 돌아가지 않으므로(Docker 엔진은 사람이 시작할 때만 센 수를 지운다), 네 번째로 끝나면 멈춘 채
+    # 남는다. 그래서 분류가 틀려 되풀이해 끝나도 GPU에 모델을 올리는 것은 세 번까지다. 모델 적재 중의 실패(모델
+    # 파일 없음 등)로 0이 아닌 코드로 끝나도 같은 상한 안에서 다시 띄운다.
+    # 2026-11-05 덧붙임: 위의 'Docker 데몬이 다시 시작될 때는 띄우지 않는다'와 달리, 이 PC에서 Docker Desktop을
+    # 켤 때 사람이 docker compose stop으로 멈춰 둔 api만 다시 뜬 일이 두 번 있었다(2026-11-02, 2026-11-05). db는
+    # restart 정책이 없어 멈춘 채라 api는 시작 명령의 마이그레이션(alembic upgrade)에서 db 이름을 찾지 못해
+    # 끝나기를 되풀이했고(2026-11-05에는 처음 한 번과 자동 다시 띄우기 세 번), 그 뒤 멈춘 채 남았다. 서버가
+    # 시작되기 전에 끝나 모델은 GPU에 올라가지 않았다. 왜 다시 떴는지는 확인하지 않았다(추정: on-failure가
+    # 사람이 멈춘 것인지는 보지 않고 마지막 종료 코드만 보는데, stop 제한 시간을 넘겨 강제로 끝난 컨테이너는
+    # 0이 아닌 코드로 끝난다).
+    restart: on-failure:3
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 900s  # 첫 시작은 모델을 받고 올린다
+
+  web:
+    build: ./frontend
+    ports:
+      - "${WEB_HOST_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  hfcache:
+  audio:
+  ollama:

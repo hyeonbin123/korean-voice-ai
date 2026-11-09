@@ -1,0 +1,192 @@
+# voice-translator
+
+영어↔한국어 음성 번역 웹 서비스. 말하거나 입력하면 음성 인식(STT), 번역, 음성 합성(TTS)을 거쳐 원문과 번역문을 보여 주고 번역문을 읽어 준다. 로그인한 사용자별로 번역 기록을 남긴다. 모델은 모두 로컬 GPU에서 돌고, 공개 평가 데이터(Google FLEURS)로 측정해서 골랐다.
+
+| 번역 화면 (데스크톱) | 기록 상세 (360px) |
+|---|---|
+| ![번역 결과 화면](docs/images/translate-desktop.png) | ![기록 상세 화면](docs/images/history-detail-360.png) |
+
+화면은 브라우저 접근성 검사(`npm run test:a11y`)가 찍은 것으로, API 응답은 검사용 가짜 값이다.
+
+## 구성
+
+| 항목 | 내용 |
+|---|---|
+| 백엔드 | FastAPI(비동기), SQLAlchemy 2.0, PostgreSQL 16, Alembic, JWT 인증 |
+| 프론트엔드 | React + TypeScript (Vite), 브라우저 마이크 녹음(MediaRecorder) |
+| 음성 인식 | Whisper large-v3-turbo (faster-whisper / CTranslate2, GPU float16) + VAD |
+| 번역 | opus-mt-tc-big 한→영·영→한 (CTranslate2로 변환), 영→한은 문장 단위로 번역 |
+| 오타 교정 | 글자로 입력한 영어만 번역 전에 qwen2.5 1.5B(Ollama)로 오타·띄어쓰기를 고침 |
+| 음성 합성 | 한국어 MeloTTS, 영어 Kokoro-82M |
+| 대화 모드 | 버튼 없이 말하고 멈추면 번역 음성까지. 브라우저에서 Silero VAD(onnxruntime-web)가 1초 쉼을 말 끝으로 판정해 한 마디씩 처리, 재생 중에는 듣지 않음. 로그인하면 한 마디의 소리를 웹소켓으로 보내 말이 192ms 멈출 때 인식·번역·합성을 미리 시작하고(다시 말하면 버림) 1초 판정 뒤 바로 재생. 예시 모드는 판정 뒤 녹음을 올림 |
+| 동시통역 | 말하는 동안 원문·번역문 자막이 갱신됨. 한 마디의 소리를 웹소켓으로 계속 보내고 서버가 1초마다 그 마디 전체를 다시 인식·번역, 이웃한 두 결과가 같은 원문 앞부분은 진하게. 말이 192ms 멈추면 번역·합성을 미리 시작해 1초 확인 뒤 바로 재생. 최종 결과는 대화 모드와 같은 소리·설정 |
+| 두 사람 대화 | 한 화면에서 한국어·영어 화자가 번갈아 말하면 한 마디마다 언어를 자동으로 가려(Whisper, 한국어·영어 둘 중) 상대 언어로 번역·음성. 판별이 애매하면 번갈아 말한다고 보고 처리하고 방향을 바꿀 수 있음. 로그인하면 대화 모드처럼 192ms 쉼에서 언어 판별부터 미리 처리. 말풍선 목록(노트북·모니터)과 휴대폰용 마주 보기 화면 |
+| 배포 | Docker Compose: db, api(GPU), ollama(GPU, 오타 교정), web(nginx가 화면과 `/api` 프록시, CSP 등 보안 머리글·gzip, [docs/security.md](docs/security.md)) |
+
+### 측정해서 고른 결과
+
+선택은 FLEURS validation으로, 확인은 고른 설정만 test로 한 번 했다. 후보, 판단 규칙(측정 전에 기록), 전체 수치는 [docs/experiments.md](docs/experiments.md)에 있다.
+
+| 단계 | 고른 것 | test 결과 |
+|---|---|---|
+| 음성 인식 | large-v3-turbo + VAD | 한국어 CER 4.57%, 영어 WER 4.95%. 음성 1초당 처리 약 0.04초 |
+| 번역 | opus-mt-tc-big | chrF 한→영 55.7, 영→한 36.1 |
+| 대화 모드 말 끝 판정 | Silero VAD, 1초 쉼 (음량 기준 판정보다 잡음에 강함) | 문장이 중간에 잘리는 비율 2.2~3.1%, 붙음·놓침 0, 말이 끝나고 판정까지 약 1.17초. 판정만으로는 1.5초 목표와 잘림 5% 이하를 함께 만족하는 방법이 없어 문장을 온전히 번역하는 쪽을 골랐다. 번역 음성까지는 아래 미리 처리 줄 |
+| 대화 모드·두 사람 대화 미리 처리 | 192ms 쉼에서 최종 처리를 미리 시작하고 1초 판정에서 확정 (판정 뒤 올리기보다 빠르고 결과는 같음) | 실제 서비스(test, PC를 쓰지 않을 때) 말을 멈춘 뒤 번역 음성까지 중앙값: 대화 모드 한국어 원문 1.86 → 1.24초, 영어 원문 2.25 → 1.43초, 두 사람 대화 한국어 원문 2.03 → 1.26초, 영어 원문 2.43 → 1.58초. 두 모드 160문장 모두 원문·번역문·언어가 판정 뒤 올린 결과와 같음. 다른 요청의 지연 회귀 없음(validation) |
+| 동시통역 자막 | 1초마다, 최종과 같은 인식 설정으로 다시 인식 (250·500ms 갱신보다 덜 흔들림) | 실제 서비스(test, PC를 쓰지 않을 때): 말한 단어가 자막에 나타나기까지 중앙값 영어 0.76초·한국어 0.76초, 말을 멈춘 뒤 번역 음성까지 영어 1.73초·한국어 1.29초(목표 1.5초, 영어는 넘음). 진하게 보인 원문 글자가 나중에 바뀌는 비율 0.4~1.0%(오프라인). 번역문은 앞부분도 자주 바뀌어 최종까지 흐리게 둔다 |
+| 두 사람 대화 언어 판별 | Whisper 판별에서 한국어·영어만 비교, 확신 0.6 미만이면 직전 마디의 반대 언어 | 영어는 1초·2초·전체 모두 100%, 한국어는 1초 98.7%·2초와 전체 100%(test). 번갈아 처리로 넘어가는 마디 0.1%. 판별에 약 0.16초 |
+| 오타 교정 (영어 글자 입력) | qwen2.5 1.5B로 교정한 뒤 번역 | 오타를 섞은 영→한 chrF 27.5 → 34.8, 깨끗한 입력 36.1 → 36.6. 문장당 약 0.15초 추가. 한국어 입력은 교정이 깨끗한 문장을 망가뜨려 쓰지 않음 |
+| 음성 합성 | MeloTTS(한), Kokoro(영) | 합성 음성을 다시 인식한 오류: 한국어 CER 5.58%, 영어 WER 3.91% |
+| 전체 흐름 번역 품질 | 위 조합 (음성 → 인식 → 번역) | chrF 한→영 53.6, 영→한 34.6. 정답 전사를 번역할 때(55.7, 36.1)보다 1.5~2.1점 낮다(인식 오류의 몫, test 270문장) |
+| 전체 흐름 | 위 조합, 모델 스레드 1개 | 10초 음성 → 원문·번역문·번역 음성까지 중앙값 0.89초(p95 1.62초), 동시 2요청 1.54초. 번역 중 다른 요청 응답 p95 0.033초 |
+
+(2026-11-03 덧붙임) 한→영 번역의 기본 디코딩이 빔 4의 1-best에서 빔 8 n-best의 문장 chrF MBR(`KO_EN_DECODING=mbr8`, [docs/api.md](docs/api.md))로 바뀌었다. 근거는 validation 측정([docs/experiments.md](docs/experiments.md) 20절: chrF +0.87 [+0.03, +1.79], COMET-22 +0.40 [+0.09, +0.74], 번역 시간 p50 +12ms)이고, 위 표의 한→영 test 수치(55.7·53.6)는 바뀌기 전 설정(빔 4)으로 잰 값이다. 새 설정의 test 재확인은 아직 하지 않았다.
+
+(2026-10-24 덧붙임) 표와 아래 '알려진 한계'의 '말을 멈춘 뒤 번역 음성까지'는 말을 멈춘 때(측정 도구가 그 음성을 인식해 찾은 마지막 단어의 끝)부터 번역 음성 파일을 다 받을 때까지다(같은 PC, 네트워크 없음). 받은 소리를 브라우저가 풀어 재생을 시작하기까지의 시간은 들어 있지 않고, 따로 재지도 않았다.
+
+GPU는 RTX 2080 Ti(11GB)에서 쟀고, 세 모델이 올라간 서버는 VRAM 약 4.6~5.1GB를 쓴다. 오타 교정 모델(Ollama)이 약 1.3GB를 더 쓴다.
+
+## 전체 실행 (Docker)
+
+준비: NVIDIA GPU, GPU를 쓸 수 있는 Docker(Windows는 Docker Desktop + WSL2), Python 3.11과 [uv](https://docs.astral.sh/uv/) (번역 모델 변환에만 필요).
+
+번역 모델은 이미지에 넣지 않고 `data/models/ct2`에서 읽는다. 처음 한 번 변환한다. Hugging Face에 올라온 tc-big 변환본은 어휘가 깨져 있어서, Helsinki의 원본 배포본(각 약 740MB)을 받아 CTranslate2로 바꾼다.
+
+```bash
+cd backend
+uv sync --group gpu --group eval
+uv run python -m eval.fleurs_download --splits validation   # 변환 뒤 토큰 확인에 쓰는 문장
+uv run python -m eval.mt_convert --models opus-mt-tc-big-ko-en opus-mt-tc-big-en-ko
+cd ..
+docker compose up -d --build
+```
+
+http://localhost:8080 에서 쓴다 (포트는 `.env`의 `WEB_HOST_PORT`). 처음 시작할 때 음성 인식·합성 가중치(약 2.5GB)를 `hfcache` 볼륨으로 받고, 모델을 올린 뒤 한 번씩 돌려 둔 다음 준비 완료가 된다. 오타 교정 모델(약 1GB)은 뒤에서 `ollama` 볼륨으로 받아 올리고, 그동안 영어 글자 입력은 교정 없이 번역된다. 로그인이 서버 재시작 뒤에도 유지되게 하려면 `.env`에 `JWT_SECRET_KEY`를 둔다 (`.env.example` 참고).
+
+(2026-10-29 덧붙임) API 컨테이너는 root가 아닌 사용자(uid 10001)로 돈다. 새로 만드는 `hfcache`·`audio` 볼륨은 그대로 되지만, 이 변경 전의 이미지로 `docker compose up`을 한 적이 있으면 두 볼륨이 root 소유라 번역 음성을 저장하지 못한다. 그때는 새 이미지를 만든 뒤 한 번 소유자를 바꾼다(서버를 띄운 뒤에 해도 되고, 바꾼 뒤로 바로 저장된다). Windows의 Git Bash에서는 `/data/audio` 같은 인수가 Windows 경로로 바뀌지 않게 둘째 명령 앞에 `MSYS_NO_PATHCONV=1 `을 붙인다(PowerShell은 그대로).
+
+```bash
+docker compose build api
+docker compose run --rm --no-deps --user 0 api chown -R 10001:10001 /data/audio /models/hf
+docker compose up -d
+```
+
+오타 교정 모델을 측정한 빌드로 묶으려면 `.env`에 `CORRECTION_DIGEST=65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b`를 둔다. Ollama에 다른 빌드가 있으면 교정만 꺼지고 경고가 남으며 서버는 그대로 뜬다 ([docs/api.md](docs/api.md) 설정 표).
+
+## 로컬 개발
+
+준비: Python 3.11, uv, Node.js 24, Docker. 명령은 프로젝트 폴더에서 시작하고, 백엔드와 프론트엔드는 각각 다른 터미널에서 실행한다. 모델 없이 화면과 테스트만 볼 때는 0단계를 건너뛰고 2단계를 `LOAD_MODELS` 없이 실행한다(아래 설명).
+
+```bash
+# 0. 번역 모델 변환 (처음 한 번, data/models/ct2에 만듦. 위 "전체 실행 (Docker)"과 같은 명령)
+cd backend
+uv sync --group gpu --group eval
+uv run python -m eval.fleurs_download --splits validation
+uv run python -m eval.mt_convert --models opus-mt-tc-big-ko-en opus-mt-tc-big-en-ko
+cd ..
+```
+
+```bash
+# 1. DB (이 PC에서만 접속: 127.0.0.1:55442. Windows가 예약하는 5432~5631을 피함.
+#    다른 PC에서 접속해야 하면 .env의 POSTGRES_HOST_IP를 바꾸고 예시 비밀번호부터 바꾼다)
+cp .env.example .env
+docker compose up -d db
+```
+
+```bash
+# 2. 백엔드: http://localhost:8000/api/health
+#    (eval과 tts 그룹은 함께 설치할 수 없어, 0단계 뒤 여기서 tts로 바꾼다)
+cd backend
+uv sync --group gpu --group tts
+uv run alembic upgrade head
+LOAD_MODELS=true uv run uvicorn app.main:app
+```
+
+API는 `.env`를 자동으로 읽지 않는다. 기본값이 위 compose DB와 같아서 그대로 실행하면 되고, 바꿀 값은 환경 변수로 넘긴다 ([docs/api.md](docs/api.md)의 "실행 설정과 DB"). `LOAD_MODELS`를 빼면 모델 없이 떠서 번역 요청은 503을 돌려준다. 이때 화면만 보려면 프론트엔드를 `VITE_TRANSLATION_MOCK=true`로 실행한다.
+
+```bash
+# 3. 프론트엔드: http://localhost:5173 (/api 요청은 개발 서버가 백엔드로 넘김)
+cd frontend
+npm install
+npm run dev
+```
+
+## 테스트
+
+```bash
+(cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest)
+(cd frontend && npm run lint && npm test && npm run build)
+(cd frontend && npm run test:a11y)   # Playwright + Microsoft Edge, 키보드·axe(WCAG 2.2 AA)·360px 검사
+```
+
+백엔드 테스트는 compose DB에 테스트 전용 DB(`vt_test_<임의 문자열>`)를 만들어 쓰고 끝나면 지운다. 모델은 가짜 구현으로 대체한다. push와 PR마다 GitHub Actions가 백엔드·프론트엔드 검사와 브라우저 검사를 돌린다 (`.github/workflows/ci.yml`. 브라우저 검사는 Linux 러너라 Edge 대신 Playwright의 Chromium으로 돈다: `PLAYWRIGHT_CHANNEL=` 빈 값).
+
+## 측정 다시 하기
+
+```bash
+cd backend
+uv sync --group gpu --group eval
+uv run python -m eval.fleurs_download        # FLEURS 한국어·영어 validation·test (약 1GB)
+uv run python -m eval.supertonic_download    # 한국어 합성 시험용 Supertonic 3 (약 400MB, OpenRAIL-M: 아래 고지)
+```
+
+단계별 명령과 판단 규칙은 [docs/experiments.md](docs/experiments.md)에 있다 (`eval.stt_eval`, `eval.mt_eval`, `eval.tts_eval`, `eval.e2e_eval`). 리포트는 `backend/eval/reports/`에 남긴다. 음성 합성 모델은 transformers 버전이 달라 `tts` 그룹과 `eval` 그룹을 함께 설치할 수 없다. 서버를 다시 돌릴 때는 `uv sync --group gpu --group tts`로 되돌린다.
+
+## 설계 판단
+
+- **측정해서 고르기**: 단계마다 후보와 판단 규칙을 측정 전에 [docs/experiments.md](docs/experiments.md)에 적고 커밋한 뒤 잰다. 규칙이 정하지 않은 경우가 생기면 그 사실과 판단을 따로 적는다
+- **모델 호출은 전용 스레드에서**: 인식·번역·합성은 이벤트 루프 밖의 스레드 하나에서 돈다. 그래도 번역 중 다른 요청이 0.3초씩 막혀서 원인을 찾았다: faster-whisper가 음성을 읽을 때마다 부르는 전체 가비지 컬렉션이 모델의 수많은 객체를 훑으며 GIL을 쥐고 있었다. 모델을 올린 직후 `gc.freeze()`로 해결했다 (0.33초 → 0.03초)
+- **말이 없는 녹음**: VAD로 말소리 구간만 인식 모델에 넘긴다. 켜기 전에는 무음에서 "Thank you." 같은 문장을 지어냈다
+- **영→한은 문장 단위 번역**: opus-mt는 한 문장씩 학습돼 여러 문장 입력에서 문장을 빠뜨렸다. 나눠 번역하니 누락이 줄었다. 한→영은 차이가 없어 통째로 번역한다
+- **녹음 원본은 저장하지 않는다**: 인식된 글자와 번역 음성만 기록에 남긴다. 번역 음성은 인증된 요청으로만 받는다
+- **음성 합성이 실패해도 번역은 돌려준다**: 응답에 `tts_error`를 싣고, 화면은 브라우저 내장 음성으로 읽는다
+
+## 알려진 한계
+
+- **메모리 기준 미달 (T23)**: 서버 할당 메모리가 첫 요청 240개 동안 230~380MB 늘고 멈춘다. 측정 전에 정한 한도(300MB)를 세 설정 모두 넘었고, 설정과 관계없는 초기화로 보여 지연을 푼 설정(`gc.freeze`)을 그대로 쓴다
+- **평가 데이터**: FLEURS는 위키 문체의 긴 문장이라 짧은 대화체와 다르다. 참조 번역이 하나라 맞는 다른 표현도 감점된다. 영→한 chrF가 한→영보다 20점 낮은 것은 모든 후보에 공통이다
+- **얇은 판정 여유폭**: 저장된 문장 결과로 기록된 결정의 차이에 95% 구간을 붙여 보니(재분석, 모델을 다시 돌리지 않음), 문턱이 있는 validation 비교 18개(그중 3개는 이미 떨어진 후보의 참고 행) 중 6개는 구간이 판단 문턱을 걸쳤다. 그 가운데 기록된 규칙의 다른 조건까지 보아도 결정이 달라질 수 있었던 것은 3개다: 음성 인식 turbo와 large-v3의 차이 +0.28%p [−0.63, +1.27](문턱 1%p), 한→영 tc-big과 NLLB의 chrF 차이 +0.5 [−1.1, +2.1](문턱 −1), 오타 교정 C를 쓴 영→한의 깨끗한 입력 chrF 차이 −0.4 [−1.2, +0.5](문턱 −0.5). 이 3개는 다른 문장 표본이었다면 달리 골랐을 수 있다는 뜻이며, 결정은 다시 하지 않았다. 나머지 걸침 3개는 같은 규칙의 다른 조건 때문에 결정이 같다. 모델 기반 지표 COMET-22는 어느 결정에서도 chrF와 반대 방향을 유의하게 가리키지 않았다 ([docs/experiments.md](docs/experiments.md) 13절)
+- **한국어 오타 세트 다시 잼**: 한국어 오타를 섞는 생성기가 '옆 키' 오타 자리에 실제 옆 키가 아닌 'ㅈ' 오타를 섞는 버그가 있었다(고침). 그 세트로 낸 한→영 오타 수치(experiments 6·13절)는 수정 전 코드로 낸 값이다. 영어 오타 세트는 그대로여서 위 표의 오타 교정 결과와 한국어 입력을 교정하지 않는다는 결정은 영향이 없다. 2026-10-14 고친 세트로 한→영을 다시 재니 교정 없는 번역의 오타 평균 chrF가 52.9 → 52.7이었고, 교정을 더한 쪽과의 차이(et5 −6.31 → −5.87, qwen2.5 1.5B −0.65 → −0.83)도 결정과 재분석 분류를 바꾸지 않았다 (16절)
+- **번역 모델 교체 시험 (Hy-MT2-1.8B)**: 번역 전용 LLM Hy-MT2-1.8B(Q8_0, Ollama)를 validation에서 opus와 견주니 COMET-22는 유의하게 높았지만(영→한 +3.8 [+2.7, +4.9], 한→영 +1.2 [+0.5, +2.0]) chrF 차이는 구간이 0을 포함했다(영→한 −0.7, 한→영 −0.9). 영→한은 번역 시간 중앙값도 0.43초로 기준 0.35초를 넘었다(데스크톱 앱이 GPU를 쓰던 때 잰 값). 측정 전에 정한 규칙(두 지표 모두 유의하게 나을 것)대로 opus와 오타 교정을 그대로 쓴다. 두 지표가 엇갈린 원인과 사람이 읽기에 어느 쪽이 나은지는 확인하지 않았다 ([docs/experiments.md](docs/experiments.md) 15절)
+- **로그인 토큰 저장 위치**: refresh 토큰(7일)을 브라우저 sessionStorage에 두고, 서버에는 토큰 폐기 목록이 없다. XSS가 생기면 토큰을 빼 갈 수 있어 배포 nginx의 CSP로 끼워 넣은 스크립트가 실행되기 어렵게 했다. HttpOnly 쿠키와 서버 쪽 폐기로 바꾸는 것은 인증 계약과 로그아웃 동작을 바꾸는 일이라 하지 않았다 ([docs/security.md](docs/security.md))
+- **측정 환경**: 한 PC(RTX 2080 Ti, Windows)에서 서버와 측정 도구를 함께 돌렸다. 다른 GPU나 여러 대에서는 재지 않았다
+- **접근성**: 키보드·axe·360px 검사는 자동이다. 스크린리더와 실제 마이크로는 사람이 확인해야 한다
+- **대화 모드**: 말 끝 판정은 FLEURS를 이어 붙인 녹음과 합성 잡음으로 쟀다. 읽는 말투라 실제 대화의 머뭇거림과 다르고, 실제 마이크·스피커로 쓴 확인은 아직 없다. 브라우저 판정이 오프라인 측정과 같은 결과를 내는 것은 같은 음성으로 확인했다. 대화 모드를 처음 켜면 말소리 판정 파일(WASM 약 14MB, gzip 약 3.7MB)을 한 번 받는다. 말을 멈춘 뒤 번역 음성까지의 수치는 같은 PC에서 네트워크 없이 잰 값이고, 두 사람 대화의 영어 원문(1.58초)은 1.5초 목표를 조금 넘는다. 미리 처리는 한 마디 안의 짧은 쉼(192~992ms)마다 시작했다가 버려지며 GPU를 더 쓴다(test 160문장에 218번)
+- **동시통역**: 말을 멈춘 뒤 번역 음성까지 영어 원문은 1.73초로 목표(1.5초)를 넘는다. 단계별로 나눠 보니(validation 진단, [docs/experiments.md](docs/experiments.md) 17절) 영어 원문은 최종 처리(인식 약 0.32초, 번역 0.08초, 한국어 합성 0.58초)가 1초 확정보다 중앙값 약 0.28초 늦게 끝나는 것이 원인이고, 최종 처리가 자막 갱신을 기다리는 시간은 중앙값으로 몇 ms였다. 한국어 합성 시간의 약 60%는 MeloTTS의 글 전처리(BERT 특징)다. (2026-10-24 덧붙임: 몇 ms는 전체 마디의 중앙값이다. 쉼이 왔을 때 자막 갱신이 돌고 있던 마디가 절반이었고, 그 마디들만 보면 최종 처리가 기다린 시간의 중앙값은 영어 원문 165ms·한국어 원문 179ms였다. 또 이 글 전처리는 발음 변환(g2pkk)과 BERT 특징을 한 번에 잰 단계라 둘의 몫은 나눠 재지 않았다.) 한 마디 안의 짧은 쉼마다 미리 처리가 시작됐다가 버려지며 GPU를 쓴다(늦게 시작하거나 갱신을 따로 돌려도 자막이 빨라지지 않았다, T61). 실제 마이크로 쓴 확인은 아직 없다. (2026-11-07 덧붙임: 이 문단의 '약 60%'와 '약 0.28초'는 2026-10-15의 17절 측정 당시 설정 — 한국어 합성 전처리의 정규식 캐시 `MELO_REGEX_CACHE` 끔 — 에서 잰 validation 값이다. 2026-11-03부터 기본값은 켬이고, 18절에서 켬으로 다시 잰 validation 값은 글 전처리의 몫 14.1%(끔 63.5%), 영어 원문 마디의 서버 합성 p50 250ms(끔 564ms), 처리가 1초 확정보다 늦게 끝난 마디 동시통역 38%·대화 모드 22%(끔 78%·75%)다. 위 1.73초(test)는 다시 재지 않았다)
+- **두 사람 대화**: 한국어로 1초 남짓 짧게 대답하면 드물게 영어로 잘못 판별된다(test에서 1초 조각 374개 중 4개가 높은 확신으로 틀림). 확신이 낮을 때만 방향 바꾸기 단추가 나오므로, 높은 확신으로 틀린 경우는 다시 말해야 한다. 두 언어를 섞어 말하거나 억양이 강한 경우는 재지 않았다. 자막이 나오는 동시통역 방식의 두 사람 대화는 나중 과제로 남겼다
+- **GPU를 함께 쓰는 프로그램**: 서버는 PC의 GPU 하나를 쓴다. 같은 GPU로 게임 등을 돌리면 지연이 크게 늘었다(같은 동시통역 측정에서 한국어 자막 p90 5.6초 → PC를 쓰지 않을 때 1.2초). 지연 수치는 PC를 쓰지 않을 때 잰 값이다
+- **가끔 느려지는 서버 인식 (T42)**: 측정 중 약 10분 동안 인식이 5~43초 걸린 구간이 두 번 있었다. 같은 음성을 다시 보내면 정상이었다. 같은 GPU를 쓰는 다른 프로그램(게임 등) 때문으로 추정하지만 시각을 맞춰 확인하지는 못했다
+- **음성 합성 준비물**: MeloTTS는 쓰지 않는 언어의 BERT 토크나이저도 받는다(프랑스어·스페인어·일본어·다국어). Windows에서는 MeloTTS와 Kokoro에 작은 우회가 필요하고 코드에 들어 있다 (Linux 컨테이너는 필요 없음). (2026-10-29 덧붙임: 이 토크나이저들과 한국어 BERT 모델, MeloTTS-Korean·Kokoro-82M의 설정·가중치·목소리는 측정에 쓴 Hugging Face 커밋으로 고정해 받고, 서비스 코드가 직접 받는 파일 5개는 SHA-256을 확인한다. 그 전에는 리비전 없이 받았다 — [docs/security.md](docs/security.md) 재현성 고정)
+
+## 모델과 데이터의 라이선스
+
+| 쓰임 | 이름 | 만든 곳 | 라이선스 | 원본 |
+|---|---|---|---|---|
+| 음성 인식 | Whisper large-v3-turbo | OpenAI | MIT | [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) |
+| 음성 인식 (쓰는 변환본) | faster-whisper-large-v3-turbo | Mobius Labs | MIT | [mobiuslabsgmbh/faster-whisper-large-v3-turbo](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) |
+| 말소리 구간 검출 (서버 인식, 대화 모드의 말 끝 판정) | Silero VAD v6 (faster-whisper에 포함된 ONNX 파일) | Silero | MIT | [snakers4/silero-vad](https://github.com/snakers4/silero-vad). 대화 모드는 같은 파일을 `frontend/src/conversation/assets/`에 넣어 브라우저로 보낸다 (라이선스 원문 동봉) |
+| 대화 모드의 브라우저 추론 | onnxruntime-web 1.30.0 | Microsoft | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime). WASM 파일을 화면과 함께 배포 (라이선스 원문 동봉) |
+| 오타 교정 (영어 글자 입력) | Qwen2.5-1.5B-Instruct (Ollama `qwen2.5:1.5b-instruct`) | Alibaba Cloud Qwen | Apache-2.0 | [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) |
+| 번역 한→영 | opus-mt-tc-big-ko-en | Helsinki-NLP (University of Helsinki) | CC-BY-4.0 | [Helsinki-NLP/opus-mt-tc-big-ko-en](https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-ko-en). 원본 MarianNMT 배포본을 CTranslate2로 변환해 씀 |
+| 번역 영→한 | opus-mt-tc-big-en-ko | Helsinki-NLP (University of Helsinki) | CC-BY-4.0 | [Helsinki-NLP/opus-mt-tc-big-en-ko](https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-en-ko). 위와 같이 변환 |
+| 음성 합성 한국어 | MeloTTS-Korean | MyShell.ai | MIT | [myshell-ai/MeloTTS](https://github.com/myshell-ai/MeloTTS), [myshell-ai/MeloTTS-Korean](https://huggingface.co/myshell-ai/MeloTTS-Korean) |
+| MeloTTS 한국어 전처리 | bert-kor-base | Kiyoung Kim | 모델 카드에 표기 없음 (원 저장소 [kiyoungkim1/LMkor](https://github.com/kiyoungkim1/LMkor)는 Apache-2.0) | [kykim/bert-kor-base](https://huggingface.co/kykim/bert-kor-base) |
+| MeloTTS 영어 전처리 | bert-base-uncased | Google | Apache-2.0 | [google-bert/bert-base-uncased](https://huggingface.co/google-bert/bert-base-uncased) |
+| MeloTTS가 함께 받는 토크나이저 | bert-base-multilingual-uncased | Google | Apache-2.0 | [google-bert/bert-base-multilingual-uncased](https://huggingface.co/google-bert/bert-base-multilingual-uncased) |
+| 〃 | bert-base-french-europeana-cased | dbmdz | MIT | [dbmdz/bert-base-french-europeana-cased](https://huggingface.co/dbmdz/bert-base-french-europeana-cased) |
+| 〃 | bert-base-spanish-wwm-uncased (BETO) | dccuchile | 모델 카드에 표기 없음 (원 저장소 [dccuchile/beto](https://github.com/dccuchile/beto)는 CC-BY-4.0) | [dccuchile/bert-base-spanish-wwm-uncased](https://huggingface.co/dccuchile/bert-base-spanish-wwm-uncased) |
+| 〃 | bert-base-japanese-v3 | Tohoku NLP | Apache-2.0 | [tohoku-nlp/bert-base-japanese-v3](https://huggingface.co/tohoku-nlp/bert-base-japanese-v3) |
+| 음성 합성 영어 | Kokoro-82M | hexgrad | Apache-2.0 | [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) |
+| 음성 합성 한국어 (비교용 설정 `KO_TTS=supertonic`. 시험에서 채택되지 않아 기본은 MeloTTS) | Supertonic 3 | Supertone Inc. | 모델 BigScience OpenRAIL-M (아래 고지), 옮겨 쓴 추론 코드 MIT | [supertone-oss-archive/supertonic-3](https://huggingface.co/supertone-oss-archive/supertonic-3) (리비전 `aafc6e3`), [supertone-oss-archive/supertonic](https://github.com/supertone-oss-archive/supertonic) |
+| 평가 데이터 | FLEURS | Google | CC-BY-4.0 | [google/fleurs](https://huggingface.co/datasets/google/fleurs) |
+
+라이선스는 2026-09-13~14에(Supertonic 3는 2026-10-04에) 각 모델 카드와 저장소에서 확인했다. 저장소에 들어 있는 모델 가중치는 대화 모드용 Silero VAD v6 ONNX 파일(1.2MB) 하나이고, 나머지는 실행할 때 원본에서 받는다.
+
+**Supertonic 3 이용 제한 고지**: `KO_TTS=supertonic`으로 쓰는 Supertonic 3 모델은 BigScience OpenRAIL-M 라이선스다. 이 설정으로 서버를 돌리는 사람과 그 서버의 사용자는 라이선스 Attachment A의 이용 제한을 지켜야 한다. 법을 어기는 일, 미성년자를 해치는 일, 남을 해칠 목적으로 거짓 정보나 개인 식별 정보를 만들거나 퍼뜨리는 일, 기계가 만든 것임을 밝히지 않고 퍼뜨리는 일, 남을 비방·괴롭히거나 동의 없이 사칭하는 일(딥페이크 등), 개인의 법적 권리에 불리한 완전 자동 결정, 사회적 행동·성격이나 법으로 보호되는 특성에 따른 차별, 나이·사회적·신체적·정신적 특성을 노린 해로운 조작, 의료 조언과 진단 해석, 사법·법 집행·이민 절차를 위한 정보 생성에 쓸 수 없다. 서비스로 제공하면 이 제한을 이용 조건에 넣어 사용자에게 알려야 한다(라이선스 4.a·5조). 전문은 받은 파일 `data/models/supertonic-3/LICENSE`에 있다. 만든 곳(Supertone)은 2026-09-09에 저장소를 보관 처리해 더는 수정이나 지원을 하지 않는다. 그래서 이 저장소는 보관처의 리비전과 파일별 SHA-256을 고정해 받고(`uv run python -m eval.supertonic_download`, 약 400MB), 올릴 때마다 해시를 확인한다.
+
+## 문서
+
+- [docs/api.md](docs/api.md): API 요청·응답, 오류, 실행 설정
+- [docs/experiments.md](docs/experiments.md): 모델 측정 절차·규칙·결과
+- [docs/security.md](docs/security.md): 재현성 고정, 의존성 취약점 검사와 받아들인 위험
+- [docs/plan.md](docs/plan.md): 개발 시작 전 계획

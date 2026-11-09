@@ -1,0 +1,121 @@
+# [파일 역할] 오타 입력 번역 평가 세트를 만드는 eval/typo_noise.py의 오타 규칙을 검증한다(규칙은
+# docs/experiments.md 6절).
+# [왜 중요한가] 오타 교정 후보를 공정하게 비교하려면 누구나 같은 오타 세트를 다시 만들 수 있어야 한다. 그래서
+# 같은 시드 → 같은 결과, 오타 확률 0 → 변화 없음, 한국어 오타는 온전한 음절로만 생김, 단어당 오타 하나(작은
+# 편집)라는 성질을 고정한다.
+# [방법] 규칙 함수는 eval 그룹(pyarrow 등) 없이 불러올 수 있게 분리돼 있어 CI에서도 돈다.
+
+import random
+
+import pytest
+
+# CHO·JUNG·JONG은 유니코드 한글 음절 배열 순서의 초성·중성·종성 표다. decompose·compose는 음절을 자모 번호로
+# 나누고 다시 합치며, neighbours는 QWERTY 자판에서 같은 줄의 좌우 키를 준다.
+from eval.typo_noise import (
+    CHO,
+    DUBEOLSIK,
+    JONG,
+    JUNG,
+    _korean_neighbour_key,
+    add_typos,
+    compose,
+    decompose,
+    is_syllable,
+    neighbours,
+)
+
+# 실제 평가 문장(FLEURS)과 비슷한 길이의 한국어·영어 시험 문장.
+KOREAN = "겨울은 믿을 수 없을 만큼 쌀쌀해지기도 한다 영하 이하로 내려가는 날은 드물지만"
+ENGLISH = "Winter can be surprisingly cold even though days below freezing are rare"
+
+
+# '강'이 (ㄱ, ㅏ, ㅇ)의 번호로 나뉘고, 받침 없는 음절·겹받침(쌁)·이중 모음(뭐)·마지막 음절(힣)까지 나눴다
+# 합치면 원래 글자로 돌아오는지 확인한다. 한국어 오타는 자모를 바꾼 뒤 다시 합쳐 만들므로 이 왕복이 정확해야
+# 한다.
+def test_hangul_syllables_decompose_and_compose_back():
+    assert decompose("강") == (CHO.index("ㄱ"), JUNG.index("ㅏ"), JONG.index("ㅇ"))
+    assert all(compose(*decompose(char)) == char for char in "가각힣쌀쌁뭐")
+
+
+# 옆 키 오타는 같은 줄의 좌우 키만 쓴다. 줄 끝 키(q)는 한쪽만, 숫자처럼 표에 없는 키는 옆 키가 없다. 빈
+# 문자열(두벌식 표에 없는 자모의 키)도 옆 키가 없다. 예전에는 ''가 모든 줄에 포함된 것으로 판정돼
+# ['w']를 냈다.
+def test_neighbouring_keys_stay_on_the_same_row():
+    assert neighbours("q") == ["w"]
+    assert neighbours("g") == ["f", "h"]
+    assert neighbours("1") == []
+    assert neighbours("") == []
+
+
+# 옆 키 오타 후보를 모두 모으려고 rng.choice에 넘어온 목록을 그대로 잡아 두는 가짜 난수 생성기.
+class _Options:
+    def __init__(self):
+        self.options: list[str] = []
+
+    def choice(self, options):
+        self.options = list(options)
+        return options[0]
+
+
+def _neighbour_key_options(word: str) -> list[str]:
+    rng = _Options()
+    _korean_neighbour_key(word, rng)
+    return rng.options
+
+
+# 한국어 옆 키 오타는 두벌식 표에 있는 자모만 그 키의 같은 줄 좌우 키 자모로 바꾼다. 받침 없는 음절(가),
+# 쌍자음 초성(까), 겹받침(닭), Shift로 치는 모음(얘)은 그 자리에 후보가 없다. 예전 코드는 이런 자리에 'ㅈ'(w)
+# 오타를 만들었다(가 → 갖, 까 → 자, 닭 → 닺, 얘 → 얮).
+def test_korean_neighbour_key_uses_only_keys_on_the_layout():
+    assert sorted(_neighbour_key_options("가")) == sorted(["다", "사", "거", "기"])
+    assert sorted(_neighbour_key_options("까")) == sorted(["꺼", "끼"])
+    assert sorted(_neighbour_key_options("닭")) == sorted(["잙", "갉", "덝", "딝"])
+    assert _neighbour_key_options("얘") == ["냬", "럐"]
+
+
+# 같은 성질을 시험 문장 전체로 확인한다: 후보마다 음절 하나의 자모 하나만 바뀌고, 원래 자모는 두벌식 표에
+# 있으며, 바뀐 자모의 키는 원래 키의 같은 줄 좌우 키다.
+def test_korean_neighbour_key_changes_one_jamo_to_a_neighbouring_key():
+    jamo = (CHO, JUNG, JONG)
+    for word in KOREAN.split():
+        for option in _neighbour_key_options(word):
+            changed = [(a, b) for a, b in zip(word, option, strict=True) if a != b]
+            assert len(changed) == 1
+            before, after = decompose(changed[0][0]), decompose(changed[0][1])
+            slots = [slot for slot in range(3) if before[slot] != after[slot]]
+            assert len(slots) == 1
+            original, typed = jamo[slots[0]][before[slots[0]]], jamo[slots[0]][after[slots[0]]]
+            assert original in DUBEOLSIK
+            assert DUBEOLSIK[typed] in neighbours(DUBEOLSIK[original])
+
+
+# 같은 시드의 난수 생성기로 두 번 만들면 오타 결과가 똑같아야 한다(평가 세트 재현성). 확률 0.5면 이 문장에서는
+# 실제로 무엇인가 바뀌어야 한다.
+@pytest.mark.parametrize(("text", "language"), [(KOREAN, "ko"), (ENGLISH, "en")])
+def test_the_same_seed_gives_the_same_typos(text, language):
+    first = add_typos(text, language, 0.5, random.Random("seed"))
+    second = add_typos(text, language, 0.5, random.Random("seed"))
+    assert first == second
+    assert first != text
+
+
+# 오타 확률 0이면 문장이 그대로다. 확률을 판정하기 전에 단어를 건드리는 회귀를 잡는다.
+@pytest.mark.parametrize(("text", "language"), [(KOREAN, "ko"), (ENGLISH, "en")])
+def test_rate_zero_changes_nothing(text, language):
+    assert add_typos(text, language, 0.0, random.Random(1)) == text
+
+
+# 모든 단어에 오타를 넣어도(확률 1.0) 결과에 낱자모(ㄱ, ㅏ 등)가 남지 않고 완성형 음절과 공백만 있는지 50개
+# 시드로 확인한다. 오타는 자모를 바꾼 뒤 음절로 다시 합쳐 만든다.
+def test_korean_typos_keep_whole_syllables():
+    for seed in range(50):
+        noisy = add_typos(KOREAN, "ko", 1.0, random.Random(seed))
+        assert all(is_syllable(char) or char == " " for char in noisy)
+
+
+# 오타 한 번은 글자를 하나 빼거나, 겹치거나, 공백을 빼는 정도라 길이가 많아야 1 바뀐다. 그래서 모든 단어에
+# 오타를 넣어도 문장 길이 차이가 단어 수를 넘지 않아야 한다. 한 단어에 오타가 여러 번 들어가는 회귀를 잡는다.
+def test_typos_are_small_edits():
+    for seed in range(50):
+        noisy = add_typos(ENGLISH, "en", 1.0, random.Random(seed))
+        assert abs(len(noisy) - len(ENGLISH)) <= len(ENGLISH.split())

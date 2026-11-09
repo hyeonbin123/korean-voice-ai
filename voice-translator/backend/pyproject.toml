@@ -1,0 +1,104 @@
+[project]
+name = "voice-translator-backend"
+version = "0.1.0"
+description = "API server for an English-Korean voice translator"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
+    "bcrypt>=5.0.0",
+    "ctranslate2>=4.6",
+    "email-validator>=2.3.0",
+    "fastapi>=0.115",
+    "faster-whisper>=1.2",
+    "httpx>=0.28",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.14.0",
+    "python-multipart>=0.0.32",
+    "sentencepiece>=0.2",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.5",
+    "psutil>=7",
+]
+eval = [
+    "jiwer>=4.0.0",
+    "nvidia-ml-py>=13.610.43",
+    "pyarrow>=25.0.1",
+    "sacrebleu>=2.4",
+    "torch>=2.14.0",
+    "transformers>=4.57",
+    # 보안 하한(도구가 직접 쓰지 않음): 위 torch가 끌어오는 setuptools를 GHSA-xmj3-9gf7-h52w를 고친 84.1.0
+    # 이상으로 잠근다. 서버 환경(tts 그룹)은 torch 2.11.0+cu128이 setuptools<82를 요구해 81.0.0에 남는다
+    # (docs/security.md '의존성 취약점' 2026-10-30 덧붙임). tests/test_lock_security_floors.py가 지킨다.
+    "setuptools>=84.1.0",
+]
+gpu = [
+    # CUDA 12 builds; torch 2.11+cu128 (tts group) pins cuBLAS 12.8.4.1, which CTranslate2 also accepts.
+    "nvidia-cublas-cu12>=12.8,<13",
+    "nvidia-cudnn-cu12>=9,<10",
+]
+# Speech synthesis models chosen in docs/experiments.md (T4). The server installs it with gpu:
+# `uv sync --group gpu --group tts`.
+tts = [
+    "melotts",
+    "kokoro==0.9.4",
+    "transformers==4.27.4",
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "python-mecab-ko>=1.3.7",
+]
+
+[tool.uv]
+# MeloTTS pins transformers 4.27.4 and the eval tools need >= 4.57, so the two groups are installed apart.
+conflicts = [[{ group = "eval" }, { group = "tts" }]]
+# MeloTTS가 의존성으로 선언한 gradio(웹 데모 UI, melo/app.py)와 tensorboard(학습 기록, melo/train.py)는
+# 서버가 쓰는 melo.api·melo.utils·melo.text가 import하지 않는다. 잠금에서 통째로 빼서(둘만 쓰던 pillow·
+# brotli·pandas 등 15개도 함께 빠짐) 서버 이미지와 pip-audit 검사 대상을 줄인다(docs/security.md '의존성
+# 취약점' 2026-10-24 덧붙임). 아래 override처럼 `sys_platform == 'never'` 마커를 주는 방식은 설치만 막고
+# 패키지는 마커를 단 채 잠금에 남아 검사 대상에서 빠지지 않으므로 쓰지 않았다. tests/test_lock_hygiene.py가
+# 둘이 잠금에 되돌아오지 않는지 지킨다.
+exclude-dependencies = ["gradio", "tensorboard"]
+override-dependencies = [
+    # MeloTTS's Japanese front end: mecab-python3's `MeCab` folder is python-mecab-ko's `mecab` on a
+    # case-insensitive file system (app/services/tts.py stands in for the Japanese module on Windows).
+    "mecab-python3; sys_platform != 'win32'",
+    # The full unidic dictionary needs a separate 770 MB download; unidic-lite (also required) is enough.
+    "unidic; sys_platform == 'never'",
+    # MeloTTS가 고정한 cached-path 1.8.10은 filelock<4.0을 요구하지만, filelock 3.x에는 2026-10에 공개된 권고
+    # 13건(CVE-2026-112907 등)을 고친 판이 없다(고친 판 4.2.1, 하나는 4.0.9). 그 상한을 덮어 모든 환경이 4.x를
+    # 쓰게 한다. cached-path가 쓰는 FileLock API는 4.x에서도 같고(3.32.6 → 4.0.0에서 바뀐 것은 소프트 읽기·쓰기
+    # 잠금·리스·asyncio 쪽), 서버 이미지 안에서 cached-path·huggingface_hub·torch의 잠금 사용을 4.2.4로 확인했다
+    # (docs/security.md '의존성 취약점' 2026-10-30 덧붙임). MeloTTS나 cached-path를 바꿀 때 이 줄을 다시 본다.
+    # tests/test_lock_security_floors.py가 잠금의 판을 지킨다.
+    "filelock>=4.2.1",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+melotts = { git = "https://github.com/myshell-ai/MeloTTS.git", rev = "209145371cff8fc3bd60d7be902ea69cbdb7965a" }
+torch = [{ index = "pytorch-cu128", group = "tts" }]
+torchaudio = [{ index = "pytorch-cu128", group = "tts" }]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]  # FastAPI's Depends() default-argument pattern is intentional
