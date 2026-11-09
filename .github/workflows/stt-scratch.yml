@@ -1,12 +1,34 @@
-name: CI
+name: stt-scratch
 
-# push와 pull request마다 린트(ruff)와 테스트(pytest)를 GPU 없이 돌리고(test 작업), 잠금 파일에 고정된 의존성 판을
+# main push와 pull request마다(아래 paths) 린트(ruff)와 테스트(pytest)를 GPU 없이 돌리고(test 작업), 잠금 파일에 고정된 의존성 판을
 # 공개 보안 권고와 대조한다(audit 작업).
 # 테스트는 작은 무작위 모델로 구조적 성질(미래 누출 없음, 캐시 스트리밍 == 오프라인, 서비스 경로 등)만 보므로
 # CPU에서 돈다. CUDA가 필요한 테스트는 테스트 안의 skipif(torch.cuda.is_available())로 건너뛴다.
 on:
   push:
+    branches: [main]
+    paths:
+      - "stt-scratch/**"
+      - ".github/workflows/stt-scratch.yml"
   pull_request:
+    paths:
+      - "stt-scratch/**"
+      - ".github/workflows/stt-scratch.yml"
+
+# 모노레포 설정(2026-11-10): GitHub는 저장소 맨 위의 .github/workflows만 읽으므로 이 워크플로를
+# stt-scratch/.github/workflows/ci.yml에서 이 자리로 옮겼다(git mv라 이력이 이어진다). 작업·액션·권한·검사 내용은 그대로다.
+# - on.*.paths: stt-scratch/ 아래나 이 파일이 바뀐 main push와 pull request에서만 돈다.
+# - defaults.run.working-directory: run 단계를 stt-scratch/ 안에서 돌린다(옮기기 전의 저장소 맨 위와 같은 자리).
+# - setup-uv의 working-directory: uses 단계에는 defaults.run이 먹지 않는다. 이 값이 pyproject.toml을 찾는 곳,
+#   activate-environment가 만드는 .venv 자리, cache-dependency-glob의 기준을 정한다. 적지 않으면 저장소 맨 위를 봐
+#   캐시 키에 다른 구성 요소의 uv.lock이 섞이고 .venv가 맨 위에 생긴다. cache-suffix는 구성 요소·작업마다 캐시 키를 나눈다.
+# - concurrency: 같은 구성 요소·같은 ref의 실행은 하나씩 돈다(기다리는 실행은 가장 새것 하나만 남는다).
+concurrency:
+  group: stt-scratch-${{ github.ref }}
+
+defaults:
+  run:
+    working-directory: stt-scratch
 
 # GITHUB_TOKEN 권한을 저장소 기본값에 맡기지 않고 최소로 둔다. 이 워크플로는 코드를 받아(checkout) 린트·테스트와
 # 권고 대조만 하므로 읽기 권한 하나면 되고, 쓰기 권한이 없으면 설치 단계에서 받은 패키지가 잘못된 코드를 실행하더라도
@@ -36,6 +58,9 @@ jobs:
         with:
           python-version: "3.11"
           activate-environment: true
+          working-directory: stt-scratch
+          cache-dependency-glob: uv.lock
+          cache-suffix: stt-scratch-test
       # uv.lock은 학습용으로 torch·torchaudio를 CUDA 12.8 빌드(+cu128)로 묶는다. 테스트에는 GPU가 필요 없으므로
       # 잠긴 버전과 같은 번호의 CPU 빌드를 PyTorch CPU 색인에서 받고, 나머지 잠긴 패키지는 CUDA 빌드만 쓰는 리눅스
       # 전용 휠(nvidia-*, triton, cuda-*)을 빼고 그대로 설치한다. --locked는 uv.lock이 pyproject.toml과 어긋나면
@@ -103,6 +128,9 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.11"
+          working-directory: stt-scratch
+          cache-dependency-glob: uv.lock
+          cache-suffix: stt-scratch-audit
       # shell: bash는 pipefail을 켠다(기본 셸은 bash -e뿐이라 파이프 앞쪽 명령이 실패해도 지나간다). 목록 하나가
       # 실패해도 다음 목록까지 대조해 로그에 모두 남긴 뒤, 하나라도 실패했으면 마지막에 실패로 끝낸다.
       - name: Audit the locked dependencies
