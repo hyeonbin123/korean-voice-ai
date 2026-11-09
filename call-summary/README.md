@@ -1,0 +1,173 @@
+# call-summary
+
+고객센터 상담 대화 전사를 상담 후처리 기록(요약, 문의 유형, 처리 결과, 후속 조치, 핵심 값)의 JSON으로 바꾸는 소형 LLM을 LoRA/QLoRA로 학습하고, 로컬에서 서빙한다. 학습 전후와 큰 모델 대비 성능을 미리 정한 규칙으로 측정한다.
+
+- 계획: [docs/plan.md](docs/plan.md)
+- 측정 규칙과 결과: [docs/experiments.md](docs/experiments.md)
+- 상태: 0~5단계 끝 (데이터, 기준선, 학습, 음성 인식 오류 조건, 서빙). 2026-10-04 음성 조건을 v2로 고쳐 다시 잼, 서비스에 확인이 필요한 번호 표시를 더함. 2026-10-05 2026년 기준 4B 지시 모델 두 개를 프롬프트 전용 비교 대상으로 더함, 음성 조건의 인식기를 바꿔 비교함(v3, 바꾸지 않음). 2026-10-09 요약 품질의 보조 지표로 값 확인과 다시 보정한 판정 모델을 더함
+- 2026-10-13 측정에 쓴 코드의 버그 둘을 고쳤다: 학습 루프가 epoch 끝에 남은 미니배치를 다음 epoch의 앞 미니배치와 한 스텝으로 묶었고(1,500건이면 마지막 어댑터가 3,000건이 아니라 3,008건을 봄), 부하 시험의 지연 p50·p95 계산식이 평가 도구와 달랐다. 아래의 학습한 모델 수치는 고치기 전 코드로 학습한 어댑터의 값이다. 2026-10-15 고친 코드로 두 학생을 다시 학습해 미리 정한 규칙대로 견줬더니, 두 학생 모두 같은 epoch를 고르고 dev·dev-asr의 exact가 기록과 같은 범위였다 (짝지은 차이 0.0, 0.0, +0.4%p, 구간 모두 ±3%p 안). 그래서 기존 수치와 서빙 모델을 그대로 쓴다. 같은 seed로 다시 학습하면 어댑터가 바이트까지 같았다. 부하 시험은 고친 계산식으로 다시 쟀다 (처리량 약 0.4요청/초 그대로). 자세한 것은 docs/experiments.md "재측정 결과"
+
+## 결과 요약 (3단계)
+
+상담 기록의 구조 필드(유형, 처리 결과, 핵심 값, 처리 목록, 후속 조치)가 모두 맞은 비율(exact). 괄호는 95% 부트스트랩 구간이고, 기록 기준 프롬프트 행 말고는 모든 모델에 같은 프롬프트를 쓰며 표의 각 모델은 test 세트마다 한 번 쟀다 (2026-10-29 바로잡음: 전에는 test 세트를 한 번만 쟀다고 적었다. test-a는 단계마다 다른 모델로 여러 번 쟀다. 2026-10-30 바로잡음: 전에는 모든 모델에 같은 프롬프트를 쓴다고 적었다. 기록 기준 프롬프트 행은 그 프롬프트에 기록 관례를 덧붙인 프롬프트로 쟀다).
+
+| 모델 | test-a (같은 생성기) | test-b (다른 모델이 쓴 대화) | test-c (학습에 없던 업종) |
+|---|---|---|---|
+| qwen2.5 7B | 9.7 | 13.3 | 3.0 |
+| qwen2.5 14B | 26.0 | 30.0 | 14.0 |
+| qwen2.5 14B + 기록 기준 프롬프트 | 29.0 | 33.3 | 23.0 |
+| Qwen3-4B 학습 전 | 17.3 | 26.7 | 5.5 |
+| **Qwen3-4B QLoRA (1,500건 학습)** | **95.7** [93.3, 97.7] | **90.0** [81.7, 96.7] | **55.0** [48.0, 62.0] |
+
+- 실행 조건 (2026-10-29 덧붙임): qwen2.5 7B·14B는 Ollama 기본 태그의 4비트 양자화(Q4_K_M)로 쟀고, 14B는 층 49개 중 44개만 GPU에 올렸다. 학습 전 Qwen3-4B는 transformers fp16으로 쟀고 test-a·b에서는 같은 프롬프트에 학습 예시 2개를 붙였다(test-c는 예시 없이). 학습한 4B는 4bit 바탕 + 어댑터(transformers)로 쟀다. 4비트는 qwen2.5에 조금 불리할 수 있다. 학습 전과 학습한 Qwen3-4B는 바탕의 정밀도도 다르고(fp16 대 4bit) 학습 전 모델을 4bit로 잰 기록은 없다 (docs/experiments.md 3단계 결과, "2026년 기준 프롬프트 전용 비교 대상"의 "밝혀 둘 조건")
+- 학습한 4B는 세 분할 모두에서 학습 전, 7B, 14B, 기록 기준을 적은 14B보다 높다 (짝지은 차이의 95% 구간 하한이 모두 0보다 크다)
+- 2026년 기준 같은 크기의 지시 모델 두 개(qwen3:4b-instruct-2507, 생각을 끈 qwen3.5:4b)를 프롬프트만으로 붙여 다시 쟀다 (2026-10-05). 두 모델 × 프롬프트 두 개 × 예시 0·2개 중 dev로 고른 설정(qwen3.5:4b, 기록 기준 프롬프트, test-c는 예시 없이)만 test에서 쟀고, 서빙 중인 학습 모델(GGUF q8_0)과 비교하면 test-a 18.7 대 95.7, test-c 4.5 대 49.5, 음성 조건 test-d v2 13.3 대 79.3이다 (짝지은 차이의 하한이 모두 0보다 크다). 잰 세 분할에서는 결론이 같다 (Claude가 쓴 test-b는 이 비교에서 재지 않았다). 이 과제에서는 새 4B 지시 모델도 프롬프트만으로는 학습하지 않은 Qwen3-4B와 비슷하고 14B보다 낮다. 서빙 모델의 test-c는 표의 55.0(글 전사로만 학습한 모델)보다 낮은 49.5이고, 대화에 없는 값을 적는 비율도 6.2%로 표의 모델(1.5%)보다 높다 (+4.7%p [2.4, 7.2])
+- 이득은 생성기가 달라지면 조금(95.7 → 90.0), 업종이 바뀌면 크게(→ 55.0) 줄어든다. 새 업종에서 틀린 것은 대부분 그 업종에만 있는 처리 라벨이다
+- 대화에 없는 값을 적는 비율(환각): 표의 학습한 4B 0~1.5%, 14B 0~28% (새 업종에서 빈 값을 채워 넣는 경우가 많음)
+- 학습 전 모델들이 틀린 것의 상당수는 프롬프트에 적지 않은 기록 관례(해결된 상담에도 남은 일을 후속 조치로 적는 것 등)였다. 관례를 프롬프트에 적어 주면 14B가 조금 나아지지만 학습과는 거리가 멀다
+
+## 결과 요약 (4단계: 음성 인식을 거친 전사)
+
+test-a의 발화를 합성 음성(MeloTTS) → 전화 음질(8 kHz μ-law) → Whisper로 다시 받아 적은 test-d에서 잰 exact. 보고하는 음성 조건은 **v2**(2026-10-04, 운송장번호를 숫자 하나씩 읽음)이고, 처음 잰 v1(2026-09-29) 값을 함께 둔다.
+
+| 모델 | test-a (글 전사) | test-d v1 (2026-09-29) | **test-d v2** (2026-10-04) |
+|---|---|---|---|
+| qwen2.5 14B | 26.0 | 14.7 | 재지 않음 |
+| Qwen3-4B, 글 전사로만 학습 | 95.7 | 51.7 | 재지 않음 |
+| **Qwen3-4B, 학습 데이터 절반을 음성 인식 전사로 바꿔 학습** | **95.7** | 80.7 [76.0, 85.3] | **79.3** [74.7, 84.0] |
+
+- v1은 학습한 모델 그대로(transformers, 4bit + LoRA), v2는 서빙하는 GGUF q8_0(Ollama 0.35.1)으로 쟀다. 조건만 바꾼 효과는 같은 서빙 모델의 dev 음성 조건에서 −1.7%p [−5.8, +2.1]이고, 차이는 모두 운송장번호가 든 통화에서 났다
+- 음성 인식을 거치면 정답 값이 전사에 온전히 남는 통화가 v2에서 82%(v1 84%)뿐이다 (상품·기기 이름과 주문번호, 운송장번호가 잘 깨진다). 글 전사로만 학습한 모델은 들린 대로 옮겨 적어 44%p 떨어진다 (v1)
+- 같은 계산량에서 학습 데이터 절반을 음성 인식 전사로 바꾸면 음성 조건이 29%p 오르고 글 전사 성능은 그대로다 (v1)
+- 이 모델은 학습 때 본 이름으로 인식 오류를 바로잡지만("은하택구" → "은하 탭 9"), 빠진 번호의 숫자를 짐작해 채우기도 한다. 번호는 서비스에서 따로 검증해야 한다. 그래서 서비스는 형식이 맞지 않거나 전사에 없는 번호를 "확인이 필요한 번호"로 표시한다 (아래 5단계)
+- v1 조건에는 측정 인공물이 있었다: 합성 전에 발음형으로 풀어 쓰는 단계가 운송장번호 `6291-7877-5168`을 범위로 보고 "육천이백구십일 칠천팔백칠십칠에서 오천백육십팔"로 읽게 했다 (test-d 300건 중 87건). v2는 운송장번호만 숫자 하나씩 읽게 고친 것이다. v2에서 가짜 "에서"는 사라졌지만 열두 자리를 하나씩 읽으면 숫자가 빠지거나, 더해지거나, 바뀌거나, 한글 음절로 적히는 일("612호 7692 4794")이 생겨 운송장번호가 전사에 남는 비율은 오히려 낮아졌다 (test-d 90.8 → 85.1%). 규칙과 결과는 docs/experiments.md "음성 조건 v2"
+- 인식기도 바꿔 봤다 (음성 조건 v3, 2026-10-05, dev만): 같은 소리를 large-v3, 업종 카탈로그를 hotwords로 준 turbo, whisper-ko-ft의 turbo-n, Qwen3-ASR-1.7B(맥락 있음·없음)로 다시 받아 적고 번호를 숫자로 바꾸는 규칙을 거쳤다. 정답 값이 모두 남은 통화는 large-v3로 +4.6%p, 카탈로그 turbo로 +10.0%p(대부분 상품 이름) 늘었지만, 서빙 모델의 exact 차이는 +2.9%p [−1.7, +7.5], +0.8%p [−2.5, +4.6]로 구간이 0을 포함해 인식기를 바꾸지 않았다 (카탈로그 turbo로 되찾은 상품 이름은 모델이 이미 바로잡던 것이었다). FLEURS 한국어에서 turbo보다 나았던 Qwen3-ASR과 whisper-ko-ft에서 학습한 turbo-n은 이 전화 조건에서 번호의 숫자를 빠뜨리거나 숫자를 한글로 적어 turbo보다 크게 나빴다. 보고 수치는 test-d v2 그대로다. 규칙과 결과는 docs/experiments.md "음성 조건 v3"
+
+## 결과 요약 (5단계: 서빙)
+
+음성 조건까지 학습한 4B 모델을 GGUF로 바꿔 Ollama에 올리고 FastAPI 서비스로 감쌌다 (dev 240건).
+
+| 형태 | exact | 파일 | 요청당 지연 p50 |
+|---|---|---|---|
+| 학습한 모델 그대로 (transformers, 4bit + LoRA) | 94.6 | - | - |
+| **GGUF q8_0, 서비스 경유** | **94.6** | 4.3 GB | 2.7초 |
+| GGUF q4_K_M | 66.2 | 2.5 GB | 2.0초 |
+
+- 서비스를 거쳐도 품질이 그대로다 (dev 0.0%p, 음성 조건(v1) dev −0.4%p). 1,200건 동안 재시도·거절 0
+- 남은 오류 (2026-10-29, 정답 잡음 감사): 서빙 모델이 dev에서 틀린 13건을 Claude가 대화와 명세로 다시 읽어 보니, 정답이 분명히 틀린 것은 1건(대화에서 한 본인 확인이 정답 처리 목록에 없음), 모델 오류 4건, 교사가 명세에 없는 약속·흐름을 넣어 정답과 모델 답이 둘 다로 읽히는 건 8건이었다. 정답 잡음을 맞은 것으로 쳐도 exact 점 추정 95.0%라 94.6%가 정답 잡음 천장에 닿았다고 볼 근거는 없다. 판정자 한 사람의 검토이고(2026-10-30 덧붙임: 판정자는 검토 전에 정답 잡음으로 나눈 그 1건이 세 학습 묶음이 모두 같은 답을 낸 유일한 후보라는 것을 알았다. 검토 양식에서 가린 것은 모델 답뿐이다), 정답과 기록 수치는 바꾸지 않았다 (docs/experiments.md "dev 남은 오류의 정답 잡음 감사")
+- 강건성 (2026-11-01, dev 전용, 같은 세션의 원본 실행과 같은 건끼리 짝지음): 전사의 주문·운송장 번호를 새 값으로 바꾸면 대조에서 맞힌 번호 131개 중 130개(99.2%)를 새 값으로 옮겼고 exact 차이는 −0.8%p [−2.1, 0.0], 값 없는 발화("잠시만요, 고객님." 등)를 끼우면 −0.8%p [−2.9, +1.2]로 미리 정한 기준(따라 쓴 비율 99% 이상, 구간 하한 −3%p 초과)을 넘었다. 고객이 처리 결과·보상 금액·문의 유형을 바꿔 적으라는 지시를 끼우고 상담원이 거절한 대화에서는 240건 중 10건의 구조 기록에 지시한 값이 들어갔고 exact가 −4.6%p [−7.9, −1.3]였다 (판정 없이 보고만 하는 변형. 요약까지 세면 45건이지만 거절한 요청을 옮긴 요약도 든다). 결과를 보고 모델·프롬프트·서비스는 고치지 않았다 (docs/experiments.md "반사실·메타모픽 강건성")
+- 처음 서빙에서는 두 가지로 크게 떨어졌다: (1) JSON 스키마 강제 디코딩이 키 순서를 바꿔 학습한 모델이 필드를 빠뜨림 → 강제를 끄고 파싱·검증·재시도로 대신, (2) QLoRA 어댑터를 원래 fp16 바탕에 합쳐 약 7%p 손실 → 학습 때의 4bit 바탕을 fp16으로 풀어낸 뒤 합침. (1)은 서비스 test-a 측정의 건별 결과(정답의 '본인 확인' 처리 170건 중 117건이 빠짐)에서 드러나 서비스 설정만 바꿨고, (2)는 dev 진단으로 원인을 가렸다. 이 단계에서 고친 시스템은 dev·dev-asr로만 다시 쟀다 (docs/experiments.md 5단계. 2026-10-29 바로잡음: 전에는 두 원인을 모두 dev에서 진단했다고 적었다)
+- 확인이 필요한 번호 표시 (2026-10-04): 기록은 그대로 두고, 번호(주문번호, 운송장번호 등) 중 형식이 맞지 않거나 전사에서 찾을 수 없는 것을 응답에 따로 적는다. 기록된 답에 대 보면 dev 음성 조건(v2)에서 맞은 번호 98개는 하나도 표시하지 않고 틀린 번호 33개 중 22개를 표시해, 표시 없이 나가는 틀린 번호가 예측한 번호의 25.2%에서 8.4%로 준다 (test-d v2에 한 번: 맞은 125개 중 0, 틀린 39개 중 22개, 23.8 → 10.4%). 정확도 지표는 그대로다. 형식이 맞고 전사에도 있는 한 글자 바뀜(대부분 1과 2)은 잡지 못한다
+- 요약 품질 (2026-10-09, 보조 지표, 같은 날 검토 뒤 고침): 사실에 적힌 번호·금액·날짜·시각이 요약에 남은 비율(값 확인: 판정 모델 없이 채점과 같은 정규화로 셈)은 서빙 모델 test-a 98.9%, 음성 조건 test-d v2 90.1%이고, 음성 조건에서 빠지는 값은 대부분 잘못 들은 번호다. 값 확인에 판정 모델(qwen3.5:9b)을 더한 형태의 사실 재현율은 test-a 98.9%, test-d v2 92.4%다. 이 형태는 서빙 모델의 dev 요약 60건에서 Claude 라벨과 kappa 0.603이었는데, 그 대부분은 값 확인에서 왔다 (값 확인 혼자 0.556, 판정 모델 혼자 0.149, 예전 판정 모델(qwen2.5 14B) 혼자 −0.015, 예전 판정 모델 + 값 확인 0.531). 보정에서 이 형태는 Claude가 본 요약 오류 21개 중 10개만 잡았고, 글 전사 요약(test-a와 같은 조건인 dev 표본 20건)에서는 5개 중 1개만 잡았다. 그래서 두 수치 모두 실제보다 높게 나온 값이고, 글 전사의 98.9%는 더 그럴 수 있다. 결론은 계속 구조 필드의 exact로 낸다 (docs/experiments.md "요약 판정 재보정")
+- 한 대의 GPU에서 Ollama가 요청을 하나씩 처리해 처리량은 약 0.4요청/초 (동시 요청을 늘리면 지연만 늘어남)
+- 메모리와 속도 (2026-10-03, dev를 한 건씩): Ollama가 보고하는 VRAM은 q8_0 4,731 MiB, f16 8,328 MiB, q4_K_M 3,031 MiB (4,096 컨텍스트의 KV 캐시 576 MiB 포함), 생성 속도는 58, 37, 81토큰/초. 지연은 표의 값(2026-09-30)보다 약 1.45배 길었다 (답은 글자까지 같음). 이 측정 때는 배경화면 프로그램이 GPU를 함께 쓰고 있었고 Ollama도 0.34.2에서 0.35.0으로 바뀌어 있었는데, 둘 중 무엇 때문에 느려졌는지는 가르지 못했다
+- 요청 순서 (2026-10-29 덧붙임): 위 지연·처리량은 모두 dev 파일 순서대로(업종마다 80건씩 이어서) 보낸 값이다. 시스템 프롬프트는 업종마다 다르고 Ollama는 직전 요청과 같은 프롬프트 앞부분만 캐시에서 다시 쓰는데, 이 순서에서는 같은 업종이 이어져 업종 프롬프트를 거의 늘 다시 쓸 수 있었다. 속도 측정 기록에서 업종이 바뀐 두 요청의 프롬프트 처리는 약 0.36초로, 같은 업종이 이어진 요청(p50 0.17초)의 약 2배였다. 업종이 섞인 순서는 재지 않았다 (docs/experiments.md "효율 추가 측정 결과")
+- 보안 스캔(HawkScan, 모델 없는 오프라인 모드): High·Medium·Low 모두 0. 2026-10-03 18:38 스캔까지는 `/summarize` 요청이 모두 입력 검사(422)에서 걸려 검사를 통과한 뒤의 처리 경로를 시험하지 못했다. OpenAPI 설명이 받는 발화자 값을 정규식으로만 적어 스캔 엔진이 맞는 값을 만들지 못했고, enum으로 고친 뒤에는 엔진이 한글 값을 "???"로 바꿔 보냈다. 그래서 한글을 JSON `\u` 이스케이프로 적은 요청(`hawk/summarize.har`)을 씨앗으로 넣었다. 그 뒤 스캔(2026-10-03 18:47)에서는 `/summarize` 1,793건 중 658건이 처리기에 닿았고 결과는 그대로 0건이다. 번호 표시를 넣은 뒤 다시 스캔(2026-10-04)해도 0건이다 (처리기에 닿은 656건) (docs/experiments.md "보안 스캔 기록")
+- 보안 스캔 (2026-10-24, OWASP ZAP 2.17.0으로 바꿈. HawkScan 체험 종료): 서비스의 입력 경계·입장 제어·상태 경로를 바꾼 뒤 모델 없는 오프라인 모드를 스캔해 High·Medium·Low 모두 0, Informational 1 (User Agent Fuzzer: 응답의 `request_id`가 요청마다 달라 본문이 다르다는 것). `/summarize` 1,514건 중 568건이 처리기에 닿았다 (ZAP도 OpenAPI로 만든 한글 값을 ISO-8859-1로 보내 입력 검사에서 걸리므로, ASCII 씨앗 요청의 변형이 처리기를 지난다). 두 도구는 규칙 목록이 달라 HawkScan 기록과 직접 비교하지 않는다. 2026-10-30 모델 호출과 상태 조회의 작업 스레드 자리를 나눈 뒤 다시 스캔해도 결과는 같았다 (High·Medium·Low 0, Informational 1, `/summarize` 1,514건 중 567건이 처리기에 닿음). 2026-11-01 서비스 요청에 `truncate: false`·`shift: false`를 넣은 뒤 다시 스캔해도 같았다 (High·Medium·Low 0, Informational 1, `/summarize` 1,504건 중 564건이 처리기에 닿음) (docs/experiments.md "보안 스캔 기록")
+
+자세한 규칙, 모든 수치, 한계는 [docs/experiments.md](docs/experiments.md).
+
+데이터는 모두 생성한 가상 데이터다. 업종 4개(쇼핑몰, 통신사, 택배사, 카드사)와 회사 이름, 상품, 요금제는 모두 지어낸 것이다.
+
+## 수치 다시 내기
+
+위 머리말과 결과 요약에 적은 평가 실행 수치(표의 exact와 95% 구간, 본문의 짝지은 차이와 환각 비율)는 [docs/numbers.toml](docs/numbers.toml)에 하나씩 실행 기록(`reports/<run_id>/`)과 묶어 두었다. 아래 명령은 선언마다 실행 기록의 건별 점수(`items.jsonl`)에서 값을 다시 계산해(구간은 evaluate와 같은 seed 0, 2,000번 부트스트랩이라 그대로 다시 나온다) README에 적힌 소수 자리까지 같은지, 그 숫자를 둘러싼 글(`context`)이 README의 그 절에 꼭 한 번 있는지, 측정 때 쓴 `summary.json`도 같은 값인지 보고, 하나라도 어긋나면 종료 코드 1로 끝난다. 모델·GPU 없이 몇 초 걸린다. `tests/test_numbers.py`가 같은 검사를 돌리므로 CI가 push마다 확인한다.
+
+```bash
+uv run --no-sync python -m call_summary.compare --check docs/numbers.toml
+```
+
+선언 하나는 파일과 절(`where`, `section`), 그 자리에 그대로 있어야 할 글(`context`, 선언한 값으로 끝난다), 실행 기록(`run`, 짝지은 차이면 빼는 쪽 `base`도), 지표(`metric`), 종류(`kind`: `point` 점 추정, `ci` 점 추정과 구간, `paired` 짝지은 차이 run − base), 값(`value`)과 소수 자리(`places`)다. 지연·효율과 부하, 요약 판정, 번호 표시, 음성 조건 입력 분석, 정답 잡음 감사의 수치, 강건성 시험의 따라 쓴 비율·주입 따름(그 시험의 exact 짝지은 차이는 선언했다), 숫자 없이 적은 판정 문장(구간 하한이 0보다 크다 등)은 아직 이 검사로 다시 내지 않는다. README에 평가 실행 수치를 더하거나 고칠 때는 선언도 함께 더하거나 고친다.
+
+## 데이터를 만드는 방식
+
+정답을 먼저 만들고 대화를 나중에 만든다.
+
+1. **명세** (`specs.py`): seed를 고정한 난수로 업종, 문의 유형, 핵심 값과 그 말투(`32,000원` / `3만 2천 원`), 상담원이 한 처리, 결과, 대화 중 일어나는 일(번호를 잘못 말했다 고침, 불만, 대기 등)을 뽑는다. 구조 필드의 정답은 명세에서 바로 나온다
+2. **대화** (`gen.py`): 로컬 교사 모델이 명세를 대화로 쓴다
+3. **자동 검사**: 명세의 값이 글자 그대로 모두 나오는지, 명세에 없는 금액·날짜·시각·번호가 나오지 않는지 코드로 확인하고, 통과하지 못한 대화는 버린다
+
+## 설치와 테스트
+
+```bash
+uv sync                    # 기본 + 개발 도구 (테스트는 GPU·모델 없이 돈다)
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+```
+
+학습·transformers 추론에는 `train` 그룹이 필요하다 (torch cu128). 이 그룹을 설치한 환경에서는 `uv sync`를 그룹 없이 다시 부르면 지워지므로 `uv sync --group train`을 쓰거나 `uv run --no-sync`로 실행한다. torch는 PyTorch cu128 인덱스의 2.11.0으로 고정했다. 2026-10-29 확인한 cu128 인덱스에는 2.11.0보다 새 torch가 없고 2.12 이후 판은 cu130·cu132 인덱스에 있어(Python 3.11 Windows 휠 기준), torch를 올리려면 인덱스도 바꿔야 한다. 그러면 학습과 transformers 4bit 평가의 실행 조건이 함께 바뀌므로, 바꾸기 전에 docs/experiments.md에 규칙을 먼저 커밋하고 기록된 어댑터를 dev에서 다시 재 exact가 기록과 같은 범위인지 확인한다.
+
+```bash
+uv sync --group train
+```
+
+## 실행
+
+```bash
+# 명세 만들기 (분할: train, dev, test-a, test-b, test-c)
+uv run python -m call_summary.build_specs --split dev --per-domain 96 --out data/specs/dev.jsonl
+
+# 교사 모델로 대화·참고 요약 만들기 (Ollama, 이어서 하기 가능)
+uv run python -m call_summary.gen --specs data/specs/dev.jsonl --out data/raw/dev.jsonl --model qwen2.5:14b-instruct
+
+# 분할 확정: 업종마다 통과한 앞의 N건, train과 번호가 겹치는 test 건 제외, 거절 비율 보고
+uv run python -m call_summary.finalize
+
+# 정답 기록 전체가 train의 한 건과 글자까지 같은 건 세기 (보고만, 분할은 그대로). --run을 주면 그 실행의 exact를 겹친 건과 나머지로 나눔
+uv run --no-sync python -m call_summary.overlap datasets/dev.jsonl datasets/test-a.jsonl --run reports/<run_id>
+
+# 평가 (Ollama 또는 transformers). 결과는 outputs/runs/<run_id>/, --official이면 reports/
+uv run python -m call_summary.evaluate --data data/dev.jsonl --backend ollama --model qwen2.5:7b-instruct
+uv run --no-sync python -m call_summary.evaluate --data data/dev.jsonl --backend hf --model Qwen/Qwen3-1.7B --batch 4
+uv run --no-sync python -m call_summary.evaluate --data data/dev.jsonl --backend hf --model Qwen/Qwen3-1.7B --adapter outputs/train/<run>/final
+
+# 요약 판정 (판정 모델), 사람 채점 양식, 실행 비교 표
+uv run python -m call_summary.judge_run --run outputs/runs/<run_id>
+uv run python -c "from call_summary.judge_run import hand_template_main as m; m()" --run outputs/runs/<run_id> --out work/hand.jsonl
+uv run python -m call_summary.compare outputs/runs/<a> outputs/runs/<b>
+uv run python -m call_summary.compare --paired outputs/runs/<a> outputs/runs/<b>
+uv run python -m call_summary.compare --pick outputs/runs/<a> outputs/runs/<b> ...   # dev에서 고르는 규칙 순서
+
+# 요약 판정 재보정 (docs/experiments.md "요약 판정 재보정"): 값 확인(모델 없음), 보정 표본, 판정 모델 실행, 일치 표와 채택
+uv run --no-sync python -m call_summary.value_facts reports/<run_id>... [--judge-file judge-<이름>.jsonl]
+uv run --no-sync python -m call_summary.judge_calib sample --stratum <층>=reports/<run_id>:<건수> ... --hand H=reports/<run_id>/hand50.jsonl --out reports/judge2/sample.jsonl --template work/judge2/template.jsonl
+uv run --no-sync python -m call_summary.judge_calib judge --sample reports/judge2/sample.jsonl --model <태그> --out reports/judge2/judge-<이름>.jsonl --num-gpu 99 --think off
+uv run --no-sync python -m call_summary.judge_calib report --sample reports/judge2/sample.jsonl --labels reports/judge2/claude80.jsonl --hand-labels H=reports/<run_id>/hand50.jsonl --judge J0=... --judge J1=... --baseline J0 --candidates J1 --decide-on <층>,<층>
+uv run --no-sync python -m call_summary.judge_run --run reports/<run_id> --model <태그> --out reports/<run_id>/judge-<이름>.jsonl   # j1의 judge.jsonl을 덮어쓰지 않음
+uv run --no-sync python -m call_summary.judge_calib cells --sample reports/judge2/sample.jsonl --labels reports/judge2/claude80.jsonl --hand-labels H=reports/<run_id>/hand50.jsonl --group S=<층>,<층>   # 값 확인 혼자와 Claude 라벨의 셀 표
+
+# 학습 (LoRA, 4B는 --qlora)
+# 2026-10-24부터 train·evaluate(hf)·export는 바탕 모델을 기본으로 고정한 커밋 revision에서 불러온다 (Qwen3-4B 1cfa9a72…, Qwen3-1.7B 70d244cc…, --revision으로 바꿈). hf 평가 manifest와 train_config.json에는 revision과 라이브러리 판(libs), export.json에는 revision이 남는다 (docs/experiments.md 3단계 결과의 2026-10-24 덧붙임)
+uv run --no-sync python -m call_summary.train --model Qwen/Qwen3-1.7B --out outputs/train/qwen3-1.7b
+
+# LoRA 합치기 → GGUF → llama-quantize → Ollama 등록 (work/llama.cpp, work/llama-bin 필요. QLoRA 어댑터는 4bit 바탕을 풀어 합침)
+uv run --no-sync python -m call_summary.export --base Qwen/Qwen3-4B --adapter outputs/train/qwen3-4b-qlora-r16-mixed/final --name call-summary-4b-dq --out outputs/export/qwen3-4b-mixed-dq --num-ctx 4096
+
+# 서비스 (Ollama 모델), 모델 없는 오프라인 모드, 컨테이너, 부하 시험, 메모리·속도 측정(한 건씩), 컨텍스트 초과 동작 확인, 보안 스캔
+CALL_SUMMARY_MODEL=call-summary-4b-dq:q8_0 uv run uvicorn call_summary.service:create_app --factory --port 8072
+uv run uvicorn call_summary.service:create_offline_app --factory --port 8072
+CALL_SUMMARY_MODEL=call-summary-4b-dq:q8_0 docker compose up -d --build   # 컨테이너에는 API만, 모델은 호스트의 Ollama (아래 컨테이너 문단)
+uv run python -m call_summary.loadtest --data datasets/dev.jsonl --concurrency 1 2 4
+uv run --no-sync python -m call_summary.bench --data datasets/dev.jsonl --model call-summary-4b-dq:q8_0 --out reports/s5c-bench-q8_0.json
+uv run --no-sync python scripts/ctx_probe.py --model call-summary-4b-dq:q8_0 --dev datasets/dev.jsonl --n-dev 40 --out reports/ctx-probe-q8_0.json   # 컨텍스트 초과 동작 확인
+ZAP_DIR=<zap-2.17.0.jar가 있는 폴더> bash zap/run_zap.sh <이름>   # 보안 스캔 (OWASP ZAP 2.17.0, 2026-10-24부터). 위 오프라인 모드를 먼저 띄운다. 결과는 work/zap/<이름>/
+APP_ID=<StackHawk application id> hawk scan   # 2026-10-05까지 쓴 HawkScan (체험 종료)
+```
+
+내보내기 도구 (2026-10-29 덧붙임): 서빙 모델 `call-summary-4b-dq:q8_0`(Ollama digest `52a2d2f65261`)은 2026-09-30에 `call_summary.export`로 만들었고, 그때 쓴 도구는 다음과 같다. f16 GGUF 변환은 llama.cpp 커밋 `81bc6b8`의 `convert_hf_to_gguf.py`(같은 체크아웃의 `gguf-py`, 이 프로젝트 환경의 파이썬), q8_0·q4_K_M 양자화는 llama.cpp 릴리스 `b11255`(커밋 `31385c9`)의 Windows CPU 배포 `llama-b11255-bin-win-cpu-x64.zip`(sha256 `13bef0d15c315b153603a610a6652e2460ae9202bb1b22832eed225ccbc7fcc7`, GitHub 릴리스에 적힌 값과 같다)에 든 `llama-quantize.exe`, Ollama 등록(`ollama create`)은 같은 날 측정 기록과 같은 Ollama 0.34.2다. 2026-10-04부터의 측정과 지금 서빙은 Ollama 0.35.1이고 digest는 그대로다. 다시 만들 때는 `work/llama.cpp`에 llama.cpp를 받아 이 커밋으로 체크아웃하고 `work/llama-bin`에 이 zip을 푼다. 같은 GGUF가 다시 나오는지는 확인하지 않았다 (4bit 바탕을 풀어 합치는 단계에 GPU가 든다). 대 볼 값은 q8_0 GGUF 파일의 sha256이다 (docs/experiments.md 5단계 "내보내기"). 이제 `export.json`에는 llama.cpp 커밋과 함께 `llama_quantize`(llama-quantize 실행 파일의 경로와 sha256, 양자화 때 도구가 찍은 판 줄 `version: …`, 그 실행에서 양자화한 형태)가 남는다. 이 배포의 `llama-quantize.exe`는 양자화 코드가 든 `llama-quantize-impl.dll`을 부르는 작은 실행 파일이라 sha256만으로는 양자화 코드의 판을 가리키지 못해 판 줄을 함께 남긴다.
+
+`POST /summarize` 요청 예: `{"domain": "shop", "turns": [{"speaker": "상담원", "text": "..."}, {"speaker": "고객", "text": "..."}]}`. 발화 글 안의 줄바꿈류(파이썬 `str.splitlines`가 줄 경계로 보는 LF·CR·CRLF·VT·FF·U+001C~U+001E·NEL·U+2028·U+2029)와 탭은 전사를 조립하기 전에 하나마다 공백 하나로 바꾼다. 고객 발화에 줄바꿈과 "상담원: …"을 넣어 모델이 받는 전사에 상담원 줄을 꾸며 넣지 못하게 하려는 것이다 (한 줄 안에 적은 내용까지 막지는 않는다). 그 밖의 제어문자가 든 발화는 422다. 전사가 4,000자를 넘으면 모델 컨텍스트(4,096 토큰)에 답까지 들어가지 않으므로 413을 돌려준다 (데이터셋 전사는 가장 긴 것이 1,485자). 4,000자는 한국어 대화 기준이라 숫자·이모지 위주의 입력은 그 안에서도 컨텍스트를 넘을 수 있다: 모델 서버가 컨텍스트 초과 오류를 주면 413(`{"error": "context exceeded"}`), 답의 프롬프트·생성 토큰 합이 4,096 이상이면 컨텍스트가 다 차서 답이 끝까지 쓰이지 못했을 수 있어 다시 묻지 않고 502(`{"error": "context exhausted", "problems": ["context_full"]}`)를 돌려준다. 2026-11-01부터 서비스는 Ollama 요청(다시 묻는 요청과 선택 예열의 적재 요청도)에 `truncate: false`·`shift: false`를 넣어, 넘친 프롬프트는 잘라 넣지 않고 오류로 받고(위 413) 생성 중에 컨텍스트가 차면 컨텍스트의 앞쪽을 밀어내며 계속 쓰지 않고 그 자리에서 멈추게 한다. 두 필드가 없을 때 Ollama 0.35.1은 밀어내며 계속 썼다 (그 답도 이 합 검사가 잡아 502였다). 넘치지 않는 dev 40건의 답은 두 필드가 있든 없든 글자까지 같았고, 기록된 서비스 경유 측정은 두 필드 없이 잰 것이다 (evaluate·bench 같은 측정 도구의 요청에는 지금도 두 필드가 없다. 넘칠 때 Ollama가 어떻게 답하는지는 docs/experiments.md "서비스 컨텍스트 초과 동작 확인"). 모델 답이 스키마를 통과하지 못하거나 업종 목록 밖의 라벨을 쓰면 한 번 다시 묻고, 그래도 안 되면 502를 돌려준다. 요청 본문은 1 MiB까지만 받는다 (넘으면 본문을 파싱하기 전에 413 `{"detail": "request body too large (max 1048576 bytes)"}`). 모델 호출 구간에 동시에 들어가는 요청은 `CALL_SUMMARY_MAX_INFLIGHT`(기본 4, 1~40)개까지이고, 자리가 없으면 `CALL_SUMMARY_MAX_QUEUE`(기본 16)개까지만 줄을 서서 `CALL_SUMMARY_QUEUE_WAIT_S`(기본 30초) 동안 기다린다. 줄이 다 찼거나 그 시간이 지나면 모델을 부르지 않고 503 `{"error": "server busy"}`와 `Retry-After`(대기 상한을 올림한 초, 최소 1)를 돌려준다. 기본값은 기록된 부하 시험(동시 1·2·4)이 한도에 걸리지 않게 정했고, Ollama가 요청을 하나씩 처리하므로 동시 상한을 올려도 처리량은 늘지 않는다 (그래서 40보다 큰 값은 받지 않는다). 들어간 모델 호출은 동시 상한만큼의 전용 작업 스레드 자리에서 돌아, 상한 안의 요청이 스레드를 기다리지 않는다. 모델 서버 호출 하나의 시간 한도는 `CALL_SUMMARY_MODEL_TIMEOUT`(기본 120초. 기록된 서비스 지연 최대 36.3초와 모델 적재를 포함한 첫 요청 52.9초보다 길다)이고, 넘기면 다른 모델 서버 오류처럼 다시 묻지 않고 503이다. 한도 값이 잘못되면(0 이하이거나 40을 넘는 동시 수, 음수 대기, 숫자가 아닌 값 등) 서비스가 시작하지 않는다. 응답의 `needs_confirmation`은 기록의 번호(주문번호, 운송장번호, 접수번호, 카드 끝자리) 가운데 배포 형식(정규화한 값이 `D\d{7}`, 숫자 12자리, `R\d{6}`, 숫자 4자리)에 맞지 않거나 전사에서 찾을 수 없는 것을 `{type, value, reasons}`로 적는다 (`reasons`: `format`, `not_in_transcript`). 기록은 바꾸지 않으므로, 표시된 번호는 상담원이 고객에게 다시 확인하라는 뜻이다. 형식이 맞고 전사에도 있는 틀린 번호(인식기가 잘못 들은 숫자를 그대로 옮긴 것)는 표시되지 않는다. 첫 답은 탐욕 디코딩이라 같은 요청을 되풀이하면 같은 답이 나오므로, 다시 물을 때는 temperature 0.3과 다른 seed로 샘플링한다. `GET /stats`는 결과별 요청 수와 최근 `CALL_SUMMARY_STATS_WINDOW`(기본 10,000)건의 지연 분포(응답의 `window`가 그 크기. 결과별 수는 창과 상관없이 전체를 센다), `GET /domains`는 업종별 라벨 목록. 처리기에 닿은 `/summarize` 요청마다 로거 `call_summary.service`가 JSON 한 줄을 남긴다 (요청 id, 업종, 발화 수·글자 수, 정규화로 바뀐 발화 수 `normalized_turns`, "상담원:"·"고객:" 꼴이 든 발화 수 `speaker_marker_turns`(세기만 하고 거절하지 않음), 결과(`ok`, `retried_ok`, `rejected`, `model_unavailable`, `context_full`, `context_exceeded`, `busy`, `unknown_domain`, `too_long`), HTTP 상태, 시도 횟수, 지연, 모델 호출 자리를 기다린 시간 `queue_s`, 시도를 합친 프롬프트·생성 토큰 수, num_predict에서 멈춘 답이 있었는지 `length_stop`과 컨텍스트를 다 채운 답이 있었는지 `context_full`(모델 서버가 알려 주지 않으면 null), 확인이 필요한 번호 수). 요청 본문이 형식 검사(빠진 필드, 허용되지 않은 발화자, 발화 글의 제어문자, 빈 `turns` 등)에서 걸려 FastAPI가 422를 돌려준 요청과 본문 상한에 걸린 413은 처리기에 닿지 않으므로 줄이 남지 않는다 (목록에 없는 업종의 422는 처리기가 돌려주므로 남는다). 전사와 기록 내용, 표시한 번호의 값은 개인정보가 들어 있어 남기지 않는다. 모델 없는 오프라인 모드의 고정 답에는 업종마다 정해 둔 번호 하나가 들어 있어 번호 검사가 늘 돈다. 기록된 평가 실행에 같은 검사를 대 보는 도구: `uv run --no-sync python -m call_summary.verify reports/<run_id> --show`.
+
+상태 경로는 둘이다. `GET /health`는 liveness다: 모델 서버에 닿지 않고 프로세스가 답하는지만 보이며, 모델 이름, 프롬프트 지문 `prompt_hash`, 서비스가 마지막으로 확인한 서빙 모델의 digest `model_digest`와 Ollama 버전 `ollama_version`(시작할 때 한 번 조회하고 `/ready`가 확인할 때마다 갱신. 조회에 실패하면 null)을 돌려준다. `GET /ready`는 readiness다: Ollama `/api/tags`에 모델 태그가 있고, `CALL_SUMMARY_MODEL_DIGEST`(digest 앞자리. `ollama list`가 보이는 ID 12자리로 충분)를 적었으면 그 digest와 앞자리가 같을 때만 200 `{"status": "ready", ...}`, 아니면 503 `{"status": "not_ready", "reason": ...}`를 돌려준다 (`reason`: `no_model_server` 모델 서버에 닿지 못함, `no_model` 태그 없음, `digest_mismatch` 같은 태그에 다른 가중치, `warming` 예열 중). 모델 서버 조회(`/api/tags`·`/api/version` 각각)는 2초 한도이고 결과를 10초 동안 캐시한다 (닿지 못한 결과도 같은 시간 캐시한다). 조회는 모델 호출과 나누지 않는 전용 작업 스레드 자리에서 돌아, 모델 호출이 동시 상한까지 차 있어도 그 뒤에 줄을 서지 않는다. 측정 기록(manifest의 `model_fingerprint`)과 같은 조회라 잰 모델과 서빙 중인 모델이 같은 가중치인지 digest로 맞춰 볼 수 있다. compose.yaml의 healthcheck는 `/health`(liveness) 그대로다: unhealthy를 재시작으로 처리하는 오케스트레이터에 `/ready`를 걸면 Ollama가 잠깐 꺼질 때마다 컨테이너가 재시작되는 고리가 생기기 때문이다. `CALL_SUMMARY_KEEP_ALIVE`(기본 `30m`. Ollama의 keep_alive 꼴: `1h` 같은 시간 문자열 또는 초 단위 정수, 음수는 계속 상주, 0은 바로 내림)는 요청 뒤 모델을 메모리에 남겨 둘 시간이고, `CALL_SUMMARY_WARMUP=1`이면 서비스가 시작할 때 뒤에서 한 번 모델을 올린다 (프롬프트 없는 `/api/generate`. 끝날 때까지 `/ready`는 `warming`이고, 실패해도 서비스는 뜬다). 기본은 끈다: GPU를 다른 작업과 나눠 쓰는 환경에서 서비스를 띄우는 것만으로 GPU 메모리(q8_0 약 4.7 GB)를 잡지 않게 하려는 것이다. 두 값과 digest 기대값이 잘못되면 한도 값처럼 서비스가 시작하지 않는다. 시작할 때 로그 한 줄(`event: startup`)에 모델 이름, digest, Ollama 버전, `prompt_hash`, 설정과 한도 값을 남긴다. compose.yaml은 이 환경 변수들을 `${VAR:-}`로 넘기므로 셸에서 정하면 컨테이너에도 적용된다.
+
+컨테이너(compose.yaml. compose가 만드는 이미지 이름은 폴더 이름을 따라 `call-summary-app`)에는 API만 있고 모델은 호스트의 Ollama가 서빙한다. 서비스 포트는 127.0.0.1에만 열고(API에 인증이 없다), 컨테이너는 읽기 전용 루트 파일 시스템(쓸 수 있는 곳은 tmpfs `/tmp`뿐), Linux capability 모두 빼기, 권한 상승 막기(`no-new-privileges`), 메모리 상한 512 MiB로 돈다. 베이스 이미지와 uv 이미지는 digest로 고정했다 (Dockerfile 머리말). 모델 서버 주소는 `OLLAMA_URL`(기본 `http://host.docker.internal:11434`)로 바꿀 수 있다. compose 밖에서 `docker run`으로 띄우면 이 설정이 붙지 않으므로 같은 것을 플래그로 준다 (Git Bash에서는 `/tmp`가 Windows 경로로 바뀌므로 앞에 `MSYS_NO_PATHCONV=1`을 붙인다). `-p 8072:8072`처럼 주소를 빼면 호스트의 모든 주소에 열린다.
+
+```bash
+docker run --rm -p 127.0.0.1:8072:8072 --add-host host.docker.internal:host-gateway -e OLLAMA_URL=http://host.docker.internal:11434 -e CALL_SUMMARY_MODEL=call-summary-4b-dq:q8_0 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 512m call-summary-app
+```
+
+`host.docker.internal`은 Docker Desktop(Windows에서 확인)에서는 127.0.0.1에만 듣는 호스트의 Ollama에 그대로 닿는다. Linux의 Docker Engine에서는 `host-gateway`가 기본 브리지(docker0)의 IPv4 주소(보통 172.17.0.1)로 풀리는데 Ollama는 기본으로 127.0.0.1:11434에만 들으므로 그대로는 닿지 않는다. 그때는 Ollama를 그 브리지 주소에 듣게 하거나(`OLLAMA_HOST=172.17.0.1:11434`. 주소는 `ip -4 addr show docker0`로 확인하고, 호스트에서 `ollama` 명령을 쓸 때도 같은 `OLLAMA_HOST`를 준다), compose 서비스에 `network_mode: host`를 쓰고 `OLLAMA_URL=http://127.0.0.1:11434`로 띄운다. host 네트워크에서는 `ports`의 127.0.0.1 게시가 적용되지 않아 이미지의 기본 명령(`--host 0.0.0.0`)이 호스트의 모든 주소에 열리므로, compose의 `command`로 `--host 127.0.0.1`을 준다. Ollama를 `OLLAMA_HOST=0.0.0.0`으로 모든 주소에 열면 인증 없는 Ollama API가 LAN에 드러나므로, 꼭 그래야 한다면 방화벽으로 바깥에서 오는 11434 연결을 막는다. (2026-11-05 덧붙임: 이 문단의 Linux Docker Engine 안내(브리지 주소에 Ollama를 듣게 하기, `network_mode: host`)는 이 저장소에서 돌려 보지 않았고, Docker와 Ollama의 문서를 따라 적은 것이다)
+
+음성 조건(4단계) 데이터는 `scripts/asr_condition.py`로 만들었다. MeloTTS가 transformers 4.27을 요구해 이 프로젝트 환경이 아니라 support-agent 저장소의 음성 환경에서 돌린다 (스크립트 머리말 참고). 2026-10-03부터 기본은 조건 v2(`--verbalizer v2`, 운송장번호를 숫자 하나씩 읽음, 결과는 `data/asr-v2/`)다. v1·v2의 발음형은 support-agent의 현재 파일이 아니라 4단계 때의 `verbalize`(support-agent 커밋 `a5717ce`)를 옮긴 사본 `scripts/verbalize_a5717ce.py`로 만든다 (support-agent가 그 뒤 운송장번호 읽기를 고쳤다. docs/experiments.md "음성 조건 v2"의 2026-10-14 덧붙임). `--dry-run`은 모델 없이 새로 합성할 발화 수를 보여 주고, 음성 환경이 캐시와 달라 v1과 같게 읽는 발화까지 다시 만들어야 하면 스크립트가 멈춘다. 모델 없이 도는 분석: `uv run --no-sync python -m call_summary.asr_report survival datasets/dev-asr.jsonl` (유형별 정답 값 보존율), `... asr_report unfound reports/<run_id>` (전사에 없는 예측 값을 복원과 지어낸 값으로 나눔. 그중 빈 값과 "없음"·"알 수 없음" 같은 자리 표시 값도 셈), `... asr_report tracking-forms datasets/test-d-v2.jsonl --show-lost` (인식기가 운송장번호를 적은 꼴과 찾지 못한 번호마다 들린 꼴).
+
+음성 조건 v3(인식기 비교, 규칙은 docs/experiments.md "음성 조건 v3")은 두 번에 나눠 돈다. 1패스 `scripts/asr_condition.py --keep-audio [--only-ids]`는 발화를 다시 합성해 기준 인식기(large-v3-turbo)가 받은 WAV와 그 글을 `outputs/asr3/audio/`에 남기고, 2패스는 남긴 소리를 다른 인식기로 다시 듣는다: `asr_condition.py --recognise Th|L|N` (support-agent 음성 환경. N은 그 환경의 tokenizers가 turbo-n의 토크나이저 파일을 읽지 못해 whisper-ko-ft 환경), `uv run --no-sync python scripts/asr_qwen.py --arm Q|Qc` (이 프로젝트 환경, Qwen3-ASR-1.7B). 모델 없이 도는 쪽은 `python -m call_summary.asr_arms`: `context`(업종 맥락), `identity`(새 소리의 기준 인식기 글이 기록된 전사와 같은지), `gate`(번호 발화만의 싼 관문), `build`(팔마다 학생이 받는 파일, 이름이 `+I`로 끝나는 팔은 `call_summary.id_itn`의 번호 규칙을 거침), `compare`(값 보존율 짝지은 비교).
