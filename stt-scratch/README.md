@@ -1,0 +1,141 @@
+# stt-scratch
+
+한국어 음성 인식(STT) 모델을 처음 설계부터 만들어 공개 데이터로 학습하고, 스트리밍 자막 서비스까지 묶는 프로젝트다. 사전학습 가중치는 쓰지 않는다.
+
+- 모델: 청크 인과 Conformer-CTC 약 21M 파라미터(순수 PyTorch). 인과 Conv2d 서브샘플링, RoPE 어텐션 + QK-norm + 청크 마스크, BACON식 분할 depthwise conv, 동적 청크 학습, 캐시 스트리밍 추론. 최종 모델은 6층 중간 CTC(InterCTC) 헤드와 TrimTail 이어 학습을 쓴다(2단계 자기조건 CTC → 3단계 판정으로 교체, 4단계 TrimTail 채택). 구조 선택의 근거와 기각한 대안은 `docs/survey/README.md`
+- 데이터: Zeroth-Korean(CC BY 4.0) + FLEURS 한국어(CC BY 4.0) + Common Voice 22 한국어(CC0). 라이선스·분할·정규화는 `docs/data.md`, 데이터 귀속(저작자 표시·라이선스 링크·변경 표시)은 그 문서의 "귀속" 절. `manifests/`와 `reports/`의 전사문·가설은 각 데이터셋의 라이선스를 따른다(전사문은 `docs/experiments.md`의 텍스트 정규화를 거친 것)
+- 측정 규칙(사전 등록)과 결과: `docs/experiments.md`. 단계 계획: `docs/plan.md`. AI가 만든 코드의 검증 기록: `docs/ai-verification.md`
+- 하드웨어: RTX 2080 Ti 11 GB 한 장(fp16 autocast, bf16 없음), Windows 11
+
+## 결과 (봉인 test, 2026-10-14 1회)
+
+최종 모델 `outputs/stage4/trimtail/avg10.pt`, greedy, CER_ns(공백 제외 문자 오류율, 한글 전용 발화) %. 스트리밍은 서비스 구성(320 ms 청크, 좌측 5.12 s)의 실제 캐시 스트리밍. 괄호는 발화 단위 95 % 부트스트랩 구간(2026-10-24 추가: 같은 화자의 발화를 한 묶음으로 다시 뽑은 군집 구간은 모든 행에서 이보다 넓다. 화자 정보가 없는 FLEURS는 같은 문장으로 묶는다. 사후 보조, `reports/final/cluster_ci.json`). 전체 표·CER_ws·출력 불가능 문자 하한은 `docs/experiments.md` "7단계 결과"와 `reports/final/sealed_test.md`.
+
+| test 세트 | full | 스트리밍 320 ms |
+|---|---|---|
+| Zeroth 공식 test | 3.67 (2.97-4.42) | 5.35 (4.55-6.26) |
+| 　└ 학습 세트에 있는 문장 397발화(저장된 가설의 사후 분할) | 1.85 | 3.31 |
+| 　└ 처음 보는 문장 60발화(사후 분할) | 16.01 | 19.25 |
+| Zeroth test_H (처음 보는 문장만, 1,280발화) | 15.55 (15.09-16.02) | 18.08 (17.56-18.55) |
+| FLEURS 한국어 test | 14.62 (13.47-15.89) | 17.74 (16.59-19.07) |
+| Common Voice 22 한국어 test | 28.19 (26.62-29.64) | 33.35 (31.63-34.92) |
+
+- 같은 Zeroth 공식 test에서 whisper-large-v3-turbo는 제로샷 4.48 %, LoRA 파인튜닝 1.96 %다(별도 프로젝트 whisper-ko-ft, 같은 채점 정규화). 3.67 %는 그 사이(등록 가설 H7.1 충족)지만, Zeroth test 문장 대부분이 학습 세트에도 있고 학습 세트에 있는 문장(1.85 %)과 처음 보는 문장(16.01 %)의 격차가 커서 문장 암기와 일관된다. 처음 보는 문장에서는 15~16 %다
+  - 2026-10-24 추가 확인(사후 분석, 새 디코딩 없음, `reports/final/zeroth_anchor_notation.json`): 채점 정규화는 같지만 Zeroth 정답은 숫자를 한글로 풀어 쓰고 whisper는 아라비아 숫자를 내서 그 표기 차이가 앵커 쪽 오류로 센다. whisper-ko-ft가 정한 숫자 발화 142개(whisper-small 또는 turbo 가설에 아라비아 숫자가 든 발화)를 빼면 turbo 제로샷 3.29 %, 이 모델 3.69 %(같은 발화 짝 차 +0.39포인트, 95 % −0.39 ~ +1.25)로, 숫자 표기가 걸리지 않는 발화에서는 제로샷과의 차이가 0과 구별되지 않는다. H7.1 판정(등록 지표의 점추정)과 앵커 값은 그대로다. 방법·민감도는 `docs/experiments.md` 7단계 결과
+- 스트리밍 서비스(dev 측정, 6단계 구성: eager step·rule2 1.2 s·1-pass 확정 자막): 실제 캐시 스트리밍 CER은 simulated와 0.03포인트 안, 패킷 송신 → 부분 자막 p50 62 ms(로컬, 청크를 모으는 시간 제외), 끝점 확정 EP50 1.3 s, 청크당 계산 p50 62 ms(GPU) / 44 ms(CPU 1스레드), 10분 길이 오디오에서 계산 시간·메모리 증가 없음. GPU 계산 p90 ≤ 50 ms 가설(H6.2)은 미충족(63 ms; 연산 수가 많아 커널 실행 호출이 병목인 것으로 보임)
+- 7단계 뒤 후속 측정(dev 전용, 사전 등록, 다른 프로그램이 GPU를 쓰던 부하 조건)으로 서비스 기본값을 바꿨다: 끝점 뒤 같은 모델의 전체 문맥 2차 패스가 확정 자막 CER을 dev_mix 26.86 → 22.85 %, dev_H 18.75 → 16.01 %로 낮췄고(발화마다 세션을 새로 열고 발화 뒤 잡음 3 s를 붙인 조건, 2차 패스 GPU p90 55 ms), 캐시를 유지한 채 끝점 묵음을 0.8 s로 줄여 EP50 0.9 s, 기존 경로와 비트 단위로 같은 출력을 내는 CUDA Graph step으로 GPU 청크 계산 p90 72.5 → 43.0 ms(캐시가 찬 정상 상태 8.5 ms). 봉인 test로는 확인하지 않은 수치이고 봉인 수치는 위 표 그대로다
+  - 2026-10-29 추가 확인: 지금 서버 기본값(graph step, rule2 0.8 s, 2차 패스 확정 자막, 끝점 뒤 캐시 유지)으로 서버를 띄운 실시간 종단 지연과 10분 드리프트, 연속 음성(발화를 짧은 잡음 간격으로 이은 스트림)에서의 2차 패스 이득은 아직 재지 않았다. 측정 규칙은 `docs/experiments.md` 규칙 변경 27로 먼저 등록했고, 결과가 나오면 여기와 서비스 절에 덧붙인다. 위 두 줄의 수치와 판정은 그대로다
+  - 2026-11-02 측정(dev, 쉬는 상태 측정; `docs/experiments.md` "서버 기본값의 종단·드리프트·연속 음성 측정" 절 '결과'): 지금 서버 기본값의 실시간 종단은 dev_H 50발화에서 패킷 송신 → 부분 자막 p50 40 / p90 44 ms, 마지막 오디오 → 확정 자막 p50 242 / p90 377 ms(2차 패스 계산 p50 47 ms 포함), 텍스트 유효성 50/50(확정 이벤트의 `stream_text` = simulated 가설, 확정 텍스트 = 오프라인 재생). 10분 드리프트는 분당 청크 계산 p50 3.3 ms·할당 메모리 263 MB로 일정(피크 339 MB). 연속 음성(발화를 −60 dBFS 잡음 간격으로 이어 약 2분 스트림으로 자른 것)에서도 2차 패스 이득은 세 조건 모두 유지됐다: 스트림 CER_ns 차(2-pass − 1-pass) dev_mix 간격 0.5 s −4.35포인트 [−5.19, −3.65], 1.0 s −4.35 [−4.97, −3.78], dev_H 0.5 s −5.36 [−5.89, −4.85](스트림 단위 정의라 위 발화 단위 수치와 직접 비교하지 않는다). 위 두 줄의 수치와 판정은 그대로다
+- 학습: 공개 데이터 51.8 h, RTX 2080 Ti 한 장, 실험 전체 GPU 약 65 h(단계별 기록의 합, 추정 포함; 최종 모델은 3단계 (a) 100 epoch + 4단계 TrimTail 15 epoch 이어 학습). fp16 수치 발산은 규칙 변경 13(SpecAugment 커리큘럼·QK-norm) 뒤 0회
+
+## 설치
+
+```bash
+uv sync
+```
+
+Python 3.11, PyTorch CUDA 빌드가 설치된다(`pyproject.toml`). 데이터·출력은 `data/`, `outputs/`에 두며 커밋하지 않는다.
+
+## 데이터 준비 (0단계)
+
+```bash
+uv run python scripts/download_data.py
+uv run python scripts/inventory_data.py
+uv run python scripts/prepare_data.py
+uv run python scripts/compute_mel_stats.py
+```
+
+`manifests/`에 분할 매니페스트·어휘·mel 통계가, `data/pcm/`에 16 kHz int16 오디오 저장소가 생긴다. 요약은 `reports/stage0/data_summary.md`.
+
+## 테스트·린트
+
+```bash
+uv run pytest -q
+uv run ruff format src scripts tests && uv run ruff check src scripts tests
+```
+
+테스트는 0단계 게이트(미래 누출 없음, 캐시 스트리밍 == 오프라인 fp32 1e-5 / fp16 1e-2, CTC 입력 fp32, 과적합), 서비스 경로, 4단계 지연 계산 도우미, 7단계 봉인 test 보호 장치(한 번만 실행·재개 조건·잠금), 후속 옵션(빠른 step 경로가 eager와 비트 단위로 같음, 2차 패스 = 세그먼트의 전체 문맥 디코딩), 긴 세션의 RoPE 위치 재기준(임계 미만 스트림은 비트 단위로 그대로, 재기준해도 세 step 경로가 비트 단위로 같고 0에서 시작한 스트림과 1e-4 안, 반복 재기준 뒤에도 청크 격자·좌측 문맥 유지), 체크포인트 원자적 저장(임시 파일에 다 쓴 뒤 바꿔 넣으므로 저장 중 오류·중단에도 이전 `last.pt`가 바이트 단위로 그대로), 서버 상태 보고(`/info`의 어휘 SHA-256·스레드 수·CUDA Graph 캡처 상태, 캡처 실패 시 fast 폴백과 경고, 어휘 크기 검사, CPU 장치의 기본 1스레드, `--step-path`·`--final-pass`가 세션에 실제로 전달됨), 측정 도구(2차 패스를 켠 서버의 확정 이벤트에만 `stream_text`가 붙음, 클라이언트 요약이 기록의 서버 설정에 따라 텍스트 비교를 고르고 판별할 수 없으면 null, `--replay-check`의 오프라인 재생이 서버 경로와 같은 확정 기록을 냄, 커밋된 6단계 클라이언트 기록을 다시 요약해도 기록 값이 그대로, 연속 음성 스트림 구성과 `continuous` 명령, drift의 새 인자 기본값이 6단계 동작), 봉인 test 사후 분석(군집이 발화이면 군집 부트스트랩이 등록 부트스트랩과 비트 단위로 같음, 저장된 보고서 재현, whisper 앵커와 짝지을 때 결합이 일대일이고 정답이 같아야 함; 실데이터가 필요한 재현 확인은 `data/raw`와 whisper-ko-ft 체크아웃이 없으면 건너뜀), 브라우저 자막 페이지 스크립트의 연결·오디오 수명 관리(`tests/web_page_harness.js`가 Node.js vm의 가짜 DOM·WebSocket·Web Audio·가상 타이머로 `web/index.html`의 스크립트를 돌림: 멈춤 직후 재시작, 시작 실패, 마이크 트랙 정지, 16 kHz가 아닐 때 전송 안 함, endpoint 처리; `node`가 없으면 건너뜀), 데이터 내려받기(조회한 커밋 sha 그대로 받고, 게이트가 있는 저장소나 sha가 없는 조회 결과에서는 받기 전에 멈춤; 네트워크 없이 가짜 Hub로), 확정 자막 후속 아이디어의 측정 도구(측정 전 등록, `docs/experiments.md` 규칙 변경 28~30)인 어절 신뢰도(토큰 구간이 greedy 축약과 같음, 점수·어절 정렬 라벨·AUROC·ECE·Platt 보정이 정의대로, 2차 패스 덤프 세션의 이벤트가 서비스 세션과 같음, 절반 A에서 고르고 절반 B에서 판정, 덤프가 기록된 확정 가설을 재현하지 않으면 판정 없이 멈춤; 서버 옵션 `--word-confidence`의 확률이 덤프 통계로 계산한 측정 정의와 같고 켰을 때만 final에 붙으며, 페이지 밑줄은 그 옵션을 알리는 서버에서 고른 뒤에만), 핫워드 편향(목록이 비면 greedy와 비트 단위로 같음, 2위 후보인 목록 어절이 보너스로 1위가 됨, 끊긴 부분 일치의 보너스 회수, 결정성, 가지치기 없는 빔이 모든 정렬 경로를 펼친 계산과 같음, 실시간 디코딩이 덤프 배열로 한 디코딩과 같음, 평가·지연 측정이 끝까지 돎; 서버 옵션 `--hotwords`를 켠 세션의 확정 자막이 측정 경로와 같은 편향 디코딩이고 켜지 않으면 greedy 그대로, 메시지 형식·`/info`는 그대로, 2차 패스 없이나 `--word-confidence`와 함께는 켜지지 않음), 숫자 역정규화(등록 표의 변환과 오탐 방지, 결정성·두 번 적용해도 같음, 평가 세트의 학습 겹침 제외, parquet에서 꺼낸 PCM이 원본 표본과 같음, 작은 무작위 모델로 디코딩부터 채점·판정까지; 서버 옵션 `--itn`은 켰을 때만 final에 `display_text`를 붙이고 페이지가 그것을 확정 자막으로 보임)를 확인한다. CUDA가 없으면 fp16·CUDA Graph 테스트는 건너뛴다. GitHub Actions(`.github/workflows/ci.yml`)가 push마다 CPU에서 ruff와 pytest를 돈다. 2026-11-07 추가: 같은 워크플로의 audit 작업(2026-11-05부터)이 `uv.lock`의 모든 패키지(모든 그룹·플랫폼·파이썬 갈래, 같은 이름의 둘째 판 포함)를 pip-audit로 공개 권고와 대조하고, `docs/security.md`에 이유를 적어 받아들인 세 권고 밖의 권고가 하나라도 나오면 코드와 상관없이 CI가 실패한다(차단 게이트).
+
+## 학습·평가
+
+```bash
+uv run python scripts/bench_stage0.py --durations 200,300,400,600
+uv run python scripts/stage1_sweep.py --epochs 5 --lrs 1e-3,2e-3 --seeds 1,2,3 --schedule-steps 69700
+uv run python -m stt_scratch.train --run outputs/stage2/runA --epochs 100 --lr 2e-3 --seed 1 --cuda-memory-fraction 0.8
+uv run python scripts/average_checkpoints.py --run outputs/stage2/runA --k 10 --out outputs/stage2/runA/avg10.pt
+uv run python scripts/stage2_report.py --checkpoint outputs/stage2/runA/avg10.pt --name runA-avg10
+uv run python scripts/compare_runs.py --a reports/stage2/hyps/runA-avg10-dev_mix-full.jsonl --b reports/stage2/hyps/runB-lr1e-3-avg10-dev_mix-full.jsonl --name H2.1-dev_mix
+uv run python scripts/stage3.py --arms a,b,c,d --budget-hours 45
+uv run python scripts/stage4.py --start runA
+uv run python scripts/stage6.py grid --checkpoint outputs/stage4/trimtail/avg10.pt   # also h61, session, drift
+uv run python scripts/training_summary.py   # fp16 stability and GPU time of every run (final report)
+uv run python scripts/sealed_breakdown.py --anchor-report ../whisper-ko-ft/reports/whisper-large-v3-turbo/zeroth-test.json --digit-list ../whisper-ko-ft/reports/digit_utterances/zeroth-test.json
+uv run python scripts/cluster_ci.py
+uv run python -m stt_scratch.evaluate --checkpoint outputs/stage2/runA/avg10.pt --manifest dev_mix --chunk 8 --left 128 --streaming
+uv run python scripts/followup.py gate   # after Stage 7, dev only: gate, timing, exit6, session, final-cpu, summary, continuous
+uv run python scripts/final_pass_dump.py --manifests dev_mix,dev_h   # rule change 28, dev only: final-pass dump (GPU)
+uv run python scripts/confidence_eval.py   # word confidence of the final captions, from the dump (CPU)
+uv run python scripts/bias_eval.py --latency --device cuda   # rule change 29: hotword biasing latency; without --latency it evaluates on the dump
+uv run python scripts/itn_eval.py --decode --score   # rule change 30: number display ITN
+```
+
+`train.py`는 매 epoch `epochs.jsonl`에 dev CER과 dev CTC 손실을, `train.jsonl`에 손실·LR·GradScaler scale·GPU 메모리를 남기고 체크포인트를 저장한다. 발산 판정, 재개(`--resume`, 처방 대조), SpecAugment 커리큘럼(epoch 3부터), QK-norm은 `docs/experiments.md` "fp16 규칙"과 "규칙 변경"에 있다. Windows에서는 PyTorch 할당기 조각이 커져 GPU 메모리가 넘치지 않도록 `PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.8,max_split_size_mb:256`과 `--cuda-memory-fraction 0.8`을 함께 쓴다.
+
+4단계 지연 측정의 기준 정렬은 Montreal Forced Aligner 3.4.3 + `korean_mfa` 3.0으로 만든다(`scripts/export_mfa_corpus.py`로 내보낸 뒤 `mfa align ... --g2p_model_path korean_mfa --single_speaker --output_format csv`; 한국어 토큰화에 `python-mecab-ko` 필요). 7단계 봉인 test(`scripts/stage7.py`)는 확인 플래그를 요구하고 한 번만 실행된다. 봉인 test 사후 분석(저장된 가설만 읽음, 새 디코딩 없음)은 `scripts/sealed_breakdown.py`(학습 문장 여부 분할; whisper-ko-ft 발화별 보고서와 숫자 발화 목록을 주면 앵커 숫자 표기 분석도 하며, 행 번호 id를 원래 id로 잇는 데 `data/raw`의 Zeroth parquet가 필요)와 `scripts/cluster_ci.py`(문장·화자 군집 부트스트랩 보조 구간)다.
+
+확정 자막 후속 아이디어 세 가지(어절 신뢰도, 핫워드 문맥 편향, 숫자 표시 역정규화)는 2026-10-29에 측정 규칙(`docs/experiments.md` 규칙 변경 28~30)과 도구만 등록했고 아직 재지 않았다. `scripts/final_pass_dump.py`가 끝점 뒤 2차 패스의 프레임별 log-prob 통계를 `outputs/`에 남기면 `scripts/confidence_eval.py`(어절 신뢰도)와 `scripts/bias_eval.py`(핫워드 편향; `--latency`는 2차 패스 지연)가 그것을 다시 읽고, `scripts/itn_eval.py`는 학습에서 뺀 FLEURS 숫자 발화를 디코딩해(`--decode`) 역정규화 전후를 채점한다(`--score`). 셋 다 서비스에는 연결하지 않았고, 결과가 나와도 서버 기본값은 그대로다(채택되면 옵션으로만 더한다). 2026-11-01 추가: 어절 신뢰도(dev)와 숫자 표시 역정규화(학습에서 뺀 FLEURS 숫자 발화와 dev)를 재어 둘 다 채택됐고(결과는 `docs/experiments.md` 각 절의 '결과'), 서버 옵션 `--word-confidence`와 `--itn`(둘 다 기본 끔)으로 더했다(아래 스트리밍 서비스 절). 2026-11-02 추가: 핫워드 문맥 편향도 재어 채택됐고(`docs/experiments.md` "확정 자막 핫워드 문맥 편향" 절 '결과'; 목록을 정답의 희귀 어절로 만든 평가라 실제 사용자 목록보다 낙관적), 서버 옵션 `--hotwords`(기본 끔)로 더했다.
+
+## 스트리밍 서비스 (6단계)
+
+```bash
+uv run python -m stt_scratch.service.server
+```
+
+기본값은 6단계에서 정한 구성에 7단계 뒤 후속 측정(`docs/experiments.md` "7단계 뒤 후속 측정", 규칙 변경 26)의 판정을 더한 것이다: 최종 모델 `outputs/stage4/trimtail/avg10.pt`(12층), 320 ms 청크, 좌측 문맥 128프레임(5.12 s), GPU fp16 autocast, 토큰 뒤 묵음 0.8 s 끝점, 끝점 뒤 인코더 캐시 유지, 끝점에서 세그먼트를 같은 모델의 전체 문맥으로 다시 디코딩한 확정 자막(`--final-pass full`; `none`이면 6단계까지의 1-pass), 인코더 step 경로 `--step-path auto`(GPU는 정상 상태 step을 CUDA Graph로 재생하는 graph, CPU는 연산 수를 줄인 fast; 둘 다 6·7단계에 쓴 eager 경로와 출력이 비트 단위로 같음을 dev_H 전수로 확인). 시작할 때 부분 청크 길이·2차 패스 길이 묶음마다 한 번씩 예열하고 CUDA Graph를 캡처한다. 캡처가 실패하면 경고를 남기고 이후 세션의 step 경로를 fast로 바꾼다(출력은 같고 청크당 계산만 느려진다). `/info`는 설정과 함께 상태를 준다: 체크포인트와 어휘 파일(`manifests/vocab.json`)의 SHA-256, 실제 step 경로와 CUDA Graph 캡처 상태(`graph_captured`·`graph_failed`), torch 연산 스레드 수(`cpu_threads`), 프레임·세션 상한. 어휘 파일의 토큰 수가 체크포인트의 출력 크기와 다르면 서버와 `stt_scratch.evaluate`·`scripts/followup.py`·`scripts/stage6.py`는 시작하지 않는다. CPU 장치에서는 torch 연산 스레드를 기본 1로 둔다(`--threads`로 바꿀 수 있음; 아래 CPU 수치를 잰 조건과 같다). 보안 점검(OWASP ZAP·bandit·pip-audit·gitleaks, 결과와 고친 것)은 `docs/security.md`. 브라우저에서 `http://127.0.0.1:8765/`를 열면 마이크 입력을 320 ms마다 보내고 부분 자막(320 ms 스트리밍, 덧붙기만 함)과 끝점으로 확정된 세그먼트(2차 패스 결과가 부분 자막을 대체)를 보여 준다. 프로토콜은 `src/stt_scratch/service/server.py` 머리말에 있다(2차 패스를 켜면 final·endpoint 이벤트에 2차 패스 전 320 ms 스트리밍 텍스트 `stream_text`가 더 붙는다). 인증이 없으므로 로컬 데모용이다.
+
+페이지는 잠정 자막(기울임)과 확정 자막을 구분하고 설정 줄에 2차 패스·step 경로를 보인다. 멈춤을 누르면 남은 음성을 보내고 `flush` 응답(마지막 확정 자막·통계)을 받은 뒤 연결을 닫으며, 멈춤 직후 다시 시작해도 새 연결은 이전 연결과 독립이다(이전 연결의 확정 자막은 그대로 붙는다). 시작 실패(마이크 권한 거부, 비보안 출처, 16 kHz가 아닌 AudioContext)와 연결 실패·끊김(서버의 오류 줄·종료 코드)은 상태 줄에 사유를 보이고 시작 버튼을 되살린다. 페이지 스크립트는 `tests/test_web_page.py`가 Node.js의 가짜 브라우저 환경에서 확인하지만 실제 브라우저와 다를 수 있으므로, 페이지를 고치면 브라우저에서 직접 본다: 멈춤 직후 다시 시작해도 '듣는 중'이 유지되고 이전 세그먼트의 확정 자막이 들어오는지, 마이크 권한을 거부하면 상태 줄에 사유가 뜨고 시작 버튼이 돌아오는지, 멈춘 뒤 브라우저 탭의 마이크 사용 표시가 꺼지는지. 다른 PC에서 접속하게 하려면 `--host <IP>`로 열고(인증이 없어 시작 경고가 남는다) 클라이언트가 주소창에 쓰는 이름·IP를 `--allowed-host`로 Host 허용 목록에 더한다(기본 목록은 `127.0.0.1`·`localhost`·`[::1]`과 `--host` 값이고, 목록 밖의 Host로 온 요청은 400). 다만 브라우저는 마이크 API를 보안 출처(https 또는 localhost)에서만 열어 주므로 http로 접속한 다른 PC에서는 페이지가 '이 출처에서는 마이크를 쓸 수 없습니다'를 보인다.
+
+6단계 측정(dev, `docs/experiments.md` "6단계 결과"): 실제 캐시 스트리밍 CER은 simulated와 0.03포인트 안, 청크당 계산 p50 약 62 ms(GPU) / 44 ms(CPU 1스레드), 패킷 송신 → 부분 자막 p50 62 ms(로컬, 청크를 모으는 시간 제외), 끝점 확정 EP50 1.3 s, 10분 길이 오디오를 한 세션으로 처리했을 때(실시간이 아니라 약 2분에 처리) 청크 계산 시간·메모리 증가 없음.
+
+후속 측정(dev, 2026-10-18, 다른 프로그램이 GPU 3D 엔진을 약 40~49 % 쓰던 부하 조건; `reports/followup/summary.md`): 세션(발화 뒤 잡음 3 s, 캐시 유지, rule2 0.8 s)의 확정 자막 CER_ns는 1-pass 대비 dev_mix 26.86 → 22.85 %(−4.02, 95 % −4.55 ~ −3.50), dev_H 18.75 → 16.01 %, 2차 패스 계산 GPU p50/p90 50 / 55 ms·CPU 1스레드 123 / 195 ms, EP50/EP90 905 / 1,065 ms(1.2 s일 때 1,295 / 1,465 ms). 확정 자막은 텍스트가 있는 세그먼트의 약 96 %에서 부분 자막과 다르다(부분 자막을 고쳐 씀). 청크당 계산 p50/p90은 GPU eager 64.7 / 72.5 ms → graph 38.1 / 43.0 ms(정상 상태 7.9 / 8.5 ms), CPU 1스레드 eager 46.8 / 51.3 → fast 40.3 / 44.4 ms. 6층 조기 종료는 보고만 했다(dev_mix 차이 없음, dev_H 14.5 % vs 18.8 %; 서비스는 봉인 test로 잰 12층 그대로).
+
+2026-10-24 추가 확인: 위 두 문단의 CPU 수치는 모두 torch 연산 1스레드에서 잰 값이다(측정 도구가 `torch.set_num_threads(1)`로 고정; 서버도 CPU 장치에서는 기본 1스레드로 돌며 `--threads`로 바꿀 수 있고 실제 값은 `/info`의 `cpu_threads`에 있다). CPU 2차 패스 시간(p50/p90 123 / 195 ms)은 dev_mix 앞 50발화(모두 Common Voice 22 dev, 최대 7 s)의 세션에서 잰 값이라 FLEURS처럼 긴 발화(최대 약 30 s)나 rule3 상한 20 s 세그먼트의 2차 패스 시간은 포함하지 않는다. 수치와 판정은 그대로다.
+
+2026-11-01 추가: 확정 자막의 어절 신뢰도가 dev 측정(`docs/experiments.md` "확정 자막 어절 신뢰도" 결과: dev_mix 한글 전용 절반 B에서 오류 어절 검출 AUROC 0.882, ECE 0.045, ECE는 점추정으로만 충족)에서 채택돼 서버 옵션 `--word-confidence`(기본 끔, `--final-pass full` 필요)로 더했다. 켜면 final 이벤트에 `words`(확정 텍스트 어절마다 `{w, conf}`, conf = 그 어절이 맞았을 확률의 Platt 보정 추정)와 그 계산 시간 `confidence_ms`가 붙고, 페이지는 그런 서버에서만 '신뢰도 낮은 어절에 밑줄' 선택을 보인다(처음엔 꺼짐; 켜면 그 뒤 확정 자막에서 conf 0.5 미만 어절에 물결 밑줄). 보정은 GPU fp16 2차 패스의 덤프로 맞췄고, 이 모델은 그 dev 세트에서 어절의 46 %가 틀려(띄어쓰기 오류 포함) 밑줄이 어절의 절반 남짓에 그어진다. 숫자 표시 역정규화도 측정(`docs/experiments.md` "숫자 역정규화(ITN)" 결과: 숫자를 숫자로 적은 정답의 CER_ns(전체)가 학습에서 뺀 FLEURS 숫자 발화 −6.48포인트, dev_mix 숫자 절반 B −6.82포인트, 정답에 수 표현이 없는 발화의 오탐 변경률 0.99 %·0.52 %)에서 채택돼 서버 옵션 `--itn`(기본 끔)으로 더했다. 켜면 final 이벤트에 `display_text`(확정 텍스트의 한글 수 표현을 아라비아 숫자로 바꾼 표시 문자열, 예: '사십 명' → '40명')가 붙고 페이지는 그것을 확정 자막으로 보인다(`text`는 그대로; 밑줄을 고른 세그먼트는 신뢰도가 붙은 원래 어절로 그린다). 숫자를 한글로 적는 표기(Zeroth·Common Voice 정답)와는 어긋나 그 dev 세트의 한글 전용 CER_ns가 오르므로(dev_H +2.81포인트) 기본으로 켜지 않는다. 서버 기본값과 기본 화면은 그대로다. 2026-11-07 추가 확인: 서버는 끝점으로 닫힌 final 세그먼트마다 `display_text`를 따로 만들므로 세그먼트 경계(0.8 s 묵음, 20 s 상한)에 걸친 수 표현은 나뉘어 바뀔 수 있다(예: '천 구백 칠십 팔 년'이 '천 구백'·'칠십 팔 년'으로 나뉘면 '1900'·'78년'); 위 측정은 발화 단위 가설에 건 값이다.
+
+2026-11-02 추가: 지금 서버 기본값(graph step·rule2 0.8 s·2차 패스 full·끝점 뒤 캐시 유지)으로 서버를 띄운 종단·드리프트·연속 음성 측정(dev, 쉬는 상태 측정, 규칙 변경 27; `docs/experiments.md` "서버 기본값의 종단·드리프트·연속 음성 측정" 절 '결과', `reports/stage6/client-dev_h-defaults-summary.json`·`drift-defaults.json`·`reports/followup/continuous.json`). 종단(dev_H 앞 50발화 실시간 송신): 부분 자막 지연 p50 39.9 / p90 43.9 ms, 첫 부분 자막 p50 0.71 s, 마지막 오디오 → 확정 자막 p50 242 / p90 377 ms(클라이언트 대기 p50 152 ms와 2차 패스 포함), flush 왕복 p50 88 / p90 118 ms, 서버 청크 계산 p50/p90의 발화 간 중앙값 38.1 / 39.6 ms, 2차 패스 계산 p50 47.3 / p90 59.1 ms; 확정 이벤트의 `stream_text` 이음은 simulated 가설과 50/50, 확정 텍스트는 오프라인 재생과 50/50 같았다(서비스 경로 유효성 조건 충족). 10분 드리프트(한 세션, 실시간 아님): 분당 청크 계산 p50 3.26 ms로 일정, 할당 메모리 263.5 → 263.1 MB, 피크 338.6 MB, 닫힌 세그먼트 64개(rule2 60·rule3 4), 세그먼트별 2차 패스 p50 48.0 / p90 50.5 ms. 연속 음성(발화를 −60 dBFS 잡음 간격으로 이어 약 2분 스트림으로 자른 것, 스트림 단위 CER_ns): 2-pass − 1-pass가 dev_mix 간격 0.5 s 27.05 → 22.70 %(−4.35포인트, 95 % −5.19 ~ −3.65), 간격 1.0 s 27.34 → 22.99 %(−4.35, −4.97 ~ −3.78), dev_H 간격 0.5 s 21.17 → 15.81 %(−5.36, −5.89 ~ −4.85)로 세 조건 모두 등록한 표현 규칙의 "연속 음성에서도 이득 유지"에 들었다(rule3 20 s 절단은 텍스트 세그먼트의 0 %·0 %·0.62 %). 위 문단들의 수치와 판정, 서버 기본값은 그대로다.
+
+2026-11-02 추가(핫워드): 확정 자막의 핫워드 문맥 편향이 dev 측정(`docs/experiments.md` "확정 자막 핫워드 문맥 편향" 결과: dev_mix 한글 전용 절반 B에서 희귀 어절 정확 일치율 29.1 → 67.4 %(+38.2포인트, 95 % +35.3 ~ +41.0), CER_ns 22.40 → 15.61 %, dev_H 16.02 → 9.82 %, 2차 패스 p90 GPU 57 ms·CPU 1스레드 158 ms)에서 채택돼 서버 옵션 `--hotwords FILE`(기본 끔, `--final-pass full` 필요, `--word-confidence`와 함께 못 씀)로 더했다. 그 측정은 목록을 정답의 희귀 어절 + 다른 발화의 희귀 어절(방해 어절)로 만든 문맥 편향 평가의 관행이라 실제 사용자 목록보다 낙관적이고, 방해 어절만 받은 발화에서는 CER_ns가 조금 올랐다(절반 B 9발화 +0.65포인트). 파일은 UTF-8 텍스트로 한 줄에 어절(고유명사·전문어, 조사 포함 가능) 하나이고 빈 줄과 `#` 주석 줄은 무시한다. 켜면 모든 연결의 2차 패스가 greedy 대신 그 목록으로 편향한 top-k CTC prefix beam(음절당 보너스 4 nats, beam 8, top-k 10 = 측정에서 고른 구성)으로 확정 자막을 내고, 어휘에 없는 음절이 든 어절은 빼며(시작 로그에 개수), 쓸 수 있는 어절이 없으면 greedy 그대로다. 부분 자막·메시지 형식·`/info`는 바뀌지 않는다(연결별 목록을 받는 WebSocket 메시지와 `/info` 표기는 등록대로 두지 않았고 공개 여부는 사용자 결정). 서버 기본값은 greedy 그대로다.
+
+실시간 클라이언트로 지연을 재려면:
+
+```bash
+uv run python scripts/stream_client.py --manifest dev_h --limit 50 --name client-dev_h-mine --replay-check   # server running
+uv run python scripts/stream_client.py --summarize --name client-dev_h-mine
+```
+
+요약은 기록에 남은 서버 설정(`-meta.json`의 `server_info.final_pass`)에 따라 텍스트를 비교한다. 서버 기본값(`--final-pass full`)에서는 확정 텍스트가 2차 패스 결과라 simulated 가설과 다르므로, 서비스 경로의 텍스트 일치는 확정 이벤트의 `stream_text` 이음으로 본다(`same_stream_text_as_simulated`: 공백 포함·공백 무시 두 수; rule2 0.8 s에서는 세그먼트 이음 자리의 공백만 다를 수 있다). 확정 텍스트는 `--replay-check`(송신이 끝난 뒤 같은 PC에서 `/info`와 같은 모델·설정의 세션에 같은 패킷을 재생한 기대 결과, `-replay.jsonl`)와 비교한다(`same_final_text_as_replay`). 6단계처럼 확정 텍스트 자체를 simulated 가설과 맞춰 보려면 `--final-pass none`으로 띄운 서버에서 잰다. 서버 설정을 알 수 없는 기록(`-meta.json` 없음)이면 텍스트 비교는 null이고 경고가 남는다.
+
+## 구조
+
+```
+src/stt_scratch/   text(정규화·어휘), metrics(CER·발화·군집 부트스트랩), data(매니페스트·PCM 저장소·배치),
+                   model/(features, subsampling, attention, conv, conformer, ctc, decode, streaming),
+                   train, evaluate, service/(endpoint, session, server),
+                   confidence(어절 신뢰도), biasing(핫워드 편향 prefix beam), itn(숫자 표시 역정규화)
+scripts/           데이터 내려받기·재고·준비, mel 통계, 벤치, 단계별 실행기(stage1~7), 체크포인트 평균,
+                   스트리밍 클라이언트, 진단(diag_*), 학습 요약, 7단계 뒤 후속 측정(followup),
+                   봉인 test 사후 분석(sealed_breakdown, cluster_ci),
+                   확정 자막 후속 아이디어 측정(final_pass_dump, confidence_eval, bias_eval, itn_eval)
+tests/             게이트 테스트(test_model), 전처리(test_prepare_data), 서비스(test_service),
+                   4단계 지연 도우미(test_latency), 봉인 test 보호 장치(test_stage7_guards),
+                   빠른 step 경로·조기 종료·위치 재기준(test_fast_streaming), 끝점 뒤 2차 패스(test_final_pass),
+                   체크포인트 원자적 저장(test_train_io), 사후 분석(test_sealed_breakdown, test_cluster_bootstrap),
+                   측정 도구(test_stream_client, test_followup_continuous), 데이터 내려받기(test_download_data),
+                   어절 신뢰도(test_confidence), 핫워드 편향(test_biasing), 숫자 역정규화(test_itn),
+                   브라우저 페이지 스크립트(test_web_page + Node.js 하네스 web_page_harness.js)
+docs/              survey/(조사·결정), experiments.md(규칙·결과), plan.md, data.md, ai-verification.md, security.md
+manifests/         분할 매니페스트, 어휘, mel 통계 (커밋)
+reports/           단계별 측정 결과 (커밋)
+web/               브라우저 자막 페이지
+```

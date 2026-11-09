@@ -1,0 +1,10 @@
+AGENTS.md
+CLAUDE.md
+HANDOFF.md
+TASKS.md
+/data/
+/outputs/
+/work/
+.venv/
+__pycache__/
+.pytest-tmp/

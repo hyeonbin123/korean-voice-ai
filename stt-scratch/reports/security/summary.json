@@ -1,0 +1,460 @@
+{
+ "date": "2026-10-14",
+ "tools": {
+  "OWASP ZAP": "2.17.0 (zaproxy/zap-stable, zap-baseline.py + zap-api-scan.py -f openapi)",
+  "bandit": "1.9.4",
+  "pip-audit": "2.10.1",
+  "gitleaks": "8.30.1"
+ },
+ "bandit_before": {
+  "totals": {
+   "SEVERITY.HIGH": 0,
+   "SEVERITY.LOW": 21,
+   "SEVERITY.MEDIUM": 1,
+   "SEVERITY.UNDEFINED": 0
+  },
+  "by_test": {
+   "B101 LOW": 5,
+   "B311 LOW": 5,
+   "B404 LOW": 4,
+   "B603 LOW": 5,
+   "B607 LOW": 2,
+   "B310 MEDIUM": 1
+  }
+ },
+ "bandit_after": {
+  "totals": {
+   "SEVERITY.HIGH": 0,
+   "SEVERITY.LOW": 21,
+   "SEVERITY.MEDIUM": 0,
+   "SEVERITY.UNDEFINED": 0
+  },
+  "by_test": {
+   "B101 LOW": 5,
+   "B311 LOW": 5,
+   "B404 LOW": 4,
+   "B603 LOW": 5,
+   "B607 LOW": 2
+  }
+ },
+ "pip_audit": {
+  "packages_audited": 69,
+  "vulnerable": [
+   {
+    "name": "setuptools",
+    "version": "81.0.0",
+    "vulns": [
+     {
+      "id": "PYSEC-2026-3447",
+      "aliases": [
+       "GHSA-h35f-9h28-mq5c",
+       "BIT-setuptools-2026-59890",
+       "CVE-2026-59890"
+      ],
+      "fix": [
+       "83.0.0"
+      ]
+     },
+     {
+      "id": "PYSEC-2026-3447",
+      "aliases": [
+       "GHSA-h35f-9h28-mq5c",
+       "CVE-2026-59890",
+       "BIT-setuptools-2026-59890"
+      ],
+      "fix": [
+       "83.0.0"
+      ]
+     }
+    ]
+   }
+  ],
+  "torch_by_pypi_version": [
+   {
+    "name": "torch",
+    "version": "2.11.0",
+    "id": "PYSEC-2025-194",
+    "aliases": [
+     "CVE-2025-3000",
+     "GHSA-rrmf-rvhw-rf47"
+    ],
+    "fix": [
+     "2.13.0"
+    ]
+   }
+  ]
+ },
+ "gitleaks": {
+  "commits_scanned": 51,
+  "leaks": 0
+ },
+ "zap_baseline": [
+  {
+   "alert": "Content Security Policy (CSP) Header Not Set",
+   "risk": "Medium (High)",
+   "count": 1
+  },
+  {
+   "alert": "Missing Anti-clickjacking Header",
+   "risk": "Medium (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Cross-Origin-Embedder-Policy Header Missing or Invalid",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Cross-Origin-Opener-Policy Header Missing or Invalid",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Cross-Origin-Resource-Policy Header Missing or Invalid",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Permissions Policy Header Not Set",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "X-Content-Type-Options Header Missing",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Modern Web Application",
+   "risk": "Informational (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Storable and Cacheable Content",
+   "risk": "Informational (Medium)",
+   "count": 3
+  }
+ ],
+ "zap_baseline2": [
+  {
+   "alert": "Modern Web Application",
+   "risk": "Informational (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Non-Storable Content",
+   "risk": "Informational (Medium)",
+   "count": 3
+  }
+ ],
+ "zap_api": [
+  {
+   "alert": "Content Security Policy (CSP) Header Not Set",
+   "risk": "Medium (High)",
+   "count": 1
+  },
+  {
+   "alert": "Missing Anti-clickjacking Header",
+   "risk": "Medium (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Cross-Origin-Embedder-Policy Header Missing or Invalid",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Cross-Origin-Opener-Policy Header Missing or Invalid",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Cross-Origin-Resource-Policy Header Missing or Invalid",
+   "risk": "Low (Medium)",
+   "count": 3
+  },
+  {
+   "alert": "Permissions Policy Header Not Set",
+   "risk": "Low (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Unexpected Content-Type was returned",
+   "risk": "Low (High)",
+   "count": 2
+  },
+  {
+   "alert": "X-Content-Type-Options Header Missing",
+   "risk": "Low (Medium)",
+   "count": 3
+  },
+  {
+   "alert": "A Client Error response code was returned by the server",
+   "risk": "Informational (High)",
+   "count": 9
+  },
+  {
+   "alert": "Modern Web Application",
+   "risk": "Informational (Medium)",
+   "count": 1
+  },
+  {
+   "alert": "Storable and Cacheable Content",
+   "risk": "Informational (Medium)",
+   "count": 3
+  }
+ ],
+ "zap_api3": [
+  {
+   "alert": "Unexpected Content-Type was returned",
+   "risk": "Low (High)",
+   "count": 2
+  },
+  {
+   "alert": "A Client Error response code was returned by the server",
+   "risk": "Informational (High)",
+   "count": 9
+  },
+  {
+   "alert": "Non-Storable Content",
+   "risk": "Informational (Medium)",
+   "count": 2
+  }
+ ],
+ "recheck_2026_10_18": {
+  "reason": "service defaults changed after the post-Stage-7 follow-up (rule change 26): step path auto (GPU graph, CPU fast), endpoint second pass, rule2 0.8 s",
+  "server_info": {
+   "step_path": "graph",
+   "final_pass": "full",
+   "rule2_s": 0.8,
+   "device": "cuda",
+   "warm_up_s": 18.13
+  },
+  "zap": {
+   "baseline": [
+    {
+     "alert": "Modern Web Application",
+     "risk": "Informational (Medium)",
+     "count": 1
+    },
+    {
+     "alert": "Non-Storable Content",
+     "risk": "Informational (Medium)",
+     "count": 3
+    }
+   ],
+   "api": [
+    {
+     "alert": "Unexpected Content-Type was returned",
+     "risk": "Low (High)",
+     "count": 2
+    },
+    {
+     "alert": "A Client Error response code was returned by the server",
+     "risk": "Informational (High)",
+     "count": 9
+    },
+    {
+     "alert": "Non-Storable Content",
+     "risk": "Informational (Medium)",
+     "count": 2
+    }
+   ]
+  },
+  "bandit": {
+   "high": 0,
+   "medium": 0,
+   "low": 36,
+   "by_test": {
+    "B101 LOW": 5,
+    "B105 LOW": 4,
+    "B106 LOW": 3,
+    "B107 LOW": 2,
+    "B311 LOW": 5,
+    "B404 LOW": 5,
+    "B603 LOW": 8,
+    "B607 LOW": 4
+   }
+  },
+  "pip_audit": {
+   "packages_exported": 73,
+   "vulnerable": [
+    "setuptools 81.0.0 PYSEC-2026-3447 (fix 83.0.0)",
+    "torch 2.11.0 PYSEC-2025-194 (fix 2.13.0; audited as the PyPI version)"
+   ]
+  },
+  "gitleaks": {
+   "commits": 59,
+   "leaks": 0
+  }
+ },
+ "recheck_2026_10_29": {
+  "reason": "Host allow list and WebSocket input/resource limits, /info status fields, web page connection lifecycle, stream_text on close events; certifi and filelock lock updates, CI token permissions and action commit pins, commit-pinned data download",
+  "server_args": "--device cpu --allowed-host host.docker.internal --port 8098",
+  "server_info": {
+   "device": "cpu",
+   "precision": "fp32",
+   "step_path": "fast",
+   "final_pass": "full",
+   "rule2_s": 0.8,
+   "cpu_threads": 1,
+   "warm_up_s": 15.19
+  },
+  "zap": {
+   "version": "2.17.0",
+   "baseline": [
+    {
+     "alert": "Modern Web Application",
+     "risk": "Informational (Medium)",
+     "count": 1
+    },
+    {
+     "alert": "Non-Storable Content",
+     "risk": "Informational (Medium)",
+     "count": 3
+    }
+   ],
+   "api": [
+    {
+     "alert": "Unexpected Content-Type was returned",
+     "risk": "Low (High)",
+     "count": 2
+    },
+    {
+     "alert": "A Client Error response code was returned by the server",
+     "risk": "Informational (High)",
+     "count": 9
+    },
+    {
+     "alert": "Non-Storable Content",
+     "risk": "Informational (Medium)",
+     "count": 2
+    }
+   ],
+   "note": "the cloud metadata rule's 7 paths now get 400 from the Host allow list (404 on 2026-10-18); alert kinds and risks are the same as on 2026-10-18"
+  },
+  "bandit": {
+   "high": 0,
+   "medium": 1,
+   "low": 43,
+   "by_test": {
+    "B101 LOW": 5,
+    "B104 MEDIUM": 1,
+    "B105 LOW": 9,
+    "B106 LOW": 3,
+    "B107 LOW": 2,
+    "B311 LOW": 5,
+    "B404 LOW": 6,
+    "B603 LOW": 9,
+    "B607 LOW": 4
+   },
+   "medium_note": "B104 on the WILDCARD_BIND_HOSTS comparison constant in server.py (false positive)"
+  },
+  "pip_audit": {
+   "packages_exported": 73,
+   "before_update": [
+    "certifi 2026.7.22 PYSEC-2026-4320 (fix 2026.10.18, 2026.10.19)",
+    "filelock 4.1.0: 17 advisories, all fixed in 4.2.1 (CVE-2026-112906, CVE-2026-112907, CVE-2026-112908, CVE-2026-112909, CVE-2026-112910, CVE-2026-112911, CVE-2026-112912, CVE-2026-112913, CVE-2026-112914, CVE-2026-112915, CVE-2026-112934, CVE-2026-112935, CVE-2026-112937, CVE-2026-112938, CVE-2026-112939, CVE-2026-112940, CVE-2026-112941)",
+    "setuptools 81.0.0 PYSEC-2026-3447 (fix 83.0.0)",
+    "setuptools 81.0.0 GHSA-xmj3-9gf7-h52w (fix 84.1.0)"
+   ],
+   "updated": {
+    "certifi": "2026.7.22 -> 2026.10.23",
+    "filelock": "4.1.0 -> 4.2.4"
+   },
+   "vulnerable": [
+    "setuptools 81.0.0 PYSEC-2026-3447 (fix 83.0.0)",
+    "setuptools 81.0.0 GHSA-xmj3-9gf7-h52w (fix 84.1.0)",
+    "torch 2.11.0 PYSEC-2025-194 (fix 2.13.0; audited as the PyPI version)"
+   ]
+  },
+  "gitleaks": {
+   "commits": 81,
+   "leaks": 0
+  }
+ },
+ "recheck_2026_11_07": {
+  "reason": "final-caption options --word-confidence, --itn and --hotwords (all off by default) and the start-up log handler for the hotword counts; page HTML (underline choice, display_text / per-word rendering, recomputed CSP hashes) and the /info keys word_confidence and itn; CI audit job added",
+  "server_args": "--device cpu --allowed-host host.docker.internal --port 8098",
+  "server_info": {
+   "device": "cpu",
+   "precision": "fp32",
+   "step_path": "fast",
+   "final_pass": "full",
+   "cpu_threads": 1,
+   "word_confidence": false,
+   "itn": false,
+   "warm_up_s": 11.04,
+   "rule2_s": 0.8
+  },
+  "zap": {
+   "version": "2.17.0",
+   "baseline": [
+    {
+     "alert": "Modern Web Application",
+     "risk": "Informational (Medium)",
+     "count": 1
+    },
+    {
+     "alert": "Non-Storable Content",
+     "risk": "Informational (Medium)",
+     "count": 2
+    }
+   ],
+   "api": [
+    {
+     "alert": "Unexpected Content-Type was returned",
+     "risk": "Low (High)",
+     "count": 2
+    },
+    {
+     "alert": "A Client Error response code was returned by the server",
+     "risk": "Informational (High)",
+     "count": 9
+    },
+    {
+     "alert": "Non-Storable Content",
+     "risk": "Informational (Medium)",
+     "count": 2
+    }
+   ],
+   "note": "alert kinds and risks are the same as on 2026-10-29; only the baseline Non-Storable Content count is 2 instead of 3 (/robots.txt, still answered 404 with no-store, was not counted this time); the cloud metadata rule's 7 paths again get 400 from the Host allow list"
+  },
+  "bandit": {
+   "high": 0,
+   "medium": 1,
+   "low": 66,
+   "by_test": {
+    "B101 LOW": 5,
+    "B104 MEDIUM": 1,
+    "B105 LOW": 19,
+    "B106 LOW": 3,
+    "B107 LOW": 2,
+    "B311 LOW": 5,
+    "B404 LOW": 9,
+    "B603 LOW": 14,
+    "B607 LOW": 9
+   },
+   "medium_note": "B104 on the WILDCARD_BIND_HOSTS comparison constant in server.py (false positive, same as 2026-10-29)"
+  },
+  "pip_audit": {
+   "packages_locked": 75,
+   "packages_audited": 75,
+   "lists": [
+    73,
+    2
+   ],
+   "command": "same as the CI audit job (all groups, markers and +cu128 removed, second versions in a second list, --strict); also run against OSV",
+   "vulnerable": [
+    "setuptools 81.0.0 PYSEC-2026-3447 (fix 83.0.0)",
+    "setuptools 81.0.0 GHSA-xmj3-9gf7-h52w (fix 84.1.0)",
+    "torch 2.11.0 PYSEC-2025-194 (fix 2.13.0)"
+   ],
+   "osv_only": []
+  },
+  "gitleaks": {
+   "commits": 107,
+   "leaks": 0
+  }
+ }
+}
