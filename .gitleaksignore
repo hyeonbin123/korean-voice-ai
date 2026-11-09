@@ -1,0 +1,4 @@
+# gitleaks(비밀값 스캐너)가 찾지만 비밀값이 아닌 것의 지문. 형식은 "커밋:파일:규칙:줄"이고, 파일 경로는 그 커밋 시점의 경로다.
+# support-agent의 측정 기록(모델 출력을 고치지 않고 남긴 episodes.jsonl)에서, 모델이 그 프로젝트에 없는 도구 인자에 지어 넣은 RapidAPI 키 모양 값이다.
+# 이 저장소의 비밀값이 아니고 측정 원본이라 값을 가리거나 이력을 고쳐 쓰지 않는다. support-agent 저장소의 .gitleaksignore에서 옮겼다.
+64d068befc7674ddc10c7aecd96269bef8126535:reports/20260921-193331-qwen2.5-7b-instruct-P0-R0-G0-F0-V2-test-v2/episodes.jsonl:rapidapi-access-token:150
