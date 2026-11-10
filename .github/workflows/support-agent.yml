@@ -1,9 +1,30 @@
-name: CI
+name: support-agent
 
 on:
   push:
     branches: [main]
+    paths:
+      - "support-agent/**"
+      - ".github/workflows/support-agent.yml"
   pull_request:
+    paths:
+      - "support-agent/**"
+      - ".github/workflows/support-agent.yml"
+
+# 모노레포 설정(2026-11-10): GitHub는 저장소 맨 위의 .github/workflows만 읽으므로 이 워크플로를
+# support-agent/.github/workflows/ci.yml에서 이 자리로 옮겼다(git mv라 이력이 이어진다). 작업·액션·권한·검사 내용은 그대로다.
+# - on.*.paths: support-agent/ 아래나 이 파일이 바뀐 main push와 pull request에서만 돈다.
+# - defaults.run.working-directory: run 단계를 support-agent/ 안에서 돌린다(옮기기 전의 저장소 맨 위와 같은 자리).
+# - setup-uv의 working-directory: uses 단계에는 defaults.run이 먹지 않는다. 이 값이 pyproject.toml을 찾는 곳,
+#   activate-environment가 만드는 .venv 자리, cache-dependency-glob의 기준을 정한다. 적지 않으면 저장소 맨 위를 봐
+#   캐시 키에 다른 구성 요소의 uv.lock이 섞이고 .venv가 맨 위에 생긴다. cache-suffix는 구성 요소·작업마다 캐시 키를 나눈다.
+# - concurrency: 같은 구성 요소·같은 ref의 실행은 하나씩 돈다(기다리는 실행은 가장 새것 하나만 남는다).
+concurrency:
+  group: support-agent-${{ github.ref }}
+
+defaults:
+  run:
+    working-directory: support-agent
 
 # 이 워크플로의 GITHUB_TOKEN은 저장소 내용을 읽기만 한다. 적어 두지 않으면 저장소 설정의 기본 권한을 따르므로,
 # 그 기본값이 쓰기로 바뀌어도 이 작업은 읽기 전용으로 남게 여기서 정한다. 작업은 코드를 받아 린트·테스트만 한다.
@@ -50,7 +71,9 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
         with:
           enable-cache: true
-          cache-suffix: test
+          working-directory: support-agent
+          cache-dependency-glob: uv.lock
+          cache-suffix: support-agent-test
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -94,6 +117,7 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
         with:
           enable-cache: false
+          working-directory: support-agent
 
       - name: Audit the locked default group
         shell: bash

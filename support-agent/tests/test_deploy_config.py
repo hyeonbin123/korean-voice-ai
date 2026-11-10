@@ -29,17 +29,33 @@ from support_agent.service.settings import PREFIX, Settings
 
 ROOT = Path(__file__).resolve().parents[1]
 
+
+# 이 구성 요소의 CI 워크플로 파일 위치를 돌려준다. 모노레포에서는 GitHub가 저장소 맨 위의 .github/workflows만
+# 읽으므로 워크플로를 ROOT 한 단계 위(모노레포 맨 위)의 .github/workflows/support-agent.yml로 옮겼다.
+# 그 파일이 있으면 그것을, 없으면 예전 자리 ROOT/.github/workflows/ci.yml을 돌려준다. 예전 자리는 이 폴더만
+# 따로 받았을 때(모노레포 밖)를 위한 것이고, 어느 자리의 파일을 읽든 검사 내용은 그대로다. 둘 다 없으면
+# 예전 자리를 돌려주므로 그 경로를 바로 읽는 테스트는 FileNotFoundError로, 목록을 만드는 첫 테스트는
+# `assert workflows`에서 실패한다(조용히 건너뛰지 않는다).
+def _workflow_path() -> Path:
+    moved = ROOT.parent / ".github" / "workflows" / "support-agent.yml"
+    if moved.is_file():
+        return moved
+    return ROOT / ".github" / "workflows" / "ci.yml"
+
+
 # 워크플로의 `uses: 소유자/저장소@참조  # 버전` 한 줄. 참조는 40자리 16진수 커밋 SHA여야 하고, 뒤 주석에
 # 사람이 읽을 수 있는 버전(v7.0.1 같은)이 있어야 한다. SHA만 있으면 무엇을 고정했는지 알 수 없어 올릴 때
 # 실수한다.
 _USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<action>[^\s@]+)@(?P<ref>\S+)(?:\s+#\s*(?P<version>\S+))?\s*$")
 
 
-# 모든 워크플로: 맨 위 permissions가 contents: read 하나뿐이고 작업(job) 단위로 다시 넓히지 않는다. 모든
-# 액션은 커밋 SHA + 버전 주석으로 부르고, checkout은 토큰을 .git/config에 남기지 않는다(persist-credentials:
-# false). 이 작업의 단계(uv sync, ruff, pytest)는 저장소에 쓰지도, 원격에 git으로 닿지도 않는다.
+# 이 구성 요소의 워크플로(모노레포 맨 위의 support-agent.yml, 없으면 예전 자리의 ci.yml): 맨 위 permissions가
+# contents: read 하나뿐이고 작업(job) 단위로 다시 넓히지 않는다. 모든 액션은 커밋 SHA + 버전 주석으로 부르고,
+# checkout은 토큰을 .git/config에 남기지 않는다(persist-credentials: false). 이 작업의 단계(uv sync, ruff,
+# pytest)는 저장소에 쓰지도, 원격에 git으로 닿지도 않는다.
+# 맨 위의 다른 구성 요소 워크플로는 구성이 달라(태그 고정, 작업 단위 permissions 등) 이 검사 대상이 아니다.
 def test_ci_token_is_read_only_and_every_action_is_pinned_to_a_commit():
-    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    workflows = [path for path in [_workflow_path()] if path.is_file()]
     assert workflows  # 비어 있으면 아래 반복이 하나도 돌지 않고 통과해 버린다
     for path in workflows:
         text = path.read_text(encoding="utf-8")
@@ -68,7 +84,7 @@ def test_ci_token_is_read_only_and_every_action_is_pinned_to_a_commit():
 # 않는다: MeloTTS가 묶은 판의 권고가 남아 있어 늘 실패한다(docs/voice.md "정한 것과 이유"의 2026-11-01
 # 보탬). 이 작업이 빠지면 기본 그룹에 새 권고가 생겨도 아무 검사도 실패하지 않으므로 글자 그대로 고정한다.
 def test_ci_audits_the_locked_default_group_with_a_pinned_pip_audit():
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    workflow = yaml.safe_load(_workflow_path().read_text(encoding="utf-8"))
     audit = workflow["jobs"]["audit"]
     assert audit.get("continue-on-error") is True
     (step,) = [s for s in audit["steps"] if "pip-audit" in s.get("run", "")]
@@ -92,7 +108,7 @@ def test_ci_audits_the_locked_default_group_with_a_pinned_pip_audit():
 # enable-cache를 적지 않으면 기본값 auto이고 GitHub 호스트 러너에서는 켜진다. YAML에서 false는 불리언으로
 # 읽히지만 따옴표로 쓴 "false"도 setup-uv에는 같은 뜻이라 글자로 바꿔 비교한다.
 def test_ci_jobs_do_not_share_a_setup_uv_cache_key():
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    workflow = yaml.safe_load(_workflow_path().read_text(encoding="utf-8"))
     cached: dict[str, list[str]] = {}  # cache-suffix → 캐시를 켠 작업 이름들
     for name, job in workflow["jobs"].items():
         for step in job.get("steps", []):
