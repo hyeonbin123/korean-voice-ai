@@ -25,9 +25,10 @@ from pathlib import Path
 import pytest
 
 # 스크립트는 support-agent의 음성 환경에서 도는 독립 파일이라 패키지로 import하지 않고 경로로 읽는다(_load).
-# SUPPORT_AGENT는 옆 저장소 위치다. 있으면 고정한 verbalize 사본이 그 저장소 이력의 원본과 바이트까지 같은지
-# 확인한다(없으면 건너뜀. GitHub CI에는 없다). CACHE는 기록된 음성 캐시(outputs/는 커밋하지 않으므로 이 PC에만
-# 있다)로, 있으면 고정한 읽기가 기록된 발화와 글자까지 같은지 확인한다.
+# SUPPORT_AGENT는 옆 support-agent 폴더 위치다. 그 폴더가 있고 git이 고정 커밋을 풀 수 있으면 고정한 verbalize
+# 사본이 그 커밋의 원본과 바이트까지 같은지 확인한다(아니면 건너뜀. GitHub CI의 얕은 체크아웃에는 그 커밋이
+# 없다). CACHE는 기록된 음성 캐시(outputs/는 커밋하지 않으므로 이 PC에만 있다)로, 있으면 고정한 읽기가 기록된
+# 발화와 글자까지 같은지 확인한다.
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT_AGENT = ROOT.parent / "support-agent"
 CACHE = ROOT / "outputs" / "asr" / "cache.jsonl"
@@ -152,9 +153,14 @@ def test_an_edited_copy_is_refused(tmp_path, monkeypatch):
         asr.load_verbalize()
 
 
-# 옆에 support-agent 저장소가 있으면, 사본 본문이 그 저장소의 a5717ce:src/support_agent/voice/verbalize.py와
-# 바이트까지 같은지 git으로 직접 확인한다(출처 확인). 저장소나 커밋이 없으면 건너뛴다.
-@pytest.mark.skipif(not (SUPPORT_AGENT / ".git").exists(), reason="support-agent is not checked out here")
+# 옆 support-agent 폴더가 있고 git이 고정 커밋 a5717ce를 풀 수 있으면, 사본 본문이 그 커밋의
+# src/support_agent/voice/verbalize.py와 바이트까지 같은지 git으로 직접 확인한다(출처 확인). 단독 저장소였을
+# 때는 옆 폴더의 .git을 조건으로 봤지만, 모노레포에서는 support-agent가 .git 없는 하위 폴더이고 그 이력이 같은
+# 저장소에 있어 폴더가 있는지만 본다(git -C로 그 폴더에서 부르면 git이 위로 올라가 같은 저장소를 찾는다).
+# <커밋>:<경로>의 경로는 그 커밋 트리의 맨 위 기준이라 support-agent/ 접두 없이 그대로 맞는다. 폴더가 없으면
+# 건너뛰고, 폴더가 있어도 git이 그 커밋을 풀지 못하면(GitHub CI의 얕은 체크아웃에는 그 커밋이 없다) 본문에서
+# 건너뛴다.
+@pytest.mark.skipif(not SUPPORT_AGENT.is_dir(), reason="support-agent is not checked out here")
 def test_the_pinned_copy_matches_the_support_agent_history():
     spec = f"{asr.PINNED_COMMIT}:{asr.PINNED_SOURCE}"
     shown = subprocess.run(["git", "-C", str(SUPPORT_AGENT), "cat-file", "blob", spec], capture_output=True)
