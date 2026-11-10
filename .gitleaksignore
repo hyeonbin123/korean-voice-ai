@@ -2,3 +2,21 @@
 # support-agent의 측정 기록(모델 출력을 고치지 않고 남긴 episodes.jsonl)에서, 모델이 그 프로젝트에 없는 도구 인자에 지어 넣은 RapidAPI 키 모양 값이다.
 # 이 저장소의 비밀값이 아니고 측정 원본이라 값을 가리거나 이력을 고쳐 쓰지 않는다. support-agent 저장소의 .gitleaksignore에서 옮겼다.
 64d068befc7674ddc10c7aecd96269bef8126535:reports/20260921-193331-qwen2.5-7b-instruct-P0-R0-G0-F0-V2-test-v2/episodes.jsonl:rapidapi-access-token:150
+# voice-translator 백엔드 테스트의 함수 호출 줄이다. gitleaks가 값으로 본 글자는 키워드 인자 이름 previous_lang= 이고 비밀값이 아니다.
+3d2950545cb5a8a215029bf53ce7a9f4f15574f8:backend/tests/test_dialog_api.py:generic-api-key:47
+# voice-translator 백엔드 테스트의 함수 호출 줄이다. gitleaks가 값으로 본 글자는 키워드 인자 이름 previous_lang= 이고 비밀값이 아니다.
+3d2950545cb5a8a215029bf53ce7a9f4f15574f8:backend/tests/test_dialog_api.py:generic-api-key:60
+# voice-translator 백엔드 테스트의 함수 호출 줄이다. gitleaks가 값으로 본 글자는 키워드 인자 이름 previous_lang= 이고 비밀값이 아니다.
+3d2950545cb5a8a215029bf53ce7a9f4f15574f8:backend/tests/test_dialog_api.py:generic-api-key:75
+# voice-translator 백엔드 테스트의 함수 호출 줄이다. gitleaks가 값으로 본 글자는 키워드 인자 이름 previous_lang= 이고 비밀값이 아니다.
+65b60a9dc04c41598d259f75251191f5aa4be59f:backend/tests/test_live_api.py:generic-api-key:600
+# voice-translator 평가 재분석 기록(JSON)에서 비교 항목의 "key" 칸이다. 값은 평가 스크립트 reanalysis.py가 비교마다 붙이는 이름(같은 항목의 stage·direction·label 칸에 있는 말을 이어 만든 것)이고 비밀값이 아니다.
+cae2a0db7979e2dfa93db5976bd157b8f904d8cd:backend/eval/reports/reanalysis_n3_20261004_190658.json:generic-api-key:86
+# voice-translator 평가 재분석 기록(JSON)에서 비교 항목의 "key" 칸이다. 값은 평가 스크립트 reanalysis.py가 비교마다 붙이는 이름(같은 항목의 stage·direction·label 칸에 있는 말을 이어 만든 것)이고 비밀값이 아니다.
+cae2a0db7979e2dfa93db5976bd157b8f904d8cd:backend/eval/reports/reanalysis_n3_20261004_190658.json:generic-api-key:239
+# voice-translator 평가 스크립트 metricx_score.py의 TOKENIZER_REVISION 상수다. 공개 모델 google/mt5-large의 토크나이저를 받을 때 고정하는 Hugging Face Hub 리비전(커밋 해시)이고 비밀값이 아니다.
+b24d14a8ae4f7544c2d10640bb29a6b511fcd70e:backend/eval/metricx_score.py:generic-api-key:39
+# voice-translator 평가 재분석 기록(JSON)에서 비교 항목의 "key" 칸이다. 값은 평가 스크립트 reanalysis.py가 비교마다 붙이는 이름(같은 항목의 stage·direction·label 칸에 있는 말을 이어 만든 것)이고 비밀값이 아니다.
+4e5a0358df5db744ee8bf08fa4d51472d582dea4:backend/eval/reports/reanalysis_t32fix_20261014_024253.json:generic-api-key:87
+# voice-translator 평가 재분석 기록(JSON)에서 비교 항목의 "key" 칸이다. 값은 평가 스크립트 reanalysis.py가 비교마다 붙이는 이름(같은 항목의 stage·direction·label 칸에 있는 말을 이어 만든 것)이고 비밀값이 아니다.
+4e5a0358df5db744ee8bf08fa4d51472d582dea4:backend/eval/reports/reanalysis_t32fix_20261014_024253.json:generic-api-key:240
