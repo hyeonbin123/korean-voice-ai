@@ -1,0 +1,91 @@
+# 구성 요소 사이 의존 선언. tools/check_cross_deps.py가 읽어 아래 선언이 지금도 맞는지 검사하고,
+# docs/architecture.md가 같은 내용을 사람이 읽을 글로 설명한다.
+#
+# 구성 요소의 코드와 시험은 바꾸지 않았다. 의존은 구성 요소 코드 속 경로 계산에 들어 있고, 그 계산은 기록된 측정을
+# 낸 실행과 같게 두어야 하기 때문이다. 그래서 의존을 여기에 글자로 묶어 두고, 코드의 그 글이 사라지거나 대상
+# 파일이 추적에서 빠지면 검사가 알린다.
+#
+# doc            의존을 설명하는 문서(저장소 뿌리 기준 경로). 아래의 쓰는 쪽 코드 경로, tracked 경로, 고정 코드
+#                경로와 고정 사본 커밋의 앞 7자가 이 문서에 글자로 적혀 있어야 한다.
+#
+# [[dep]]        한 구성 요소가 다른 구성 요소의 파일을 쓰는 곳 하나.
+#   id           의존의 이름(검사 출력에 쓴다)
+#   from, to     쓰는 구성 요소와 쓰이는 구성 요소(폴더 이름)
+#   what         무엇을 어떻게 쓰는지 한 문장
+#   tracked      쓰이는 파일 가운데 git이 추적하는 것. 추적 파일이 아니면 검사가 실패한다.
+#   local        git이 추적하지 않아 이 PC에만 있는 대상(가상환경, 학습 결과 폴더). --local을 줄 때만 있는지 본다.
+#   [[dep.code]] 쓰는 쪽 코드에서 이 의존을 드러내는 글 한 곳
+#     path       쓰는 쪽 코드 파일(추적 파일이어야 한다)
+#     text       그 파일에 글자 그대로 들어 있어야 하는 글
+#
+# [[pinned]]     다른 구성 요소의 어느 커밋 시점 파일을 사본으로 고정해 쓰는 곳 하나.
+#   id, code     이름, 고정 상수(커밋·원본 경로·blob 해시)가 적힌 코드 파일
+#   commit_pattern, source_pattern, blob_pattern
+#                code 글에서 고정 커밋, 원본 경로, 원본 blob 해시를 뽑는 정규식. 괄호 묶음이 정확히 하나이고 파일
+#                안에서 정확히 한 번 맞아야 한다. 뽑은 커밋이 이 저장소 이력에 있고 `git rev-parse <커밋>:<원본 경로>`가
+#                적힌 blob과 같은지 본다.
+
+doc = "docs/architecture.md"
+
+[[dep]]
+id = "call-summary-voice-env"
+from = "call-summary"
+to = "support-agent"
+what = "음성 조건 스크립트가 support-agent의 음성 환경(MeloTTS가 요구하는 transformers 4.27)과 src에서 돈다"
+tracked = ["support-agent/src/support_agent/voice/speech.py", "support-agent/pyproject.toml"]
+local = ["support-agent/.venv"]
+  [[dep.code]]
+  path = "call-summary/scripts/asr_condition.py"
+  text = "set PYTHONPATH=../support-agent/src"
+  [[dep.code]]
+  path = "call-summary/scripts/asr_condition.py"
+  text = "../support-agent/.venv/Scripts/python.exe scripts/asr_condition.py"
+  [[dep.code]]
+  path = "call-summary/tests/test_asr_condition.py"
+  text = 'SUPPORT_AGENT = ROOT.parent / "support-agent"'
+
+[[dep]]
+id = "call-summary-verbalize-copy"
+from = "call-summary"
+to = "support-agent"
+what = "음성 조건 v1·v2의 읽기를 support-agent a5717ce의 verbalize.py 사본으로 고정했다"
+tracked = ["call-summary/scripts/verbalize_a5717ce.py", "support-agent/src/support_agent/voice/verbalize.py"]
+local = []
+  [[dep.code]]
+  path = "call-summary/scripts/asr_condition.py"
+  text = 'PINNED_VERBALIZE = Path(__file__).resolve().with_name("verbalize_a5717ce.py")'
+
+[[dep]]
+id = "call-summary-turbo-n-ct2"
+from = "call-summary"
+to = "whisper-ko-ft"
+what = "음성 조건 v3의 N 팔이 whisper-ko-ft에서 학습해 CTranslate2로 바꾼 turbo-n을 쓴다"
+tracked = []
+local = ["whisper-ko-ft/outputs/turbo-n/ct2"]
+  [[dep.code]]
+  path = "call-summary/scripts/asr_condition.py"
+  text = 'TURBO_N = Path(__file__).resolve().parents[2] / "whisper-ko-ft" / "outputs" / "turbo-n" / "ct2"'
+
+[[dep]]
+id = "stt-scratch-whisper-reports"
+from = "stt-scratch"
+to = "whisper-ko-ft"
+what = "봉인 test 사후 분석이 whisper-ko-ft의 발화별 turbo 제로샷 보고서와 숫자 발화 목록을 읽는다"
+tracked = ["whisper-ko-ft/reports/whisper-large-v3-turbo/zeroth-test.json", "whisper-ko-ft/reports/digit_utterances/zeroth-test.json"]
+local = []
+  [[dep.code]]
+  path = "stt-scratch/scripts/sealed_breakdown.py"
+  text = "--anchor-report ../whisper-ko-ft/reports/whisper-large-v3-turbo/zeroth-test.json"
+  [[dep.code]]
+  path = "stt-scratch/scripts/sealed_breakdown.py"
+  text = "--digit-list ../whisper-ko-ft/reports/digit_utterances/zeroth-test.json"
+  [[dep.code]]
+  path = "stt-scratch/tests/test_sealed_breakdown.py"
+  text = 'WHISPER_KO_FT = REPO.parent / "whisper-ko-ft"'
+
+[[pinned]]
+id = "verbalize-a5717ce"
+code = "call-summary/scripts/asr_condition.py"
+commit_pattern = 'PINNED_COMMIT = "([0-9a-f]{40})"'
+source_pattern = 'PINNED_SOURCE = "([^"]+)"'
+blob_pattern = 'PINNED_BLOB = "([0-9a-f]{40})"'
