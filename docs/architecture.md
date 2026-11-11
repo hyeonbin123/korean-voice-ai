@@ -21,7 +21,7 @@ support-agent와 call-summary에는 모델 없이 도는 오프라인 앱이 있
 콜센터 통화 한 건은 개념상 네 곳을 차례로 지난다.
 
 1. 음성 인식: 통화 음성을 글로 받아 적는다. whisper-ko-ft(Whisper 파인튜닝과 측정)와 stt-scratch(처음부터 만든 스트리밍 인식)가 이 일을 다룬다.
-2. 실시간 음성 계층: 말하는 동안 음성 인식, 처리, 음성 합성을 이어 붙여 실시간으로 돌린다. 이 저장소에서 이 모양을 가진 것은 voice-translator다(대화 모드와 동시통역).
+2. 실시간 음성 계층: 말하는 동안 음성 인식, 중간 처리, 음성 합성을 이어 붙여 실시간으로 돌린다. 이 저장소에서 이 모양을 가진 것은 voice-translator다(음성 인식 → 번역 → 음성 합성, 대화 모드와 동시통역).
 3. 상담 에이전트: 받아 적은 고객의 말에 도구를 호출해 업무를 처리하고 답한다. support-agent가 맡는다.
 4. 상담 후처리: 끝난 통화의 전사를 요약, 문의 유형, 처리 결과를 담은 기록(JSON)으로 바꾼다. call-summary가 맡는다.
 
@@ -37,11 +37,11 @@ support-agent와 call-summary에는 모델 없이 도는 오프라인 앱이 있
 | 무엇 | 쓰는 쪽 코드 | 대상 | 검사 |
 |---|---|---|---|
 | call-summary의 음성 조건 스크립트가 support-agent의 음성 환경과 소스에서 돈다. MeloTTS가 transformers 4.27을 요구해 call-summary 환경이 아니라 support-agent의 `.venv`에서 `PYTHONPATH=../support-agent/src`로 실행한다 | [`asr_condition.py` 7행](../call-summary/scripts/asr_condition.py#L7), [8행](../call-summary/scripts/asr_condition.py#L8), [`test_asr_condition.py` 33행](../call-summary/tests/test_asr_condition.py#L33) | [`speech.py`](../support-agent/src/support_agent/voice/speech.py), [`pyproject.toml`](../support-agent/pyproject.toml), 가상환경 `support-agent/.venv` | 저장소 안: 코드의 글자, 두 파일의 추적 여부. 로컬: `.venv`가 있는지 |
-| call-summary가 음성 조건의 읽기를 support-agent 커밋 `a5717ce`의 `verbalize.py` 사본으로 고정했다. support-agent가 그 뒤 운송장번호 읽기를 고쳐서 현재 파일로는 기록된 읽기를 재현하지 못한다 | [`asr_condition.py` 89행](../call-summary/scripts/asr_condition.py#L89)(사본 경로), [90~92행](../call-summary/scripts/asr_condition.py#L90-L92)(커밋·원본 경로·blob) | 사본 [`verbalize_a5717ce.py`](../call-summary/scripts/verbalize_a5717ce.py), 원본의 현재 파일 [`verbalize.py`](../support-agent/src/support_agent/voice/verbalize.py) | 저장소 안: 코드의 글자, 두 파일의 추적 여부, 고정 커밋이 이 저장소 이력에 있는지와 그 시점 원본의 blob이 코드에 적힌 값과 같은지 |
+| call-summary가 음성 조건 v1·v2의 읽기를 support-agent 커밋 `a5717ce`의 `verbalize.py` 사본으로 고정했다. support-agent가 그 뒤 운송장번호 읽기를 고쳐서 현재 파일로는 v1의 읽기를 재현하지 못한다 | [`asr_condition.py` 89행](../call-summary/scripts/asr_condition.py#L89)(사본 경로), [90~92행](../call-summary/scripts/asr_condition.py#L90-L92)(커밋·원본 경로·blob) | 사본 [`verbalize_a5717ce.py`](../call-summary/scripts/verbalize_a5717ce.py), 원본의 현재 파일 [`verbalize.py`](../support-agent/src/support_agent/voice/verbalize.py) | 저장소 안: 코드의 글자, 두 파일의 추적 여부, 고정 커밋이 이 저장소 이력에 있는지와 그 시점 원본의 blob이 코드에 적힌 값과 같은지 |
 | call-summary가 whisper-ko-ft에서 학습해 CTranslate2로 바꾼 `turbo-n`을 인식기로 쓴다(인식기를 바꿔 비교하는 갈래 중 N 팔) | [`asr_condition.py` 101행](../call-summary/scripts/asr_condition.py#L101) | `whisper-ko-ft/outputs/turbo-n/ct2`(학습·변환 결과라 git이 추적하지 않는다) | 저장소 안: 코드의 글자. 로컬: 그 폴더가 있는지 |
 | stt-scratch의 봉인 test 사후 분석이 whisper-ko-ft의 발화별 turbo 제로샷 보고서와 숫자 발화 목록을 읽어, 같은 발화로 짝지어 다시 채점한다 | [`sealed_breakdown.py` 14행](../stt-scratch/scripts/sealed_breakdown.py#L14), [15행](../stt-scratch/scripts/sealed_breakdown.py#L15), [`test_sealed_breakdown.py` 42행](../stt-scratch/tests/test_sealed_breakdown.py#L42) | [turbo 제로샷 보고서](../whisper-ko-ft/reports/whisper-large-v3-turbo/zeroth-test.json), [숫자 발화 목록](../whisper-ko-ft/reports/digit_utterances/zeroth-test.json) | 저장소 안: 코드의 글자, 두 파일의 추적 여부 |
 
-위 코드는 형제 폴더를 `../support-agent`처럼 상대 경로로 가리키거나 부모 폴더에서 폴더 이름으로 찾는다. 구성 요소 폴더 이름이 옛 저장소 이름과 같아서 이 경로가 이 저장소에서도 그대로 맞는다. 그래서 구성 요소의 코드와 시험은 고치지 않았다. 경로 계산을 이 저장소에 맞춰 바꾸면 기록된 측정을 낸 실행과 같은 실행이 아니게 되고 구성 요소의 시험 수집 수도 달라지기 때문이다. 대신 의존을 `tools/cross-deps.toml`에 글자로 묶었다. 코드의 그 글이 바뀌거나 대상이 추적에서 빠지면 검사가 실패해서 이 문서를 함께 고치게 한다.
+위 코드는 형제 폴더를 `../support-agent`처럼 상대 경로로 가리키거나 부모 폴더에서 폴더 이름으로 찾는다. 구성 요소 폴더 이름이 옛 저장소 이름과 같아서 이 경로가 이 저장소에서도 그대로 맞는다. 그래서 경로 계산 코드는 바꾸지 않았고, 의존을 확인하는 시험도 구성 요소에 더하지 않았다. 경로 계산을 이 저장소에 맞춰 바꾸면 기록된 측정을 낸 실행과 같은 실행이 아니게 되고, 구성 요소 안에 시험을 더하면 그 구성 요소의 시험 수가 합치기 전과 달라지기 때문이다. 대신 의존을 `tools/cross-deps.toml`에 글자로 묶었다. 코드의 그 글이 바뀌거나 대상이 추적에서 빠지면 검사가 실패해서 이 문서를 함께 고치게 한다.
 
 검사는 저장소 뿌리에서 돌린다.
 
