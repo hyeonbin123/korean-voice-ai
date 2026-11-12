@@ -1,0 +1,49 @@
+# 통화 한 건 배선 시연(call-e2e)의 프로젝트 설정.
+#
+# 이 폴더는 저장소 루트와 따로 자기 환경(.venv)과 잠금(uv.lock)을 가진다. 저장소 루트에는 pyproject.toml과
+# uv.lock을 두지 않는다: 루트에서 올라가며 설정을 찾는 uv와 ruff가 구성 요소의 환경을 바꾸지 않게 하려는 것이다.
+# support-agent와 call-summary의 코드는 가져오지(import) 않고 HTTP로만 부르므로, 이 환경에는 torch 같은 모델
+# 라이브러리가 들어 있지 않다.
+
+[project]
+name = "call-e2e"
+version = "0.1.0"
+description = "Wire one scripted call through the support-agent and call-summary offline apps over HTTP and write a one-call report (a wiring demo, not a quality measurement)"
+requires-python = ">=3.11"
+# HTTP 클라이언트만 쓴다. 두 앱은 이 환경 밖에서 따로 떠 있고, 이 패키지는 그 응답만 읽는다(torch 없음).
+dependencies = ["httpx>=0.27"]
+
+[project.scripts]
+# 명령줄 진입점: `call-e2e` 명령이 call_e2e.cli의 main을 부른다.
+call-e2e = "call_e2e.cli:main"
+
+[dependency-groups]
+# 시험과 린트. uv sync는 dev 그룹을 기본으로 함께 설치한다.
+dev = ["pytest>=8.2", "ruff>=0.6"]
+
+[tool.uv]
+# 이 폴더를 다룰 uv의 가장 낮은 판. uv.lock을 만든 판(0.13.1)보다 낮은 uv가 잠금 파일을 읽거나 다시 쓰지
+# 못하게 한다. 하한만 둔다: `~=0.13.1`처럼 위를 막으면 개발 PC의 uv를 올리는 순간 이 폴더의 모든 uv 명령이
+# 멈춘다.
+required-version = ">=0.13.1"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# src 배치: 설치되는 패키지는 src/call_e2e다. 이 폴더에 .py 파일이 하나도 없는 채로 uv sync를 하면 편집 가능
+# 설치가 비어 버려 `--no-sync` 실행이 call_e2e를 찾지 못한다(나중에 파일을 만들어도 그대로이고
+# `uv sync --reinstall-package call-e2e`를 해야 고쳐진다). 그래서 __init__.py를 가장 먼저 둔다.
+packages = ["src/call_e2e"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# 구성 요소들과 같은 기준: 줄 길이 110, 파이썬 3.11, 규칙 E·F·I·UP·B.
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

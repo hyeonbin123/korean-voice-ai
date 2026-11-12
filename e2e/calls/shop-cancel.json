@@ -1,0 +1,16 @@
+{
+  "format": "call-e2e-script/1",
+  "call_id": "shop-cancel",
+  "title": "주문 하나를 취소하는 통화",
+  "domain": "shop",
+  "customer_turns": [
+    "안녕하세요, 주문을 취소하려고요.",
+    "정예준이고 010-0000-9005입니다.",
+    "O-90005 주문 취소해 주세요."
+  ],
+  "expect": {
+    "tool_calls": [["find_customer", true], ["cancel_order", true]],
+    "session_status": "open",
+    "summary_model": "offline:canned"
+  }
+}
