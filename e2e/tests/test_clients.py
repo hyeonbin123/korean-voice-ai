@@ -446,16 +446,25 @@ def raising(exc_type: type[httpx.TransportError], message: str):
     return handler
 
 
-# (예외 종류, 예외 메시지, StepError.detail에 기대하는 글). 시간 초과 예외는 메시지가 빈 채로 오는데, 그때는
-# 종류 이름만 담고 뒤에 ": "를 붙이지 않는다.
+# (예외 종류, 예외 메시지, StepError.detail에 기대하는 글). 동기 소켓의 연결·읽기 시간 초과는 원래 예외의
+# 글을 전달한다. httpx 0.28.1로 로컬 소켓에서 확인한 글은 "timed out"이다. 연결 풀이 가득 차 기다리다
+# 끝나는 PoolTimeout은 메시지가 비므로, 그 경우에는 종류 이름만 담고 뒤에 ": "를 붙이지 않는다.
 NO_ANSWER_FAILURES = [
     (httpx.ConnectError, "connection refused", "ConnectError: connection refused"),
-    (httpx.ConnectTimeout, "", "ConnectTimeout"),
-    (httpx.ReadTimeout, "", "ReadTimeout"),
+    (httpx.ConnectTimeout, "timed out", "ConnectTimeout: timed out"),
+    (httpx.ReadTimeout, "timed out", "ReadTimeout: timed out"),
+    (httpx.PoolTimeout, "", "PoolTimeout"),
     (httpx.ReadError, "connection reset by peer", "ReadError: connection reset by peer"),
     (httpx.RemoteProtocolError, "server disconnected", "RemoteProtocolError: server disconnected"),
 ]
-NO_ANSWER_IDS = ["connect_refused", "connect_timeout", "read_timeout", "read_error", "disconnected"]
+NO_ANSWER_IDS = [
+    "connect_refused",
+    "connect_timeout",
+    "read_timeout",
+    "pool_timeout",
+    "read_error",
+    "disconnected",
+]
 
 
 @pytest.mark.parametrize(("exc_type", "message", "detail"), NO_ANSWER_FAILURES, ids=NO_ANSWER_IDS)
