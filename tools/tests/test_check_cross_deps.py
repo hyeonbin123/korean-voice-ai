@@ -10,7 +10,7 @@
     3. 로컬에만 있는 대상(환경 폴더, 모델 폴더)은 --local을 줄 때만 본다.
     4. 설명 문서: 쓰는 쪽 코드·대상·고정 코드 경로와 고정 커밋의 앞 7자 가운데 하나라도 빠지면 알린다.
     5. 고정 사본: 코드에 적힌 커밋·경로·blob이 이 저장소의 이력과 맞는지 본다. 이력이 모자라거나 값이
-       틀리면 알린다.
+       틀리면 알리고, 정규식이 맞고도 괄호 묶음이 글을 잡지 못하는 선언(참여하지 않는 묶음)도 알린다.
     6. 선언 파일의 꼴: 모르는 키, 빈 글, 깨진 정규식은 조용히 넘기지 않고 문제로 알린다.
     7. 명령줄: 종료 코드 0(통과) / 1(문제) / 2(검사를 시작할 수 없음)와 출력 꼴, 파이프로 나가는 UTF-8 출력.
     8. 이 저장소의 실제 선언이 지금도 맞는다.
@@ -22,6 +22,7 @@
 """
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -303,6 +304,27 @@ def test_pinned_patterns_must_match_exactly_once(world, case, pattern):
     problems = problems_of(world)
     assert len(problems) == 1
     assert pattern in problems[0]
+
+
+@pytest.mark.parametrize(
+    ("key", "plain", "optional"),
+    [
+        ("commit_pattern", 'PINNED_COMMIT = "([0-9a-f]{40})"', '(NOPE)?PINNED_COMMIT = "[0-9a-f]{40}"'),
+        ("source_pattern", 'PINNED_SOURCE = "([^"]+)"', '(NOPE)?PINNED_SOURCE = "[^"]+"'),
+        ("blob_pattern", 'PINNED_BLOB = "([0-9a-f]{40})"', '(NOPE)?PINNED_BLOB = "[0-9a-f]{40}"'),
+    ],
+)
+def test_pinned_pattern_whose_group_takes_no_part_is_reported(world, key, plain, optional):
+    # 괄호 묶음이 하나뿐인 정규식이라 읽을 때는 통과하지만, `(NOPE)?`는 맞은 자리에서 아무 글도 잡지 못한다. 그때
+    # 값이 없는 것으로 읽혀 커밋·blob 검사와 문서의 커밋 앞 7자 요구가 조용히 꺼지면 안 된다.
+    old, new = f"{key} = '{plain}'", f"{key} = '{optional}'"
+    assert old in DECLARATION  # 시험이 바꾸려는 줄이 실제로 있는지
+    write(world.repo, "tools/cross-deps.toml", DECLARATION.replace(old, new))
+    # 바꾼 정규식은 고정 코드에서 정확히 한 번 맞고, 그 묶음은 글을 잡지 않는다(이 시험이 노리는 꼴).
+    assert [match.group(1) for match in re.finditer(optional, read(world.repo, "a/pin.py"))] == [None]
+    problems = problems_of(world)
+    assert len(problems) == 1
+    assert key in problems[0] and "괄호 묶음" in problems[0]
 
 
 # ---------------------------------------------------------------------------------------------

@@ -1,18 +1,25 @@
 """`tools/check_root_numbers.py` 시험.
 
 이 도구는 루트 문서에 옮겨 적은 수치가 구성 요소 기록 글자와 같은지 선언 파일(root-numbers.toml)로 대조한다.
-시험은 두 가지를 고정한다.
+시험은 세 가지를 고정한다.
     1. 규칙대로 쓴 선언은 통과한다.
     2. 규칙을 어길 때마다 문제로 알린다(조용히 건너뛰지 않는다). 문제는 한 번에 하나씩만 만들어, 어느 규칙이
        어떤 문제를 냈는지 시험이 정확히 가리킬 수 있게 한다.
+    3. 파일을 읽고 출력하는 방법: 경로 꼴, BOM과 CRLF가 든 문서, 줄바꿈 없이 끝나는 문서, --repo를 주지 않았을
+       때의 기본값, 선언 수 세기, 파이프로 나가는 출력의 인코딩, 수를 읽는 정규식의 막기 규칙.
 
 시험용 저장소(`fake`)는 tmp_path 안에 글 두 개로 만든다: 첫 화면을 흉내 낸 루트 README.md, 수치의 출처를
 흉내 낸 whisper-ko-ft/README.md. 실제 저장소 문서는 읽지 않는다.
 """
 
+import codecs
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
+import check_root_numbers
 import pytest
 from check_root_numbers import (
     DeclarationError,
@@ -25,6 +32,13 @@ from check_root_numbers import (
     number_tokens,
     section_body,
 )
+from conftest import REPO
+
+# 이 파일은 <저장소>/tools/tests/에 있다. parents[1] = tools. 도구를 스크립트로 직접 돌리는 시험이 쓴다.
+TOOLS = Path(__file__).resolve().parents[1]
+
+# 유니코드 빼기 기호(U+2212). 일반 하이픈과 구별되지 않는 글자라 소스에 직접 쓰지 않고 코드 번호로 만든다.
+MINUS = chr(0x2212)
 
 # 루트 README의 구성 요소 표 한 줄: 수치(1.96%)와 그 조건(학습에서 본 문장), 날짜 붙은 테스트 수(779)가 든다.
 ROOT_LINE = "| whisper-ko-ft | Zeroth test CER 1.96% (학습에서 본 문장) | 779 (2026-11-20 CI) |"
@@ -320,3 +334,184 @@ def test_main_exit_codes(fake, capsys):
         assert main(["--repo", str(fake), "--numbers", str(bad)]) == 2
         captured = capsys.readouterr()
         assert captured.out == "" and captured.err != ""
+
+
+# ---------------------------------------------------------------------------------------------
+# 파일을 읽고 출력하는 방법, 수를 읽는 규칙
+# ---------------------------------------------------------------------------------------------
+
+
+def only_message(decls: Declarations, repo: Path) -> str:
+    """선언들을 대조해 문제가 정확히 하나일 때 그 문제 글을 돌려준다(아니면 시험이 실패한다)."""
+    problems = check(decls, repo)
+    assert len(problems) == 1, problems
+    return problems[0].message
+
+
+def test_number_tokens_skip_names_and_read_signs_like_call_summary():
+    # call-summary에서 같은 일을 하는 시험(tests/test_numbers.py의 test_number_tokens_read_signs_separators_and_skip_names)의
+    # 예를 그대로 가져왔다: 부호, 천 단위 쉼표, 한글이 바로 붙은 수는 값으로 읽고 이름·판에 붙은 수는 읽지 않는다.
+    assert number_tokens(f"{MINUS}1.7%p [{MINUS}5.8, +2.1]") == ["-1.7", "-5.8", "2.1"]
+    assert number_tokens("+4.7%p [2.4, 7.2]") == ["4.7", "2.4", "7.2"]
+    assert number_tokens("Qwen3-4B (1,500건 학습) 낮은 49.5이고 v2 q8_0") == ["1500", "49.5"]
+    assert number_tokens("학습한 4B 0~1.5%, 14B 0~28%") == ["0", "1.5", "0", "28"]
+    assert number_tokens(f"차이 {MINUS}0.0, -0.00") == ["0.0", "0.00"]
+    assert number_tokens("**95.7** [93.3, 97.7]") == ["95.7", "93.3", "97.7"]
+    # 정규식의 막기 규칙을 하나씩 따로: 밑줄 바로 뒤의 수("q8_0"의 0)는 읽지 않고, 점과 숫자가 이어지다 영문자에 걸리는
+    # 수("1.5b")는 되돌아가 앞의 "1"만 읽는 일 없이 통째로 읽지 않는다.
+    assert number_tokens("q8_0") == []
+    assert number_tokens("1.5b") == []
+    assert number_tokens("qwen3.5:1.5b 2") == ["2"]
+
+
+def test_plus_sign_is_optional_in_a_context_but_not_for_coverage(fake):
+    # 더하기 부호는 정규화한 글자에서 빠지므로 context가 부호를 담든 말든 같은 수다. 그러나 coverage는 수 전체(부호 포함)가
+    # context 자리 안에 들어야 덮인 것으로 보므로, 부호를 뺀 context는 문서의 '+3.0%p'를 덮지 못한다.
+    put(fake / "README.md", "## 구성 요소\n| 차이 | +3.0%p | 2026-11-20 |\n")
+    with_sign = {**SNAPSHOT, "context": "| 차이 | +3.0", "value": "3.0"}
+    without_sign = {**SNAPSHOT, "context": "3.0%p", "value": "3.0"}
+    coverage = [{"where": "README.md", "section": "구성 요소"}]
+    assert check(Declarations(snapshots=[with_sign]), fake) == []
+    assert check(Declarations(snapshots=[without_sign]), fake) == []
+    assert check(Declarations(snapshots=[with_sign], coverage=coverage), fake) == []
+    message = only_message(Declarations(snapshots=[without_sign], coverage=coverage), fake)
+    assert "+3.0%p" in message
+
+
+def test_context_must_hold_the_whole_number_with_its_thousands_separators(fake):
+    # 천 단위 쉼표로 이어지는 수도 마찬가지다: 문서의 2,160을 앞이나 뒤에서 일부만 담은 context는 통과하지 못한다.
+    put(fake / "README.md", "## 구성 요소\n| 학습 | 2,160건 | 2026-11-20 |\n")
+    whole = {**SNAPSHOT, "context": "| 학습 | 2,160", "value": "2160"}
+    assert check(Declarations(snapshots=[whole]), fake) == []
+    for context, value in (("| 학습 | 2,16", "16"), ("160건", "160")):
+        cut = {**SNAPSHOT, "context": context, "value": value}
+        assert "whole number" in only_message(Declarations(snapshots=[cut]), fake), context
+
+
+def test_snapshot_needs_evidence_and_a_section(fake):
+    # snapshot은 구성 요소 기록에 짝이 없는 수라, 어느 절의 수인지(section)와 어디서 셌는지(evidence)가 선언에 남아야 한다.
+
+    def without(key: str) -> dict:
+        return {k: v for k, v in SNAPSHOT.items() if k != key}
+
+    assert "missing key(s): evidence" in only_message(Declarations(snapshots=[without("evidence")]), fake)
+    assert "evidence must be a non-empty string" in only_message(
+        Declarations(snapshots=[{**SNAPSHOT, "evidence": " "}]), fake
+    )
+    assert "missing key(s): section" in only_message(Declarations(snapshots=[without("section")]), fake)
+
+
+@pytest.mark.parametrize("key", ["where", "source"])
+def test_declared_paths_must_be_relative_slash_paths(fake, key):
+    # 루트 쪽(where)과 기록 쪽(source) 경로 모두 같다. 역슬래시는 Windows에서만 풀리고, 절대 경로·드라이브 꼴·'..'는 저장소 밖을
+    # 읽게 된다. 드라이브 꼴은 실행 중에 조립한다: 이 파일의 글에 드라이브 경로 꼴이 남지 않게 하려는 것이다.
+    drive = "Z" + ":"
+    outside = "must be a path relative to the repository root"
+    cases = {
+        "docs\\a.md": "must use '/' separators, not backslashes",
+        "/x.md": outside,
+        f"{drive}/x.md": outside,
+        f"{drive}x.md": outside,  # 드라이브 글자만 있고 슬래시가 없는 꼴
+        "docs/../../x.md": "must not contain '..'",
+    }
+    for bad, reason in cases.items():
+        message = only_message(Declarations(numbers=[number(**{key: bad})]), fake)
+        assert f"{key} {reason}" in message, bad
+
+
+def test_bom_and_crlf_documents_are_read_like_plain_ones(fake):
+    # 윈도 편집기가 저장한 문서(맨 앞 BOM, CRLF 줄바꿈)도 같은 결과여야 한다. BOM이 남으면 첫 줄의 제목('## 구성 요소',
+    # '## 지금까지의 결과')이 제목으로 읽히지 않아 절을 찾지 못한다.
+    for rel, text in (("README.md", ROOT_README), ("whisper-ko-ft/README.md", SOURCE_README)):
+        (fake / rel).write_bytes(codecs.BOM_UTF8 + text.replace("\n", "\r\n").encode("utf-8"))
+    coverage = [{"where": "README.md", "section": "구성 요소"}]
+    decls = Declarations(numbers=[number()], snapshots=[SNAPSHOT], coverage=coverage)
+    assert check(decls, fake) == []
+
+
+def test_last_line_without_a_newline_is_still_a_whole_line(fake):
+    # 글이 줄바꿈 없이 끝나면 글 끝까지가 마지막 줄이다. 수 경계 검사, 조건 검사, coverage의 문제 줄이 모두 줄 끝을 찾는다.
+    # (1) 글이 수로 끝난다: 줄 끝을 한 글자 일찍 자르면 문서의 수가 '1.96'이 아니라 '1.9'로 읽혀 경계 검사가 걸린다.
+    put(fake / "README.md", "## 구성 요소\n| 구성 | 학습에서 본 문장 | CER 1.96")
+    ends_with_number = number(context="CER 1.96", condition="학습에서 본 문장")
+    assert check(Declarations(numbers=[ends_with_number]), fake) == []
+    # (2) 글이 조건으로 끝난다: 한 글자 일찍 자르면 조건 글이 그 줄에 없는 것으로 읽힌다.
+    put(fake / "README.md", "## 구성 요소\n| 구성 | CER 1.96% (학습에서 본 문장)")
+    ends_with_condition = number(context="CER 1.96", condition="(학습에서 본 문장)")
+    assert check(Declarations(numbers=[ends_with_condition]), fake) == []
+    # (3) 글이 선언 없는 퍼센트 수로 끝난다: 문제에 그 줄 전체가 나온다. 줄바꿈이 있어도 앞뒤 공백만 뺀 줄 전체다.
+    coverage = Declarations(coverage=[{"where": "README.md", "section": "구성 요소"}])
+    put(fake / "README.md", "## 구성 요소\n| 대조군 | 4.48%")
+    assert [p.context for p in check(coverage, fake)] == ["| 대조군 | 4.48%"]
+    put(fake / "README.md", "## 구성 요소\n  | 대조군 | 4.48% |  \n\n끝\n")
+    assert [p.context for p in check(coverage, fake)] == ["| 대조군 | 4.48% |"]
+    # (4) 첫 줄이 곧 글 전체다: 앞에 줄바꿈이 없으면 줄은 글의 처음(0)에서 시작한다. 절을 주지 않은 선언으로 본다.
+    put(fake / "README.md", "| 구성 | 학습에서 본 문장 | CER 1.96")
+    one_line = {key: value for key, value in number().items() if key != "section"}
+    one_line.update(context="CER 1.96", condition="학습에서 본 문장")
+    assert check(Declarations(numbers=[one_line]), fake) == []
+
+
+def test_coverage_reports_a_section_that_is_not_in_the_file(fake):
+    message = only_message(Declarations(coverage=[{"where": "README.md", "section": "없는 절"}]), fake)
+    assert message == "section '없는 절' found 0 times in README.md (must be exactly once)"
+
+
+def test_coverage_does_not_borrow_declarations_of_another_file(fake):
+    # 같은 글자 위치에 퍼센트 수가 있는 다른 문서를 만든다. README.md의 선언이 가리키는 자리는 그 문서의 수를 덮지 못한다.
+    put(fake / "docs" / "other.md", ROOT_README)
+    decls = Declarations(numbers=[number()], coverage=[{"where": "docs/other.md", "section": "구성 요소"}])
+    problems = check(decls, fake)
+    assert len(problems) == 1
+    assert problems[0].where == "docs/other.md" and "1.96" in problems[0].message
+
+
+def test_coverage_counts_percentages_inside_code_too(fake):
+    # 코드 울타리와 인라인 코드 안의 수도 선언 없이 끼어든 수로 센다(예외를 두지 않는다). 그런 수도 선언이 덮어야 한다.
+    put(fake / "README.md", "## 절\n\n```\n95% 완료\n```\n\n`7%`\n")
+    problems = check(Declarations(coverage=[{"where": "README.md"}]), fake)
+    assert len(problems) == 2
+    assert "95%" in problems[0].message and "7%" in problems[1].message
+
+
+def test_default_repo_is_the_checkout_that_holds_the_tool(fake, monkeypatch, capsys):
+    # --repo를 주지 않으면 이 도구가 든 저장소(tools/의 부모)를 쓴다. 시험이 쓰는 저장소 뿌리(REPO)와 같은 곳이어야 한다.
+    assert check_root_numbers.DEFAULT_REPO == REPO
+    # main이 그 값을 실제로 쓰는지는 기본값을 시험용 저장소로 바꿔 두고 --repo 없이 불러 본다.
+    put(fake / "root-numbers.toml", toml_text({"number": [BASE]}))
+    monkeypatch.setattr(check_root_numbers, "DEFAULT_REPO", fake)
+    assert main([]) == 0
+    assert capsys.readouterr().out.splitlines() == ["선언 1개, 문제 0개"]
+
+
+def test_main_counts_every_kind_of_declaration(fake, capsys):
+    # 끝 줄의 N은 [[number]], [[snapshot]], [[coverage]] 선언을 모두 더한 수다.
+    coverage = {"where": "README.md", "section": "구성 요소"}
+    put(
+        fake / "root-numbers.toml",
+        toml_text({"number": [BASE], "snapshot": [SNAPSHOT], "coverage": [coverage]}),
+    )
+    assert main(["--repo", str(fake)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["선언 3개, 문제 0개"]
+
+
+def test_script_prints_utf8_even_when_output_is_piped(fake):
+    # 한국어 Windows의 파이썬은 파이프로 나가는 출력을 cp949로 쓴다. 어느 PC에서나 같은 조건이 되도록 그 인코딩을 환경
+    # 변수로 정해 두고, 도구가 시작할 때 UTF-8로 다시 여는지 본다. 문제 줄에 cp949로 쓸 수 없는 글자(빼기 기호)를 넣어,
+    # 다시 열지 않으면 출력 도중에 죽는 것도 함께 잡는다.
+    put(fake / "README.md", f"## 구성 요소\n| 차이 | {MINUS}2.0%p |\n")
+    # 이 절에는 as_of 날짜가 없어 문제가 하나 난다.
+    stale = {**SNAPSHOT, "context": f"{MINUS}2.0%p", "value": "-2.0"}
+    put(fake / "root-numbers.toml", toml_text({"snapshot": [stale]}))
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+    env["PYTHONIOENCODING"] = "cp949"
+    done = subprocess.run(
+        [sys.executable, str(TOOLS / "check_root_numbers.py"), "--repo", str(fake)],
+        capture_output=True,
+        env=env,
+        check=False,  # 종료 코드는 아래에서 직접 확인한다
+    )
+    assert done.returncode == 1, done.stderr.decode("utf-8", errors="replace")
+    lines = done.stdout.decode("utf-8").splitlines()
+    assert lines[0].startswith(f"README.md[구성 요소] {MINUS}2.0%p: as_of 2026-11-20 does not appear")
+    assert lines[-1] == "선언 1개, 문제 1개"

@@ -21,11 +21,13 @@
                                제목 글('#' 없이). section을 주면 그 제목 아래 본문(같은 수준 이상의 다음
                                제목 전까지)만 본다. 코드 울타리 안의 '#' 줄은 제목이 아니다. 제목이 0개나
                                2개 이상이면 문제다.
-        context                그 범위에 정확히 한 번 나오는 한 줄 글. 마지막 수가 value여야 한다.
+        context                그 범위에 정확히 한 번 나오는 한 줄 글. 마지막 수가 value여야 하고, 그 수는
+                               문서에 적힌 수 전체여야 한다(아래 '수 경계').
         condition              context가 든 같은 줄에 있어야 하는 조건 글. 수치에는 어떤 데이터·설정에서 잰
                                값인지 조건을 붙여 읽게 하려는 것이다.
         source, source_section(선택), source_context
-                               구성 요소 기록 파일 쪽의 같은 검사(정확히 한 번, 마지막 수가 value).
+                               구성 요소 기록 파일 쪽의 같은 검사(정확히 한 번, 마지막 수가 value이고 수 경계도
+                               같다).
         value                  쉼표 없이 적은 수 글자(`-?\\d+(\\.\\d+)?`). 글의 "2,160"은 "2160"으로 적는다.
     [[snapshot]] 구성 요소 기록 파일에 없는 수(예: CI에서 센 테스트 수).
         where, section, context, value
@@ -35,20 +37,34 @@
     [[coverage]] 선언 없이 끼어든 수를 잡는다.
         where, section(선택)   이 범위(section이 없으면 파일 전체)에서 '%'나 '%p'가 바로(공백 하나까지)
                                뒤따르는 수는 모두 같은 where의 number·snapshot 선언이 가리키는 context
-                               자리 안에 있어야 한다. 선언의 section은 달라도 된다(파일 전체 coverage 하나와
-                               절마다 section을 준 선언을 함께 쓸 수 있다).
+                               자리 안에 있어야 한다. 수 전체(부호 포함)가 그 자리 안에 들어야 덮인 것으로
+                               본다. 코드 울타리와 인라인 코드 안의 수도 센다. 선언의 section은 달라도 된다
+                               (파일 전체 coverage 하나와 절마다 section을 준 선언을 함께 쓸 수 있다).
 
-수 읽기와 제목 나누기 규칙은 call-summary/src/call_summary/compare.py의 같은 일을 하는 코드와 일부러 같게
-복제했다. 같은 꼴의 글(표와 문장 속 수, 마크다운 제목)을 같은 방법으로 읽으려는 것이다. 이 도구는 의존성 없는
-한 장짜리 스크립트라 어느 구성 요소의 코드나 환경도 가져오지 않는다(구성 요소의 환경을 건드리지 않으려고).
-그래서 규칙을 가져다 쓰는 대신 복제했고, 복제한 자리마다 출처 줄을 적었다.
-tools/tests/test_check_root_numbers.py의 test_number_tokens_follow_the_call_summary_rule이 같은 예를 고정한다.
-규칙을 바꿀 때는 두 쪽을 함께 본다.
+수 경계 (context와 source_context의 마지막 수)
+    context가 문서에 적힌 수의 일부만 담으면, 한 번 나오고 마지막 수가 value와 같아 보여도 통과시키지 않는다.
+    문서에는 1.96이라고 적혀 있는데 context가 1.9에서 끝나거나, 문서에는 -2.0이라고 적혀 있는데 context가 부호를
+    빼고 2.0부터 시작하면 'not a whole number in the document' 문제로 알린다. 그러니 마지막 수는 이어지는 소수점
+    아래와 천 단위 쉼표 부분, 빼기 부호(ASCII 하이픈과 U+2212)까지 context에 담아야 한다. 더하기 부호는 있어도
+    없어도 같은 수로 본다(정규화한 글자가 같다). 루트 쪽 context와 기록 쪽 source_context에 똑같이 적용한다.
+
+수 읽기와 제목 나누기 규칙은 call-summary/src/call_summary/compare.py의 같은 일을 하는 코드를 복제했다. 같은
+꼴의 글(표와 문장 속 수, 마크다운 제목)을 같은 방법으로 읽으려는 것이다. 수를 읽는 정규식(_NUMBER)과 제목
+정규식(_HEADING)은 그 코드와 글자까지 같고, number_tokens는 같은 규칙이다(정규화를 _token으로 나눠 두었다).
+절 본문을 자르는 section_body도 같은 방법이되, 코드 울타리를 여닫는 판정은 더 엄밀하다(fence_mask): 닫는 줄은
+열 때와 같은 글자를 열 때 이상 길게 쓰고 뒤에 공백만 올 수 있으며, 줄 머리에서 인라인 코드를 쓴 줄은 울타리로
+읽지 않는다. compare.py는 줄이 세 글자(백틱이나 물결표)로 시작하면 열고, 열 때와 같은 세 글자로 시작하는 줄에서
+닫는다. 이 도구는 의존성 없는 한 장짜리 스크립트라 어느 구성 요소의 코드나 환경도 가져오지 않는다(구성 요소의
+환경을 건드리지 않으려고). 그래서 규칙을 가져다 쓰는 대신 복제했고, 복제한 자리마다 출처 줄을 적었다.
+tools/tests/test_check_root_numbers.py의 test_number_tokens_follow_the_call_summary_rule과
+test_number_tokens_skip_names_and_read_signs_like_call_summary가 수 읽기의 같은 예를,
+test_code_fence_hash_lines_are_not_headings가 울타리 규칙의 차이를 고정한다. 규칙을 바꿀 때는 두 쪽을 함께 본다.
 
 종료 코드와 출력
     0 = 모두 통과, 1 = 선언 문제나 불일치, 2 = 선언 파일을 읽을 수 없음(없음, TOML 문법 오류, 모르는 표).
     문제는 한 줄에 하나씩 `<where>[<section>] <context 앞 40자>: <문제>`로 쓰고, 마지막 줄은
-    `선언 N개, 문제 M개`다. 판정은 끝 줄 글자가 아니라 종료 코드로 한다.
+    `선언 N개, 문제 M개`다(N은 [[number]], [[snapshot]], [[coverage]] 선언을 모두 더한 수). 판정은 끝 줄 글자가
+    아니라 종료 코드로 한다.
 
 실행
     uv run --no-project tools/check_root_numbers.py [--repo <저장소>] [--numbers <toml>]
@@ -327,7 +343,8 @@ def _form_problems(decl: dict, required: tuple[str, ...], optional: tuple[str, .
 class _Docs:
     """저장소 안 문서를 한 번만 읽어 두는 캐시. 읽지 못한 파일은 (None, 이유 글)로 기억한다.
 
-    UTF-8로 읽고(앞의 BOM은 GitHub가 보여 주는 대로 버린다), 줄바꿈은 읽으면서 "\\n"으로 통일된다.
+    UTF-8로 읽고, 줄바꿈은 읽으면서 "\\n"으로 통일된다. 앞의 BOM(U+FEFF)은 버린다(utf-8-sig): 첫 줄이 제목인
+    문서에서 BOM이 제목 앞 글자로 남아 그 제목이 제목으로 읽히지 않는 일을 막으려는 것이다.
     """
 
     def __init__(self, repo: Path) -> None:
@@ -372,6 +389,18 @@ def _find_all(haystack: str, needle: str) -> list[int]:
         found.append(i)
         i = haystack.find(needle, i + 1)
     return found
+
+
+def _line_around(text: str, start: int, end: int | None = None) -> tuple[int, str]:
+    """text에서 start 자리가 든 줄을 찾아 (줄이 시작하는 위치, 줄 글)을 돌려준다.
+
+    줄은 "\\n"으로 나뉜다(_Docs.read가 읽으면서 줄바꿈을 "\\n"으로 통일한다). 줄 끝은 end 자리(주지 않으면
+    start) 뒤의 첫 "\\n"이고, 그런 줄바꿈이 없으면 글 끝까지다(줄바꿈 없이 끝나는 글의 마지막 줄). 돌려주는 줄
+    글에는 줄바꿈이 들지 않는다. start와 end는 같은 줄에 있다고 본다: 수와 context는 한 줄 안에 있다.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", start if end is None else end)
+    return line_start, text[line_start : len(text) if line_end == -1 else line_end]
 
 
 def _locate(
@@ -430,9 +459,7 @@ def _boundary_problems(context_key: str, text: str, pos: int, context: str) -> l
         return []  # 수가 없는 context는 _value_problems가 이미 알린다
     last = in_context[-1]
     want = (pos + last.start(2), pos + last.end(2))  # 수의 숫자 부분이 문서에서 차지해야 하는 자리
-    line_start = text.rfind("\n", 0, want[0]) + 1
-    line_end = text.find("\n", want[1])
-    line = text[line_start : len(text) if line_end == -1 else line_end]
+    line_start, line = _line_around(text, want[0], want[1])
     for m in _NUMBER.finditer(line):
         if (line_start + m.start(2), line_start + m.end(2)) == want and _token(m) == _token(last):
             return []
@@ -470,9 +497,7 @@ def _check_number(decl: dict, index: int, docs: _Docs, spans: list[tuple[str, in
     if root.pos is not None and root.text is not None:
         messages += _boundary_problems("context", root.text, root.pos, context)
         spans.append((where, root.pos, root.pos + len(context)))
-        line_start = root.text.rfind("\n", 0, root.pos) + 1
-        line_end = root.text.find("\n", root.pos)
-        line = root.text[line_start : len(root.text) if line_end == -1 else line_end]
+        _, line = _line_around(root.text, root.pos)
         if decl["condition"] not in line:
             messages.append(f"condition {decl['condition']!r} is not on the same line as the context")
 
@@ -542,9 +567,7 @@ def _check_coverage(decl: dict, index: int, docs: _Docs, spans: list[tuple[str, 
         if any(s <= start and end <= e for s, e in covers):
             continue
         line_no = text.count("\n", 0, start) + 1
-        line_start = text.rfind("\n", 0, start) + 1
-        line_end = text.find("\n", end)
-        line = text[line_start : len(text) if line_end == -1 else line_end].strip()
+        line = _line_around(text, start, end)[1].strip()
         shown = body[m.start() : tail.end()]  # 문서에 적힌 그대로(부호와 % 또는 %p 포함)
         problems.append(
             Problem(

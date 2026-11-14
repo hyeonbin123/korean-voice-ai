@@ -27,8 +27,9 @@
         id, code   이름, 고정 상수(커밋·원본 경로·blob 해시)가 적힌 코드 파일.
         commit_pattern, source_pattern, blob_pattern
                    code 글에서 고정 커밋, 원본 경로, 원본 blob 해시를 뽑는 정규식. 괄호 묶음(캡처)이
-                   정확히 하나여야 하고 파일 안에서 정확히 한 번 맞아야 한다. 정규식은 파일 전체 글에
-                   건다(줄 단위 기준이 필요하면 (?m)을 앞에 둔다).
+                   정확히 하나여야 하고 파일 안에서 정확히 한 번 맞아야 하며, 맞은 자리에서 그 묶음이
+                   글을 잡아야 한다(`(…)?`처럼 참여하지 않을 수 있는 묶음이면 값을 뽑지 못해 문제다).
+                   정규식은 파일 전체 글에 건다(줄 단위 기준이 필요하면 (?m)을 앞에 둔다).
 
 검사하는 것 (어긋날 때마다 문제 한 줄. 아래 순서로 본다)
     1. [[dep.code]]: path가 git 추적 파일이고 그 글에 text가 들어 있다. 경로 계산 코드가 바뀌면 설명 문서가
@@ -36,7 +37,7 @@
     2. tracked의 각 경로가 `git ls-files --error-unmatch`를 통과한다. 디스크에만 있고 커밋하지 않은
        파일은 새로 받은 복제본에 없으므로 의존의 대상으로 삼을 수 없다.
     3. --local을 줄 때만: local의 각 경로가 디스크에 있다.
-    4. [[pinned]]: code 파일이 추적 파일이고, 세 정규식이 각각 정확히 한 번 맞고, 뽑은 커밋과 blob이
+    4. [[pinned]]: code 파일이 추적 파일이고, 세 정규식이 각각 정확히 한 번 맞아 값을 뽑고, 뽑은 커밋과 blob이
        40자 소문자 16진수 해시이며(브랜치·태그 이름처럼 움직이는 값은 '고정'이 아니다), 그 커밋이 이
        저장소의 이력에 있고, `git rev-parse <커밋>:<원본 경로>`가 적힌 blob과 같다. 사본 파일 본문이 그
        blob과 같은지는 이 도구가 보지 않는다(사본을 쓰는 구성 요소의 시험이 본다). 여기서는 코드에 적힌
@@ -79,9 +80,11 @@ CODE_KEYS = ("path", "text")
 PINNED_KEYS = ("id", "code", "commit_pattern", "source_pattern", "blob_pattern")
 
 # 고정 커밋과 blob으로 받아들이는 꼴: 40자 소문자 16진수(SHA-1 전체 해시). 줄임 해시나 브랜치·태그
-# 이름은 시간이 지나면 다른 객체를 가리킬 수 있어 '고정'이 아니다. 커밋과 blob은 git 인자로 넘기기 전에
-# 이 꼴만 통과시키므로, 정규식이 넓어도 옵션처럼 읽히는 글(`-`로 시작하는 글)이 git에 닿지 않는다. 원본
-# 경로는 `<커밋>:` 뒤에 붙여 한 인자로 넘기므로 옵션으로 읽히지 않는다.
+# 이름은 시간이 지나면 다른 객체를 가리킬 수 있어 '고정'이 아니다. git에 인자로 넘기는 값은 커밋이고
+# (`cat-file -e`와 `rev-parse`의 `<커밋>:<원본 경로>`), 이 꼴을 통과한 커밋만 넘긴다. blob은 git에 넘기지
+# 않고 `rev-parse`가 돌려준 값과 견주며, 견주기 전에 같은 꼴을 요구한다. 그래서 정규식이 넓어도 옵션처럼
+# 읽히는 글(`-`로 시작하는 글)이 git 인자로 닿지 않는다. 원본 경로는 `<커밋>:` 뒤에 붙여 한 인자로 넘기므로
+# 옵션으로 읽히지 않는다.
 _FULL_HASH = re.compile(r"[0-9a-f]{40}", re.ASCII)
 
 
@@ -235,7 +238,11 @@ def _parse_dep(item: dict, number: int, problems: list[str]) -> Dep | None:
 
 
 def _parse_pinned(item: dict, number: int, problems: list[str]) -> Pinned | None:
-    """[[pinned]] 표 하나를 읽는다. 정규식은 컴파일되고 괄호 묶음이 정확히 하나여야 한다. 아니면 None."""
+    """[[pinned]] 표 하나를 읽는다. 정규식은 컴파일되고 괄호 묶음이 정확히 하나여야 한다. 아니면 None.
+
+    묶음의 개수만 본다. `(…)?`처럼 맞은 자리에서 묶음이 글을 잡지 못하는 정규식인지는 고정 코드의 글에 맞춰
+    봐야 알 수 있어 _check_pinned가 본다.
+    """
     where = f"[[pinned]] {number}번째"
     _unknown_keys(item, PINNED_KEYS, where, problems)
     pin_id = _text_of(item, "id", where, problems)
@@ -384,13 +391,24 @@ def _check_pinned(pin: Pinned, probe: _Probe) -> tuple[list[str], str | None]:
         ("source_pattern", pin.source_pattern),
         ("blob_pattern", pin.blob_pattern),
     ):
-        found = [match.group(1) for match in re.finditer(pattern, text)]
-        if len(found) == 1:
-            values[key] = found[0]
-        else:
+        matches = list(re.finditer(pattern, text))
+        if len(matches) != 1:
             problems.append(
-                f"{pin.id}: {key} - {pin.code}에서 {len(found)}번 맞았다(정확히 한 번이어야 한다)"
+                f"{pin.id}: {key} - {pin.code}에서 {len(matches)}번 맞았다(정확히 한 번이어야 한다)"
             )
+            continue
+        # 정규식에 괄호 묶음이 하나 있다는 것은 읽을 때 확인한다. 그래도 `(…)?`나 `(가)|나`처럼 맞은 자리에서
+        # 그 묶음이 참여하지 않을 수 있다. 그때 group(1)은 None이고, 값이 없는 것으로 그냥 넘어가면 커밋이
+        # 이력에 있는지, 원본 blob이 같은지, 문서가 커밋 앞 7자를 적었는지가 모두 건너뛰어지는데 문제는 하나도
+        # 나오지 않는다. 선언의 오타가 검사를 조용히 끄지 못하도록 이 경우를 문제로 알린다.
+        captured = matches[0].group(1)
+        if captured is None:
+            problems.append(
+                f"{pin.id}: {key} - {pin.code}에서 맞았지만 괄호 묶음이 아무 글도 잡지 못했다"
+                "(참여하지 않는 묶음은 값을 뽑을 수 없다)"
+            )
+            continue
+        values[key] = captured
 
     commit = values.get("commit_pattern")
     source = values.get("source_pattern")
