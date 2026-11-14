@@ -1,15 +1,17 @@
 """`tools/check_root_numbers.py` 시험.
 
 이 도구는 루트 문서에 옮겨 적은 수치가 구성 요소 기록 글자와 같은지 선언 파일(root-numbers.toml)로 대조한다.
-시험은 세 가지를 고정한다.
+시험은 네 가지를 고정한다.
     1. 규칙대로 쓴 선언은 통과한다.
     2. 규칙을 어길 때마다 문제로 알린다(조용히 건너뛰지 않는다). 문제는 한 번에 하나씩만 만들어, 어느 규칙이
        어떤 문제를 냈는지 시험이 정확히 가리킬 수 있게 한다.
     3. 파일을 읽고 출력하는 방법: 경로 꼴, BOM과 CRLF가 든 문서, 줄바꿈 없이 끝나는 문서, --repo를 주지 않았을
        때의 기본값, 선언 수 세기, 파이프로 나가는 출력의 인코딩, 수를 읽는 정규식의 막기 규칙.
+    4. 실제 저장소의 선언 파일이 첫 화면과 docs/ 문서, 구성 요소 기록과 맞는다(마지막 시험 하나).
 
-시험용 저장소(`fake`)는 tmp_path 안에 글 두 개로 만든다: 첫 화면을 흉내 낸 루트 README.md, 수치의 출처를
-흉내 낸 whisper-ko-ft/README.md. 실제 저장소 문서는 읽지 않는다.
+1~3의 시험용 저장소(`fake`)는 tmp_path 안에 글 두 개로 만든다: 첫 화면을 흉내 낸 루트 README.md, 수치의 출처를
+흉내 낸 whisper-ko-ft/README.md. 실제 저장소의 선언 파일과 문서는 마지막 시험
+test_repository_root_numbers_pass만 읽는다.
 """
 
 import codecs
@@ -534,3 +536,22 @@ def test_script_prints_utf8_even_when_output_is_piped(fake):
     lines = done.stdout.decode("utf-8").splitlines()
     assert lines[0].startswith(f"README.md[구성 요소] {MINUS}2.0%p: as_of 2026-11-20 does not appear")
     assert lines[-1] == "선언 1개, 문제 1개"
+
+
+def test_repository_root_numbers_pass():
+    # 실제 저장소의 선언 파일(root-numbers.toml)로 첫 화면(README.md)과 docs/model-choices.md를 대조한다. 옮겨 적은
+    # 수가 구성 요소 기록과 같은 글자인지, 선언 없는 퍼센트 수가 끼어들지 않았는지를 이 저장소에서 본다.
+    decls = load_declarations(REPO / "root-numbers.toml")
+    # check(...) == []만 보면 선언이 줄거나 비어도 통과하므로, 먼저 두 문서가 쓰는 만큼 선언이 있는지 본다. 하한은
+    # 2026-11-14에 두 문서에 쓴 수다: README.md의 [[number]] 11개(구성 요소 표의 대표 수치), docs/model-choices.md의
+    # [[number]] 26개, README.md의 [[snapshot]] 14개(구성 요소 표의 테스트 수 12개, AI 도구 절의 커밋 수 2개). 문서에
+    # 수를 더하면 선언도 늘어나므로 '같다'가 아니라 '이상'으로 본다.
+    wheres = [decl.get("where") for decl in decls.numbers]
+    assert wheres.count("README.md") >= 11
+    assert wheres.count("docs/model-choices.md") >= 26
+    assert sum(decl.get("where") == "README.md" for decl in decls.snapshots) >= 14
+    # 두 문서 모두 파일 전체에 건 coverage가 있어야 한다. section을 준 coverage는 그 절 밖의 퍼센트 수를 놓친다.
+    whole_file = {decl.get("where") for decl in decls.coverage if "section" not in decl}
+    assert {"README.md", "docs/model-choices.md"} <= whole_file
+    problems = [str(problem) for problem in check(decls, REPO)]
+    assert problems == []

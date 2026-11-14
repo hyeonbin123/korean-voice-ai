@@ -1,6 +1,6 @@
 """`tools/check_links.py` 시험.
 
-이 도구는 루트 문서(README.md, docs/*.md, e2e/README.md)의 상대 링크가 열리는지 본다. 시험은 다섯 가지를
+이 도구는 루트 문서(README.md, docs/*.md, e2e/README.md)의 상대 링크가 열리는지 본다. 시험은 여섯 가지를
 고정한다.
     1. 제목 앵커 만들기(github_slug, heading_slugs): GitHub와 같은 slug, 같은 제목의 번호 붙이기, 제목으로 읽는 줄.
     2. 링크 찾기(iter_links): 인라인 링크·그림·참조 정의를 찾고, 코드 안의 글은 링크로 읽지 않는다.
@@ -9,9 +9,10 @@
     4. 검사할 문서 모음(default_files): 정해진 문서만 정해진 순서로. 파일 시스템이 돌려주는 순서에 기대지 않는다.
     5. 명령줄(main): 종료 코드 0(통과) / 1(끊긴 링크) / 2(검사를 시작할 수 없음)와 출력 꼴, 현재 폴더 기준
        상대 경로 인자, 읽기 실패.
+    6. 실제 저장소의 루트 문서에 끊긴 링크가 없다(마지막 시험 하나).
 
-시험용 저장소는 tmp_path 아래 `repo` 폴더에 글 몇 개로 만든다. 저장소 밖 파일이 필요한 시험은 그 부모 폴더
-(tmp_path)를 쓴다. 실제 저장소 문서는 읽지 않는다.
+1~5의 시험용 저장소는 tmp_path 아래 `repo` 폴더에 글 몇 개로 만든다. 저장소 밖 파일이 필요한 시험은 그 부모 폴더
+(tmp_path)를 쓴다. 실제 저장소 문서는 마지막 시험 test_repository_documents_have_no_broken_links만 읽는다.
 """
 
 import codecs
@@ -23,6 +24,7 @@ from urllib.parse import quote
 
 import pytest
 from check_links import check_file, default_files, github_slug, heading_slugs, iter_links, main
+from conftest import REPO
 
 # 이 파일은 <저장소>/tools/tests/에 있다. parents[1] = tools. 도구를 스크립트로 직접 돌리는 시험이 쓴다.
 TOOLS = Path(__file__).resolve().parents[1]
@@ -521,3 +523,28 @@ def test_script_prints_utf8_even_when_output_is_piped(repo):
     lines = done.stdout.decode("utf-8").splitlines()
     assert lines[0].startswith("README.md:1: docs/없음.md: ")
     assert lines[-1] == "링크 1개, 끊김 1개"
+
+
+# 인자 없이 도구를 부를 때 검사해야 하는 실제 저장소의 루트 문서(저장소 뿌리 기준 슬래시 경로): 첫 화면, docs/의
+# 여섯 문서, 통화 한 건 시연 문서.
+REPOSITORY_DOCUMENTS = (
+    "README.md",
+    "docs/architecture.md",
+    "docs/environments.md",
+    "docs/history.md",
+    "docs/measurement.md",
+    "docs/model-choices.md",
+    "docs/notices.md",
+    "e2e/README.md",
+)
+
+
+def test_repository_documents_have_no_broken_links():
+    # 실제 저장소의 루트 문서에 끊긴 링크가 없는지 본다. 먼저 검사할 문서 모음(default_files)에 위 문서가 모두 들었는지
+    # 본다: 문서가 빠지거나 이름이 바뀌어 모음이 줄면, 아무것도 검사하지 않은 채 '끊긴 링크 없음'으로 통과할 수 있다.
+    files = default_files(REPO)
+    found = [path.relative_to(REPO).as_posix() for path in files]
+    missing = [rel for rel in REPOSITORY_DOCUMENTS if rel not in found]
+    assert missing == [], f"default_files에 없는 문서: {missing}"
+    problems = [line for path in files for line in check_file(REPO, path)]
+    assert problems == []

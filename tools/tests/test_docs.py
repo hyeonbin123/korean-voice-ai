@@ -1,6 +1,16 @@
-"""루트 문서(docs/)가 저장소의 파일과 git 이력에 맞는지 보는 시험.
+"""루트 문서(README.md, docs/)가 저장소의 파일과 git 이력에 맞는지 보는 시험.
 
 무엇을 지키나
+    README.md         첫 화면. 두 가지를 본다. (1) '실행과 테스트' 절에 줄바꿈 변환을 끄는 받기 명령
+                      (git clone -c core.autocrlf=false ...)과 '각 구성 요소 폴더 안에서' 설치·테스트한다는
+                      말이 있는지. Windows Git의 기본값(core.autocrlf=true)으로 받으면 .gitattributes가 없는
+                      구성 요소의 파일이 CRLF로 풀려 기록에 해시가 남은 바이트가 달라지고, 루트에는 파이썬
+                      프로젝트가 없어 저장소 뿌리에서 pytest나 uv sync를 돌리면 실패하거나 다섯 구성 요소의
+                      시험을 한꺼번에 모으기 때문이다. (2) '통화 한 건의 흐름' 절의 Mermaid 그림에서 노드
+                      이름이 ASCII 영숫자·밑줄뿐이고, 한글·괄호·쌍점 같은 글자가 든 노드 글과 선의 글이
+                      큰따옴표로 감싸져 있는지. 따옴표 없는 특수 글자는 GitHub 화면에서 그림 대신 오류 상자가
+                      보이게 하는 흔한 원인이다. 그림이 실제로 그려지는지는 이 시험이 증명하지 못한다(GitHub
+                      화면에서 따로 본다).
     docs/notices.md   구성 요소 곳곳에 흩어진 제3자 고지(라이선스 원문, 사본의 출처,
                       데이터·모델 라이선스 표)의 자리를 모은 문서다. 고지 파일이나 고지 절 하나를
                       가리키는 링크가 빠지면, 저장소를 처음 보는 사람은 그 고지가 있다는 것을 알 길이
@@ -25,10 +35,12 @@
     main 브랜치가 없을 수 있다.
 """
 
+import re
 import subprocess
 from urllib.parse import unquote
 
 from check_links import iter_links
+from check_root_numbers import fence_mask, section_body
 from conftest import REPO
 
 # 합친 다섯 저장소의 이름. 이 저장소의 폴더 이름이고, 태그 archive/<이름>과 옛 주소의 마지막
@@ -184,3 +196,135 @@ def test_history_names_the_move_and_merge_commits():
         assert len(merged) == 1, f"{name}의 이동 커밋 {move}를 들인 병합 커밋이 하나가 아니다: {merged}"
         assert move in history, f"docs/history.md에 {name}의 이동 커밋 {move}가 없다"
         assert merged[0] in history, f"docs/history.md에 {name}의 병합 커밋 {merged[0]}가 없다"
+
+
+# 첫 화면(README.md)에서 아래 두 시험이 읽는 절의 제목('## ' 뒤의 글). 바깥에서 이 제목의 앵커로 링크할 수 있어
+# 고정한 글자다.
+RUN_SECTION = "실행과 테스트"
+FLOW_SECTION = "통화 한 건의 흐름"
+
+# '실행과 테스트' 절에 그대로 있어야 하는 글. 받기 명령은 줄바꿈 변환을 끄는 옵션까지 글자 그대로 본다.
+CLONE_COMMAND = "git clone -c core.autocrlf=false https://github.com/hyeonbin123/korean-voice-ai"
+INSIDE_COMPONENTS = "각 구성 요소 폴더 안에서"
+
+# Mermaid 노드 정의의 머리: 이름 바로 뒤에 여는 괄호([, (, {). 이름은 공백·큰따옴표·세로줄·괄호가 아닌 글자들로
+# 넓게 읽는다. 이름에 쓰면 안 되는 글자(하이픈, 한글 등)가 든 이름도 일단 이름으로 읽어 아래 _NODE_ID 검사에서
+# 걸리게 하려는 것이다. 그래서 화살표에 이름을 공백 없이 붙여 쓴 줄(a-->b[...])도 이름이 'a-->b'로 읽혀 걸린다.
+# 그림에서는 화살표 앞뒤에 공백을 둔다.
+_NODE_HEAD = re.compile(r'(?P<id>[^\s"|\[\](){}]+)(?P<open>[\[({])')
+# 여는 괄호마다 닫는 괄호.
+_CLOSERS = {"[": "]", "(": ")", "{": "}"}
+# 선에 단 글(-->|글| 꼴)의 세로줄 사이.
+_EDGE_LABEL = re.compile(r"\|([^|]*)\|")
+# 큰따옴표로 감싼 글 하나.
+_QUOTED = re.compile(r'"[^"]*"')
+# 따옴표 없이 써도 되는 글: ASCII 영숫자, 공백, 하이픈, 밑줄, 슬래시, 점만.
+_PLAIN = re.compile(r"[A-Za-z0-9 _./-]*")
+# 노드 이름(ID): ASCII 영숫자와 밑줄만.
+_NODE_ID = re.compile(r"[A-Za-z0-9_]+")
+
+
+def readme_section(section: str) -> str:
+    """README.md의 '## <section>' 절 본문(다음 같은 수준 이상의 제목 전까지).
+
+    절을 자르는 규칙은 루트 수치 검사 도구의 check_root_numbers.section_body를 그대로 쓴다(코드 울타리 안의
+    '#' 줄은 제목이 아니다). 해석을 두 벌 두지 않으려는 것이다. 그 제목이 정확히 한 번 나오지 않으면 실패한다.
+    """
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    body, hits = section_body(text, section)
+    assert hits == 1 and body is not None, (
+        f"README.md에 '{section}' 제목이 {hits}번 나온다(정확히 한 번이어야 한다)"
+    )
+    return body
+
+
+def fenced_blocks(text: str) -> list[tuple[str, list[str]]]:
+    """글에 있는 코드 울타리마다 (정보 글, 안쪽 줄들)을 돌려준다.
+
+    어느 줄이 울타리 안인지는 check_root_numbers.fence_mask가 정한다(여는 줄·안쪽 줄·닫는 줄이 모두 True). 그
+    True가 이어진 덩어리 하나를 울타리 하나로 본다. 정보 글은 여는 줄에서 앞쪽 공백과 백틱·물결표를 뗀 나머지다
+    (```mermaid면 'mermaid'). 안쪽 줄에서는 여는 줄과, 백틱이나 물결표 세 개 이상만으로 된 닫는 줄을 뺀다(닫히지
+    않은 울타리는 글 끝까지가 안쪽이다).
+
+    주의: 닫는 줄 바로 다음 줄에서 다른 울타리를 열면(사이에 빈 줄이 없으면) 두 울타리가 하나로 읽힌다. 정보
+    글은 앞 울타리의 것이 되고, 앞 울타리의 닫는 줄과 뒤 울타리의 줄이 안쪽 줄에 섞인다. 첫 화면에는 그런 꼴이
+    없다(울타리 앞뒤에 빈 줄을 둔다).
+    """
+    lines = text.splitlines()
+    mask = fence_mask(text)
+    blocks: list[tuple[str, list[str]]] = []
+    start = 0
+    while start < len(lines):
+        if not mask[start]:
+            start += 1
+            continue
+        end = start
+        while end + 1 < len(lines) and mask[end + 1]:
+            end += 1
+        info = lines[start].strip().lstrip("`~").strip()
+        inner = lines[start + 1 : end + 1]
+        last = inner[-1].strip() if inner else ""
+        if len(last) >= 3 and set(last) in ({"`"}, {"~"}):
+            inner = inner[:-1]
+        blocks.append((info, inner))
+        start = end + 1
+    return blocks
+
+
+def mermaid_labels(lines: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
+    """Mermaid flowchart 줄들에서 노드 정의 (이름, 괄호 안 글) 목록과 선에 단 글 목록을 돌려준다.
+
+    큰따옴표 안의 글은 괄호나 세로줄이 들어 있어도 그림의 문법이 아니므로, 먼저 그 안을 같은 길이의 공백으로
+    가린 줄에서 노드 머리(_NODE_HEAD)와 선의 글(_EDGE_LABEL)을 찾고, 글 자체는 가리기 전의 줄에서 같은 자리를
+    잘라 온다. 그래서 돌려주는 글에는 감싼 큰따옴표가 그대로 있다. '%%'로 시작하는 줄은 Mermaid 주석이라 읽지
+    않는다.
+
+    읽는 꼴: 노드 정의는 네모·둥근·마름모 괄호 하나로 감싼 것(id[...], id(...), id{...})만, 선의 글은
+    -->|글| 꼴만 읽는다. 겹괄호 모양(id((...)), id[(...)] 등)은 안쪽 괄호까지 글로 읽혀 따옴표 검사에서 걸리고,
+    -- 글 --> 꼴로 단 글은 읽지 않는다. 첫 화면의 그림은 읽는 꼴로만 쓴다.
+    """
+    nodes: list[tuple[str, str]] = []
+    edge_labels: list[str] = []
+    for line in lines:
+        if line.strip().startswith("%%"):
+            continue
+        masked = _QUOTED.sub(lambda found: '"' + " " * (len(found.group(0)) - 2) + '"', line)
+        for head in _NODE_HEAD.finditer(masked):
+            close = masked.find(_CLOSERS[head["open"]], head.end())
+            nodes.append((head["id"], line[head.end() : len(line) if close == -1 else close]))
+        for label in _EDGE_LABEL.finditer(masked):
+            edge_labels.append(line[label.start(1) : label.end(1)])
+    return nodes, edge_labels
+
+
+def needs_quotes(text: str) -> bool:
+    """괄호 안이나 선에 단 글이 큰따옴표로 감싸야 하는데 감싸지 않았으면 True.
+
+    글 전체가 큰따옴표 하나로 감싸져 있거나, ASCII 영숫자·공백·하이픈·밑줄·슬래시·점만으로 되어 있으면 False다.
+    """
+    return not (_QUOTED.fullmatch(text) or _PLAIN.fullmatch(text))
+
+
+def test_readme_clone_keeps_bytes_and_runs_inside_components():
+    body = readme_section(RUN_SECTION)
+    assert CLONE_COMMAND in body, f"'{RUN_SECTION}' 절에 받기 명령 '{CLONE_COMMAND}'이 없다"
+    assert INSIDE_COMPONENTS in body, f"'{RUN_SECTION}' 절에 '{INSIDE_COMPONENTS}'라는 말이 없다"
+
+
+def test_readme_mermaid_labels_are_quoted():
+    body = readme_section(FLOW_SECTION)
+    # 먼저 검사할 그림이 있는지 본다. 울타리가 없거나 정보 글이 달라(```Mermaid 등) 아무것도 읽지 못한 채 아래
+    # 검사가 모두 빈 목록으로 통과하는 일을 막으려는 것이다.
+    blocks = [inner for info, inner in fenced_blocks(body) if info == "mermaid"]
+    assert len(blocks) == 1, f"'{FLOW_SECTION}' 절의 mermaid 울타리가 {len(blocks)}개다(정확히 하나여야 한다)"
+    content = [line for line in blocks[0] if line.strip()]
+    assert content and content[0].strip() == "flowchart LR", (
+        f"그림의 첫 줄이 'flowchart LR'이 아니다: {content[:1]}"
+    )
+    nodes, edge_labels = mermaid_labels(content[1:])
+    assert nodes, "mermaid 그림에서 노드 정의를 하나도 읽지 못했다"
+    bad_ids = [node_id for node_id, _ in nodes if not _NODE_ID.fullmatch(node_id)]
+    assert bad_ids == [], f"ASCII 영숫자·밑줄이 아닌 글자가 든 노드 이름: {bad_ids}"
+    texts = [text for _, text in nodes] + edge_labels
+    unquoted = [text for text in texts if needs_quotes(text)]
+    assert unquoted == [], f"큰따옴표로 감싸지 않은 글: {unquoted}"
