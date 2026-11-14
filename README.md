@@ -63,7 +63,7 @@ flowchart LR
 
 ## 증거 정책
 
-- 다섯 저장소의 원래 커밋을 해시 그대로 들여 그 해시가 여기서 열린다(예: `git show a5717ce`). 파일 이력은 git 명령으로 본다([이력 따라가기](docs/history.md#이력-따라가기)).
+- 다섯 저장소의 원래 커밋을 해시 그대로 들여, 구성 요소 문서가 근거로 적은 그 해시가 여기서 열린다(예: `git show a5717ce`). 파일 이력은 git 명령으로 본다([이력 따라가기](docs/history.md#이력-따라가기)).
 - 기록한 수치·판정·규칙 문장은 고치지 않고 날짜를 붙여 덧붙인다. whisper-ko-ft·support-agent·call-summary의 기록 수치는 실행 기록에서 다시 계산하는 시험이 CI에서 지킨다.
 - 첫 화면과 `docs/`의 수치는 [`root-numbers.toml`](root-numbers.toml)이 출처 글과 짝짓고 [`tools/check_root_numbers.py`](tools/check_root_numbers.py)가 대조한다(테스트 수·커밋 수는 센 날짜와 근거만 적는다).
 
