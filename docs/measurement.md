@@ -5,7 +5,7 @@
 ## 공통 원칙
 
 1. **측정 규칙과 판정 기준을 먼저 커밋한다.** 후보, 지표, 고르는 규칙, 판정 기준을 재기 전에 그 구성 요소의 `docs/experiments.md`에 적어 커밋하고 잰다. 그 문서의 규칙 절에는 '측정 전', '재기 전'처럼 언제 적었는지가 붙어 있다.
-2. **개발용 묶음으로 고르고, 시험용 묶음은 고른 것만 한 번 잰다.** 후보는 개발용(validation, dev) 묶음으로 고른다. 시험용(test) 묶음은 그 실험에서 고른 것만 한 번 재고, 그 결과를 보고 고른 것을 바꾸지 않는다. 이것은 실험 하나 안의 규칙이다. 실험을 건너서 같은 시험용 묶음을 다시 쓴 구성 요소도 있고, 그 사실을 기록에 남겼다(아래 표의 support-agent와 call-summary 줄).
+2. **개발용 묶음으로 고르고, 시험용 묶음은 한 번만 잰다.** 후보는 개발용(validation, dev) 묶음으로 고른다. 시험용(test) 묶음은 그 실험에서 고른 것(과 견줄 기준선 등)만 한 번 재고, 그 결과를 보고 고른 것을 바꾸지 않는다. 시험용 묶음으로 무엇을 재는지는 구성 요소의 규칙마다 다르다(아래 표의 마지막 열). 이것은 실험 하나 안의 규칙이다. 실험을 건너서 같은 시험용 묶음을 다시 쓴 구성 요소도 있고, 그 사실을 기록에 남겼다(아래 표의 support-agent와 call-summary 줄).
 3. **기록한 수치는 고치지 않고, 바로잡거나 더 확인한 것은 날짜를 붙여 덧붙인다.** 예: whisper-ko-ft README의 '2026-10-24 추가 확인'(기록된 수치·판정은 그대로 두고 조건을 더함), voice-translator README의 '2026-11-03 덧붙임'(설정이 바뀐 뒤에도 표의 test 수치는 바뀌기 전 설정으로 잰 값으로 둠), call-summary README의 '2026-10-29 바로잡음'.
 4. **부정적 결과도 공개한다.** 개선이 없거나 기준을 넘지 못한 판정도 같은 자리에 적는다. 예: support-agent의 '판정: 개선 없음', whisper-ko-ft의 '도메인 전용' 판정, call-summary가 음성 인식기를 바꿔 보고 바꾸지 않은 판정.
 5. **수치 옆에 조건을 적는다.** 어떤 데이터와 설정에서 잰 값인지를 수치와 같은 자리에 둔다. 예: whisper-ko-ft의 Zeroth 수치는 처음 듣는 화자가 학습에서 본 문장을 읽는 조건이다. call-summary 결과 요약에는 모델마다 양자화와 실행 방식이 적혀 있다.
@@ -14,7 +14,7 @@
 
 | 구성 요소 | 규칙과 결과 | 기록 수치를 지키는 시험 | 시험용 묶음을 쓰는 방식 |
 |---|---|---|---|
-| whisper-ko-ft | [`docs/experiments.md`](../whisper-ko-ft/docs/experiments.md) | [`tests/test_recorded_reports.py`](../whisper-ko-ft/tests/test_recorded_reports.py): 커밋된 리포트(`reports/`)의 발화별 채점과 요약 오류율을 지금 코드로 다시 계산해 기록과 같은지 본다 | README 결과 표의 'test (단계마다 한 번 측정)': 단계마다 고른 후보를 test에서 한 번 잰다 |
+| whisper-ko-ft | [`docs/experiments.md`](../whisper-ko-ft/docs/experiments.md) | [`tests/test_recorded_reports.py`](../whisper-ko-ft/tests/test_recorded_reports.py): 커밋된 리포트(`reports/`)의 발화별 채점과 요약 오류율을 지금 코드로 다시 계산해 기록과 같은지 본다 | README 결과 표의 'test (단계마다 한 번 측정)': 규칙은 단계가 끝날 때 기준선과 고른 모델 하나만 test에서 한 번 재는 것이다 |
 | stt-scratch | [`docs/experiments.md`](../stt-scratch/docs/experiments.md), AI가 만든 코드를 어떻게 검증했는지의 기록 [`docs/ai-verification.md`](../stt-scratch/docs/ai-verification.md) | [`tests/test_sealed_breakdown.py`](../stt-scratch/tests/test_sealed_breakdown.py): 저장된 봉인 test 가설로 사후 분석을 다시 계산해 커밋된 결과와 같은지 본다 | 봉인 test를 2026-10-14에 한 번 쟀다. 두 번째 시작과 다른 구성으로의 재개를 막고 실행 중에는 잠그는 보호 장치([`scripts/stage7.py`](../stt-scratch/scripts/stage7.py), 시험 [`tests/test_stage7_guards.py`](../stt-scratch/tests/test_stage7_guards.py))가 있다 |
 | voice-translator | [`docs/experiments.md`](../voice-translator/docs/experiments.md) | [`backend/tests/test_eval_metrics.py`](../voice-translator/backend/tests/test_eval_metrics.py): 기록된 말 끝 판정·동시통역 자막 수치를 만든 지표 함수를 손으로 계산할 수 있는 사례로 고정한다 | README '측정해서 고른 결과': 선택은 FLEURS validation으로, 확인은 고른 설정만 test로 한 번 |
 | support-agent | [`docs/experiments.md`](../support-agent/docs/experiments.md) | [`tests/test_recorded_numbers.py`](../support-agent/tests/test_recorded_numbers.py): README와 `docs/experiments.md`의 기록 수치를 커밋된 `reports/` 기록에서 다시 계산해 글과 맞춰 본다 | 규칙은 실험이 끝날 때 고른 후보만 시험용 40과제로 한 번 잰다는 것이다. 실험을 건너서는 같은 40과제를 다시 썼고, 시험용을 쓴 기록을 모두 [시험용 사용 장부](../support-agent/docs/experiments.md#시험용-사용-장부-2026-10-29부터-적음-측정-없음)에 적는다(위 시험이 장부를 실행 기록과 맞춰 본다) |

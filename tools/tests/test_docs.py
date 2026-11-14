@@ -4,16 +4,19 @@
     docs/notices.md   구성 요소 곳곳에 흩어진 제3자 고지(라이선스 원문, 사본의 출처,
                       데이터·모델 라이선스 표)의 자리를 모은 문서다. 고지 파일이나 고지 절 하나를
                       가리키는 링크가 빠지면, 저장소를 처음 보는 사람은 그 고지가 있다는 것을 알 길이
-                      없다. 그래서 가리켜야 할 대상 목록(NOTICE_TARGETS)을 글자로 고정한다.
+                      없다. 그래서 가리켜야 할 대상 목록(NOTICE_TARGETS)을 글자로 고정한다. 그 목록은
+                      손으로 적은 것이라 새로 들어온 고지를 스스로 잡지 못하므로, 라이선스 원문의
+                      표지 글(MIT·BSD·Apache-2.0)이 든 추적 파일을 git grep으로 찾아 notices.md가
+                      그 파일을 모두 가리키는지도 본다.
     docs/history.md   다섯 저장소를 이 저장소의 같은 이름 폴더로 합친 기록이다. 원래 마지막 커밋의
                       전체 해시와 옛 주소, 합칠 때 만든 이동 커밋·병합 커밋의 전체 해시가 적혀 있어야
                       '원래 커밋을 해시 그대로 들였다'는 말을 누구나 이 저장소의 git만으로 다시 확인할
                       수 있다.
 
 읽는 것
-    실제 저장소의 문서와 git 이력(태그 archive/<이름>과 HEAD에서 닿는 커밋). 시험용 가짜 저장소는
-    만들지 않는다. 이동·병합 커밋은 로컬 기록 파일이 아니라 저장소의 git만으로 찾는다. 공개 저장소의
-    시험은 저장소 밖의 파일을 읽을 수 없기 때문이다.
+    실제 저장소의 문서, 추적 파일의 내용(git grep), git 이력(태그 archive/<이름>과 HEAD에서 닿는
+    커밋). 시험용 가짜 저장소는 만들지 않는다. 이동·병합 커밋은 로컬 기록 파일이 아니라 저장소의
+    git만으로 찾는다. 공개 저장소의 시험은 저장소 밖의 파일을 읽을 수 없기 때문이다.
 
 주의
     태그와 전체 이력이 있어야 한다. 얕은 체크아웃이나 태그를 받지 않은 체크아웃에서는 실패한다
@@ -59,8 +62,21 @@ NOTICE_TARGETS = (
     "../voice-translator/frontend/src/conversation/assets/SOURCE.md",
     "../voice-translator/frontend/src/test/nginx.test.ts",
     "../voice-translator/README.md#모델과-데이터의-라이선스",
+    # voice-translator: 참조 코드를 따라 옮겨 쓴 Supertonic 3 추론 코드(머리 docstring에 MIT 원문)
+    "../voice-translator/backend/app/services/supertonic.py",
     # stt-scratch: 다시 배포하는 전사·가설의 데이터 귀속 절
     "../stt-scratch/docs/data.md#귀속-2026-10-24-확인",
+)
+
+# 라이선스 원문의 표지 글. MIT 원문의 "Permission is hereby granted, ...", BSD 원문의 "Redistribution
+# and use in source and binary forms, ...", Apache-2.0의 머리 고지와 원문 부록에 함께 있는 "Licensed
+# under the Apache License, ..."에서 땄다. 이 글이 든 추적 파일은 다른 곳의 코드·파일과 그 라이선스를
+# 담고 있으므로 docs/notices.md가 그 파일을 가리켜야 한다. 위 NOTICE_TARGETS는 손으로 고정한 목록이라
+# 새로 들어온 고지를 스스로 잡지 못해 이 검색으로 메운다. 다른 라이선스(GPL, CC 등)의 원문은 찾지 않는다.
+LICENSE_TEXT_MARKERS = (
+    "Permission is hereby granted",
+    "Redistribution and use in source and binary forms",
+    "Licensed under the Apache License",
 )
 
 
@@ -105,6 +121,28 @@ def test_notices_points_to_every_notice_file():
     targets = {unquote(target) for _, target in iter_links(text)}
     missing = [target for target in NOTICE_TARGETS if target not in targets]
     assert missing == [], f"docs/notices.md가 가리키지 않는 고지: {missing}"
+
+
+def test_notices_points_to_every_file_with_license_text():
+    # 추적 파일에서 표지 글을 찾는다. git grep 옵션: -l 파일 이름만, -I 바이너리 제외, -F 글자 그대로,
+    # -z 이름을 NUL로 나눠 내보낸다(한글 경로도 따옴표·8진 이스케이프 없이 받으려고). 이 시험 파일은 표지
+    # 글을 상수로 담고 있어 뺀다. 저장소 밖 파일과 추적하지 않는 파일은 git grep이 보지 않는다.
+    args = ["grep", "-l", "-I", "-F", "-z"]
+    for marker in LICENSE_TEXT_MARKERS:
+        args += ["-e", marker]
+    args += ["--", ".", ":(exclude)tools/tests/test_docs.py"]
+    done = subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, encoding="utf-8")
+    # 종료 코드 0 = 찾음, 1 = 찾은 것 없음, 그 밖 = git grep 자체의 실패.
+    assert done.returncode in (0, 1), f"git grep 실패({done.returncode}): {done.stderr}"
+    found = sorted(path for path in done.stdout.split("\0") if path)
+    # 지금 저장소에는 표지 글이 든 파일이 있다. 하나도 못 찾으면 검색이 제대로 돌지 않은 것으로 보고
+    # 실패시킨다(빈 결과로 조용히 통과하지 않게).
+    assert found, "라이선스 원문의 표지 글이 든 추적 파일을 하나도 찾지 못했다"
+    text = (REPO / "docs" / "notices.md").read_text(encoding="utf-8")
+    targets = {unquote(target) for _, target in iter_links(text)}
+    # git grep은 저장소 뿌리 기준 경로를 내고, notices.md는 docs/ 아래에 있어 링크 앞에 ../가 붙는다.
+    missing = [path for path in found if f"../{path}" not in targets]
+    assert missing == [], f"라이선스 원문이 든 파일을 docs/notices.md가 가리키지 않는다: {missing}"
 
 
 def test_history_names_every_original_head_and_address():

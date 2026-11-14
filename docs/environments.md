@@ -6,15 +6,15 @@
 
 | 구성 요소 | 파이썬 | 잠금 파일 | CI 설치 범위 | 로컬 환경에 더하는 그룹 | GPU를 쓰는 곳 | 기본 포트 | compose 프로젝트 |
 |---|---|---|---|---|---|---|---|
-| whisper-ko-ft | `>=3.11,<3.13` | `uv.lock` | 기본 + `dev`·`ct2` 그룹의 잠긴 판(torch는 같은 판의 CPU 빌드) | `dev`, `ct2` | 학습·측정 | 없음 | 없음 |
-| stt-scratch | `>=3.11,<3.13` | `uv.lock` | 기본 + `dev`(torch·torchaudio는 같은 판의 CPU 빌드) | 없음(`dev`는 기본 그룹) | 학습·측정 | 8765(스트리밍 자막 서버) | 없음 |
-| voice-translator | `>=3.11`(`backend/`) | `backend/uv.lock`, `frontend/package-lock.json` | 백엔드 `uv sync --locked`(기본 + `dev`), 화면 `npm ci`(Node.js 24) | 측정 도구는 `dev`, `gpu`, `eval`. 서버는 `gpu`, `tts` | 서버(`api`·`ollama` 컨테이너)와 측정 | DB 55442, 웹 8080 | 폴더 이름 |
+| whisper-ko-ft | `>=3.11,<3.13` | `uv.lock` | 기본 + `dev`·`ct2` 그룹의 잠긴 판(torch는 같은 판의 CPU 빌드) | `ct2` | 학습·측정 | 없음 | 없음 |
+| stt-scratch | `>=3.11,<3.13` | `uv.lock` | 기본 + `dev`(torch·torchaudio는 같은 판의 CPU 빌드) | 없음 | 학습·측정, 스트리밍 자막 서버(CUDA가 있으면 기본으로 GPU) | 8765(스트리밍 자막 서버) | 없음 |
+| voice-translator | `>=3.11`(`backend/`) | `backend/uv.lock`, `frontend/package-lock.json` | 백엔드 `uv sync --locked`(기본 + `dev`), 화면 `npm ci`(Node.js 24) | 측정 도구는 `gpu`, `eval`. 서버는 `gpu`, `tts` | 서버(`api`·`ollama` 컨테이너)와 측정 | DB 55442, 웹 8080 | 폴더 이름 |
 | support-agent | `>=3.11` | `uv.lock` | `uv sync --frozen`(기본 + `dev`) | `voice`(음성 채널) | 에이전트·시뮬레이터 언어 모델(Ollama), `voice` 그룹의 음성 합성·인식 | DB 55462, 앱 8062, MCP 서버 8063(`--http`) | `support-agent`(compose 파일에 고정) |
 | call-summary | `>=3.11` | `uv.lock` | `uv sync --frozen`(기본 + `dev`) | `train`(학습·transformers 추론) | 학습, 서빙 모델(Ollama) | 8072 | 폴더 이름 |
 
-- 파이썬 열은 각 `pyproject.toml`의 `requires-python`이다. CI는 모두 파이썬 3.11로 돈다(워크플로의 `python-version` 또는 `UV_PYTHON`).
+- 파이썬 열은 각 `pyproject.toml`의 `requires-python`이다. 다섯 구성 요소의 워크플로에서 시험(`pytest`)을 돌리는 작업(voice-translator는 `backend`, 나머지는 `test`)은 파이썬 3.11로 돈다(워크플로의 `python-version` 또는 `UV_PYTHON`).
 - CI는 GPU가 없는 Linux 러너에서 돈다. 그래서 다섯 구성 요소의 시험은 GPU 없이 돈다. support-agent와 call-summary에는 모델 없이 도는 오프라인 앱도 있다([architecture.md](architecture.md#구성-요소와-인터페이스)).
-- '로컬 환경에 더하는 그룹'은 학습·측정·서비스에 쓰는 무거운 패키지(GPU용 torch 등)를 담은 의존성 그룹이고, `uv sync --frozen` 뒤에 `--group <이름>`으로 붙인다. voice-translator 백엔드의 `eval`과 `tts`는 함께 설치할 수 없다(아래).
+- '로컬 환경에 더하는 그룹'은 학습·측정·서비스를 로컬에서 돌릴 때 `uv sync --frozen` 뒤에 `--group <이름>`으로 붙이는 의존성 그룹이다. 시험·린트 도구(pytest, ruff 등)를 담은 `dev`는 uv가 따로 붙이지 않아도 설치하는 기본 그룹이라 이 열에 적지 않았다. voice-translator 백엔드의 `eval`과 `tts`는 함께 설치할 수 없다(아래).
 - 기본 포트는 compose 파일이나 명령줄 옵션의 기본값이다. voice-translator와 support-agent의 compose는 환경 변수로 호스트 포트를 바꿀 수 있다.
 - voice-translator와 call-summary의 compose 파일에는 프로젝트 `name`이 없어, compose 프로젝트 이름이 그 폴더 이름이 된다. 같은 이름의 폴더에서 compose를 돌리면 같은 프로젝트로 묶인다.
 - 통화 한 건 시연(`e2e/`)도 자기 `pyproject.toml`과 `uv.lock`을 가진다. 설치와 실행은 [`e2e/README.md`](../e2e/README.md)에 있다.
@@ -27,7 +27,7 @@
 - whisper-ko-ft와 call-summary는 `transformers 5.17.0`, `numpy 2.4.6`(파이썬 3.11) 또는 `2.5.3`(3.12 이상)이다.
 - voice-translator 백엔드는 한 잠금 안에 둘 다 있다. 측정 도구 그룹(`eval`)은 `transformers 5.17.0`, 음성 합성 그룹(`tts`)은 MeloTTS 때문에 `transformers 4.27.4`이고, 두 그룹은 함께 설치하지 않도록 `backend/pyproject.toml`에 충돌로 적혀 있다.
 
-그래서 다섯을 한 잠금으로 풀 수 없다. 판을 하나로 맞추려고 바꾸면 기록된 수치를 낸 환경과 달라진다. 예를 들어 whisper-ko-ft의 영어 보조 지표 정규화는 transformers 판에 따라 동작이 바뀔 수 있어 5.17.0을 기준으로 규칙을 적었다([`src/whisper_ko_ft/en_norm.py`](../whisper-ko-ft/src/whisper_ko_ft/en_norm.py) 머리 주석).
+그래서 다섯 구성 요소의 환경(위 표의 그룹까지 붙인 것)은 한 가상환경에 함께 설치할 수 없다(예: support-agent의 `voice` 그룹은 `transformers==4.27.4`를, whisper-ko-ft는 `transformers>=4.57`을 요구한다). 잠금 파일 하나로 합치려면 다섯의 의존성을 다시 풀어야 하고, 그때 판이 바뀌면 기록된 수치를 낸 환경과 달라진다. 예를 들어 whisper-ko-ft의 영어 보조 지표 정규화는 transformers 판에 따라 동작이 바뀔 수 있어 5.17.0을 기준으로 규칙을 적었다([`src/whisper_ko_ft/en_norm.py`](../whisper-ko-ft/src/whisper_ko_ft/en_norm.py) 머리 주석).
 
 ## 쓰는 법
 

@@ -35,7 +35,7 @@
 
 ## 합칠 때 바꾼 것
 
-합친 날 main에 더한 커밋 가운데 구성 요소 폴더나 워크플로를 바꾼 것은 아래 여섯이다. 커밋 메시지에 바꾼 까닭이 있다(`git show <커밋>`).
+다섯 병합 뒤 같은 날 main에 더한 커밋 가운데 구성 요소 폴더나 워크플로를 바꾼 것은 아래 여섯이다. 커밋 메시지에 바꾼 까닭이 있다(`git show <커밋>`).
 
 - 워크플로 자리(`3603aec`, `7f06758`, `136dd4e`, `fa0628d`, `c93b094`): GitHub는 저장소 맨 위의 `.github/workflows`에 있는 워크플로만 읽는다. 그래서 구성 요소마다 `<폴더>/.github/workflows/ci.yml`을 `.github/workflows/<폴더>.yml`로 옮겼다. 옮긴 워크플로는 main push와 pull request로는 그 폴더나 그 워크플로 파일이 바뀌었을 때만 돌고, 단계는 그 폴더 안(voice-translator는 `backend/`·`frontend/` 안)에서 돈다. 작업, 액션, 권한, 취약점 검사의 예외 목록은 바꾸지 않았다.
 - 워크플로를 읽는 시험 두 파일(`136dd4e`, `fa0628d`): call-summary `tests/test_container.py`와 support-agent `tests/test_deploy_config.py`는 이제 저장소 맨 위의 새 워크플로 파일을 읽고, 그 파일이 없을 때만 옛 경로(`.github/workflows/ci.yml`)를 읽는다. 검사하는 내용은 그대로다.
