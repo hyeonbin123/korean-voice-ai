@@ -172,7 +172,7 @@ value = "36.1"
 where = "docs/model-choices.md"
 section = "support-agent"
 context = "qwen2.5 7B 18.1"
-condition = "시험용 40과제"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| 기준: qwen2.5 7B, P1 | 18.1"
@@ -182,7 +182,7 @@ value = "18.1"
 where = "docs/model-choices.md"
 section = "support-agent"
 context = "`qwen3.5:4b` 55.6"
-condition = "시험용 40과제"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| `qwen3.5:4b`, P1 | **55.6"
@@ -192,7 +192,7 @@ value = "55.6"
 where = "docs/model-choices.md"
 section = "support-agent"
 context = "차이 +37.5"
-condition = "시험용 40과제"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| `qwen3.5:4b`, P1 | **55.6%** | **+37.5"
@@ -202,7 +202,7 @@ value = "37.5"
 where = "docs/model-choices.md"
 section = "support-agent"
 context = "쓰기가 6"
-condition = "시험용 40과제"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| 기준: qwen2.5 7B, P1 | 18.1% | | 2.5% | 6"
@@ -212,7 +212,7 @@ value = "6"
 where = "docs/model-choices.md"
 section = "support-agent"
 context = "6건에서 13"
-condition = "시험용 40과제"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| `qwen3.5:4b`, P1 | **55.6%** | **+37.5%p [+28.7, +46.2]** | 20.0% | 13"
@@ -310,17 +310,22 @@ value = "66.2"
 where = "README.md"
 
 # 구성 요소 표의 대표 수치. 표의 줄은 통화 흐름 순서(whisper-ko-ft, stt-scratch, voice-translator, support-agent,
-# call-summary)이고, 조건 글은 그 수가 든 표의 같은 줄에 있다.
+# call-summary)이고, 조건 글은 그 수가 든 표의 같은 줄에 있다. 표에서 대표 수치와 같은 칸에 함께 적은 짝 수치는 굵게
+# 적는다(훑어볼 때 수가 조건 글에 묻히지 않게. 좋아진 수와 나빠진 수를 똑같이 굵게 한다). 그래서 그 선언의 context에는
+# 굵게 표시 `**`가 수 앞에 들어 있다. 테스트 수와 '40과제 × 4회' 같은 조건의 크기는 굵게 적지 않는다.
 
-# whisper-ko-ft: 결과 절 'test (단계마다 한 번 측정)' 표의 Zeroth test CER 줄. 4.48은 학습하지 않은
+# whisper-ko-ft: 결과 절 'test (단계마다 한 번 측정)' 표. Zeroth test CER 줄에서 4.48은 학습하지 않은
 # whisper-large-v3-turbo 열, 1.96은 turbo + LoRA 열이다(같은 줄의 whisper-small 열과 파인튜닝한 small 열은 옮기지 않는다).
 # 이 줄은 정답과 가설의 숫자 표기를 맞추지 않은 CER이라 첫 화면 칸에 그렇게 적는다. 위 docs/model-choices.md의
 # 4.22·2.68은 같은 절의 숫자 표기를 맞춘 CER 표에서 왔다(4.22는 같은 기준선 모델, 2.68은 숫자 표기를 바꿔 학습한 모델).
+# 5.21과 6.94는 같은 표의 FLEURS 한국어 test CER 줄에서 같은 두 열이다. 같은 모델이 다른 도메인에서는 나빠졌다는
+# 짝 수치로, 학습에서 본 문장 조건의 1.96만 보이지 않게 같은 칸에 적는다. 이 모델의 판정 '도메인 전용'은 같은 README의
+# 단계 표와 판정 문단에 있다.
 
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "large-v3-turbo 4.48"
+context = "large-v3-turbo **4.48"
 condition = "학습에서 본 문장"
 source = "whisper-ko-ft/README.md"
 source_section = "지금까지의 결과"
@@ -330,19 +335,41 @@ value = "4.48"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "turbo + LoRA 1.96"
+context = "LoRA 파인튜닝 **1.96"
 condition = "학습에서 본 문장"
 source = "whisper-ko-ft/README.md"
 source_section = "지금까지의 결과"
 source_context = "| Zeroth test 457발화, CER | 10.31% [9.39, 11.29] | 4.48% [3.77, 5.32] | 3.78% [2.00, 6.61] | **1.96"
 value = "1.96"
 
-# stt-scratch: 봉인 test 표의 전체 문맥(full) 열. 3.67은 Zeroth 공식 test, 15.55는 처음 보는 문장만 모은 Zeroth test_H다.
+[[number]]
+where = "README.md"
+section = "구성 요소"
+context = "다른 도메인 FLEURS 한국어 test는 **5.21"
+condition = "도메인 전용"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "| FLEURS 한국어 test, CER | 7.62% [6.56, 8.73] | **5.21"
+value = "5.21"
 
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "Zeroth 공식 test 3.67"
+context = "다른 도메인 FLEURS 한국어 test는 **5.21%** → **6.94"
+condition = "도메인 전용"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "| FLEURS 한국어 test, CER | 7.62% [6.56, 8.73] | **5.21%** [4.19, 6.16] | 11.58% [9.30, 14.66] | 6.94"
+value = "6.94"
+
+# stt-scratch: 봉인 test 표의 전체 문맥(full) 열. 3.67은 Zeroth 공식 test, 15.55는 처음 보는 문장만 모은 Zeroth test_H다.
+# 이 구성 요소는 스트리밍 인식이지만 옮긴 값은 스트리밍 열이 아니므로, 첫 화면 칸에는 조건을 '비스트리밍'으로 적는다
+# (스트리밍 320 ms 열의 값은 출처 표의 바로 옆 칸에 있다).
+
+[[number]]
+where = "README.md"
+section = "구성 요소"
+context = "Zeroth 공식 test **3.67"
 condition = "문장 암기"
 source = "stt-scratch/README.md"
 source_section = "결과 (봉인 test, 2026-10-14 1회)"
@@ -352,7 +379,7 @@ value = "3.67"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "처음 보는 문장만 15.55"
+context = "처음 보는 문장만 **15.55"
 condition = "처음 보는 문장"
 source = "stt-scratch/README.md"
 source_section = "결과 (봉인 test, 2026-10-14 1회)"
@@ -365,7 +392,7 @@ value = "15.55"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "한국어 CER 4.57"
+context = "인식 CER **4.57"
 condition = "FLEURS"
 source = "voice-translator/README.md"
 source_section = "측정해서 고른 결과"
@@ -375,7 +402,7 @@ value = "4.57"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "한국어 원문 1.86"
+context = "한국어 원문 **1.86"
 condition = "말을 멈춘 뒤"
 source = "voice-translator/README.md"
 source_section = "측정해서 고른 결과"
@@ -385,7 +412,7 @@ value = "1.86"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "한국어 원문 1.86 → 1.24"
+context = "한국어 원문 **1.86초 → 1.24"
 condition = "말을 멈춘 뒤"
 source = "voice-translator/README.md"
 source_section = "측정해서 고른 결과"
@@ -393,13 +420,14 @@ source_context = "대화 모드 한국어 원문 1.86 → 1.24"
 value = "1.24"
 
 # support-agent: 새 세대 소형 모델 측정 결과 절의 시험용 표(40과제 × 4회)의 pass^1. 18.1은 기준 구성(qwen2.5 7B),
-# 55.6은 qwen3.5:4b다. 둘 다 규정을 도구에서도 막는 구성(P1)이다.
+# 55.6은 qwen3.5:4b다. 둘 다 규정을 도구에서도 막는 구성(P1)이다. 6과 13은 같은 표 같은 두 줄의 '정답에 없는 쓰기'
+# 열(과제가 요구하지 않은 쓰기 건수)이다. 성공률이 오른 것과 함께 나빠진 쪽도 같은 칸에 적으려고 옮긴다.
 
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "qwen2.5 7B 18.1"
-condition = "시험용 40과제"
+context = "qwen2.5 7B **18.1"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| 기준: qwen2.5 7B, P1 | 18.1"
@@ -408,21 +436,42 @@ value = "18.1"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "`qwen3.5:4b` 55.6"
-condition = "시험용 40과제"
+context = "`qwen3.5:4b` **55.6"
+condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
 source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| `qwen3.5:4b`, P1 | **55.6"
 value = "55.6"
 
+[[number]]
+where = "README.md"
+section = "구성 요소"
+context = "쓰기 호출도 **6"
+condition = "시험용 40과제 × 4회"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| 기준: qwen2.5 7B, P1 | 18.1% | | 2.5% | 6"
+value = "6"
+
+[[number]]
+where = "README.md"
+section = "구성 요소"
+context = "쓰기 호출도 **6 → 13"
+condition = "시험용 40과제 × 4회"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| `qwen3.5:4b`, P1 | **55.6%** | **+37.5%p [+28.7, +46.2]** | 20.0% | 13"
+value = "13"
+
 # call-summary: 결과 요약 절 표의 'Qwen3-4B QLoRA (1,500건 학습)' 줄(글 전사로만 학습한 어댑터를 4bit 바탕 + 어댑터로
-# 잰 값). 95.7은 test-a(같은 생성기), 55.0은 test-c(학습에 없던 업종) 열이다. 서빙 모델은 학습 데이터 절반을 음성 인식을
+# 잰 값). 95.7은 test-a(같은 생성기), 90.0은 test-b(다른 모델이 쓴 대화), 55.0은 test-c(학습에 없던 업종) 열이다. 그 줄의
+# test 세 열을 모두 옮긴다(가장 좋은 값과 가장 나쁜 값만 고른 것으로 보이지 않게). 서빙 모델은 학습 데이터 절반을 음성 인식을
 # 거친 전사로 바꿔 학습한 다른 어댑터(GGUF q8_0)이고, 그 값은 위 docs/model-choices.md 선언에 있다.
 
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "같은 생성기) 95.7"
+context = "같은 생성기) **95.7"
 condition = "같은 생성기"
 source = "call-summary/README.md"
 source_section = "결과 요약 (3단계)"
@@ -432,7 +481,17 @@ value = "95.7"
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "학습에 없던 업종) 55.0"
+context = "다른 모델이 쓴 대화) **90.0"
+condition = "다른 모델이 쓴 대화"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "| **Qwen3-4B QLoRA (1,500건 학습)** | **95.7** [93.3, 97.7] | **90.0"
+value = "90.0"
+
+[[number]]
+where = "README.md"
+section = "구성 요소"
+context = "학습에 없던 업종) **55.0"
 condition = "학습에 없던 업종"
 source = "call-summary/README.md"
 source_section = "결과 요약 (3단계)"

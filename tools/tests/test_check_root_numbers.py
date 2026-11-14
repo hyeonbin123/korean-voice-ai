@@ -543,11 +543,13 @@ def test_repository_root_numbers_pass():
     # 수가 구성 요소 기록과 같은 글자인지, 선언 없는 퍼센트 수가 끼어들지 않았는지를 이 저장소에서 본다.
     decls = load_declarations(REPO / "root-numbers.toml")
     # check(...) == []만 보면 선언이 줄거나 비어도 통과하므로, 먼저 두 문서가 쓰는 만큼 선언이 있는지 본다. 하한은
-    # 2026-11-14에 두 문서에 쓴 수다: README.md의 [[number]] 11개(구성 요소 표의 대표 수치), docs/model-choices.md의
-    # [[number]] 26개, README.md의 [[snapshot]] 14개(구성 요소 표의 테스트 수 12개, AI 도구 절의 커밋 수 2개). 문서에
-    # 수를 더하면 선언도 늘어나므로 '같다'가 아니라 '이상'으로 본다.
+    # 2026-11-14에 두 문서에 쓴 수다: README.md의 [[number]] 16개(구성 요소 표의 대표 수치 11개와, 같은 칸에 함께 적은
+    # 짝 수치 5개: whisper-ko-ft의 다른 도메인 CER 둘, support-agent의 과제가 요구하지 않은 쓰기 건수 둘,
+    # call-summary의 test-b 하나), docs/model-choices.md의 [[number]] 26개, README.md의 [[snapshot]] 14개(구성 요소
+    # 표의 테스트 수 12개, AI 도구 절의 커밋 수 2개). 문서에 수를 더하면 선언도 늘어나므로 '같다'가 아니라 '이상'으로
+    # 본다. 퍼센트가 붙지 않은 수(쓰기 건수, 초)는 coverage가 세지 않으므로, 그런 선언이 빠진 것은 이 하한만 잡는다.
     wheres = [decl.get("where") for decl in decls.numbers]
-    assert wheres.count("README.md") >= 11
+    assert wheres.count("README.md") >= 16
     assert wheres.count("docs/model-choices.md") >= 26
     assert sum(decl.get("where") == "README.md" for decl in decls.snapshots) >= 14
     # 두 문서 모두 파일 전체에 건 coverage가 있어야 한다. section을 준 coverage는 그 절 밖의 퍼센트 수를 놓친다.

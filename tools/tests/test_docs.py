@@ -1,7 +1,7 @@
 """루트 문서(README.md, docs/)가 저장소의 파일과 git 이력에 맞는지 보는 시험.
 
 무엇을 지키나
-    README.md         첫 화면. 두 가지를 본다. (1) '실행과 테스트' 절에 줄바꿈 변환을 끄는 받기 명령
+    README.md         첫 화면. 세 가지를 본다. (1) '실행과 테스트' 절에 줄바꿈 변환을 끄는 받기 명령
                       (git clone -c core.autocrlf=false ...)과 '각 구성 요소 폴더 안에서' 설치·테스트한다는
                       말이 있는지. Windows Git의 기본값(core.autocrlf=true)으로 받으면 .gitattributes가 없는
                       구성 요소의 파일이 CRLF로 풀려 기록에 해시가 남은 바이트가 달라지고, 루트에는 파이썬
@@ -10,7 +10,10 @@
                       이름이 ASCII 영숫자·밑줄뿐이고, 한글·괄호·쌍점 같은 글자가 든 노드 글과 선의 글이
                       큰따옴표로 감싸져 있는지. 따옴표 없는 특수 글자는 GitHub 화면에서 그림 대신 오류 상자가
                       보이게 하는 흔한 원인이다. 그림이 실제로 그려지는지는 이 시험이 증명하지 못한다(GitHub
-                      화면에서 따로 본다).
+                      화면에서 따로 본다). (3) 굵게 표시(`**`)가 줄마다 짝이 맞고, 여는 표시와 닫는 표시가
+                      마크다운 규칙으로 굵게가 되는 자리에 있는지. 닫는 표시 앞이 문장 부호(%, 괄호 등)이고
+                      바로 뒤가 한글이면 굵게가 풀려 별표가 화면에 그대로 보이는데(`**6.94%**로`), 수치 검사는
+                      여는 표시만 글자로 대조해서 이것을 잡지 못한다.
     docs/notices.md   구성 요소 곳곳에 흩어진 제3자 고지(라이선스 원문, 사본의 출처,
                       데이터·모델 라이선스 표)의 자리를 모은 문서다. 고지 파일이나 고지 절 하나를
                       가리키는 링크가 빠지면, 저장소를 처음 보는 사람은 그 고지가 있다는 것을 알 길이
@@ -37,6 +40,7 @@
 
 import re
 import subprocess
+import unicodedata
 from urllib.parse import unquote
 
 from check_links import iter_links
@@ -328,3 +332,122 @@ def test_readme_mermaid_labels_are_quoted():
     texts = [text for _, text in nodes] + edge_labels
     unquoted = [text for text in texts if needs_quotes(text)]
     assert unquoted == [], f"큰따옴표로 감싸지 않은 글: {unquoted}"
+
+
+# 인라인 코드(백틱 한 쌍으로 감싼 글). 그 안의 별표는 마크다운 문법이 아니라 글자다.
+_CODE_SPAN = re.compile(r"`[^`]*`")
+# 별표가 이어진 덩어리 하나. 굵게 표시는 별표 두 개(`**`)만 쓴다.
+_STAR_RUN = re.compile(r"\*+")
+
+
+def _is_blank(char: str) -> bool:
+    """줄의 처음·끝(빈 글자)이거나 공백 글자면 True. 마크다운은 줄의 처음과 끝을 공백처럼 본다."""
+    return char == "" or char.isspace()
+
+
+def _is_punctuation(char: str, symbols_too: bool) -> bool:
+    """마크다운이 문장 부호로 치는 글자면 True.
+
+    ASCII 문장 부호(%, 괄호, 쉼표, 백틱 등)와 유니코드 범주 P(문장 부호)는 늘 문장 부호다. 유니코드 범주
+    S(ASCII가 아닌 기호, 예: 화살표 →)는 CommonMark 0.30까지는 문장 부호로 치지 않고 0.31부터 쳐서, symbols_too로
+    두 해석을 고른다(GitHub가 쓰는 변환기가 어느 쪽인지에 기대지 않으려고).
+    """
+    if char == "":
+        return False
+    if char.isascii():
+        return not (char.isalnum() or char.isspace())
+    category = unicodedata.category(char)
+    return category.startswith("P") or (symbols_too and category.startswith("S"))
+
+
+def bold_marker_problems(line: str) -> list[str]:
+    """글 한 줄에서 굵게 표시(`**`)가 굵게 그려지지 않을 자리를 찾아, 자리마다 까닭 한 줄을 돌려준다.
+
+    마크다운(CommonMark)은 별표 묶음의 앞뒤 글자를 보고 그 묶음이 굵게를 열 수 있는지, 닫을 수 있는지 정한다.
+        열 수 있다: 바로 뒤가 공백이 아니고, 뒤가 문장 부호면 앞이 공백이나 문장 부호여야 한다.
+        닫을 수 있다: 바로 앞이 공백이 아니고, 앞이 문장 부호면 뒤가 공백이나 문장 부호여야 한다.
+    그래서 `**6.94%**로`의 닫는 표시는 앞이 문장 부호(%)이고 뒤가 한글이라 닫지 못하고, 화면에 별표가 그대로
+    보인다. 한글에는 낱말 사이 공백이 없는 자리가 많아 이 꼴이 쉽게 생긴다.
+
+    이 함수는 한 줄 안의 `**`를 차례대로 여는 표시, 닫는 표시, 여는 표시…로 읽는다(굵게 안에 굵게를 넣지 않는
+    글을 가정한다). 링크 글의 경계, 표 칸의 경계, 역슬래시로 감춘 별표, 네 칸 들여쓴 줄(코드 블록)은 읽지
+    않는다(첫 화면의 굵게는 링크 글의 경계나 표 칸의 경계를 넘지 않는다). 목록 표시 `*`도 별표 하나로 알리므로
+    목록은 `-`로 쓴다. 인라인 코드 안의 별표는 세지 않는다. 알리는 것: 별표가 두 개가 아닌 묶음(`*`, `***`), 짝이
+    맞지 않는 줄, 열 수 없는 자리의 여는 표시, 닫을 수 없는 자리의 닫는 표시. 기호(화살표 등)를 문장 부호로
+    치는 해석과 치지 않는 해석 어느 쪽에서든 어긋나면 알린다.
+    입력: 코드 울타리 밖의 글 한 줄. 출력: 문제 설명의 목록(없으면 빈 목록).
+    """
+    # 인라인 코드의 안쪽을 글자 x로 가린다. 백틱은 남겨서, 코드 옆에 붙은 표시가 문장 부호(백틱) 옆으로 읽히게 한다.
+    masked = _CODE_SPAN.sub(lambda found: "`" + "x" * (len(found.group(0)) - 2) + "`", line)
+    runs = list(_STAR_RUN.finditer(masked))
+    problems = [
+        f"{run.start() + 1}번째 글자: 별표가 {len(run.group(0))}개다(굵게 표시는 두 개만 쓴다)"
+        for run in runs
+        if len(run.group(0)) != 2
+    ]
+    marks = [run for run in runs if len(run.group(0)) == 2]
+    if len(marks) % 2:
+        problems.append(f"굵게 표시가 {len(marks)}개라 짝이 맞지 않는다")
+    for index, mark in enumerate(marks):
+        before = masked[mark.start() - 1] if mark.start() > 0 else ""
+        after = masked[mark.end()] if mark.end() < len(masked) else ""
+        around = masked[max(mark.start() - 6, 0) : mark.end() + 6]
+        for symbols_too in (False, True):
+            before_punct = _is_punctuation(before, symbols_too)
+            after_punct = _is_punctuation(after, symbols_too)
+            can_open = not _is_blank(after) and (not after_punct or _is_blank(before) or before_punct)
+            can_close = not _is_blank(before) and (not before_punct or _is_blank(after) or after_punct)
+            if index % 2 == 0 and not can_open:
+                problems.append(f"{mark.start() + 1}번째 글자: 여는 표시가 굵게를 열지 못한다('{around}')")
+                break
+            if index % 2 == 1 and not can_close:
+                problems.append(f"{mark.start() + 1}번째 글자: 닫는 표시가 굵게를 닫지 못한다('{around}')")
+                break
+    return problems
+
+
+def test_bold_marker_problems_follow_the_markdown_rule():
+    # 아래 실제 문서 시험이 기대는 함수를 손으로 따질 수 있는 사례로 고정한다. 문제가 없는 꼴과 있는 꼴을 함께 본다
+    # (함수가 늘 빈 목록을 돌려주면 실제 문서 시험이 아무것도 보지 않은 채 통과하기 때문이다).
+    fine = (
+        "**굵게**",
+        "FLEURS는 **5.21%** → **6.94%**(나빠졌다)",  # 닫는 표시 앞이 %여도 뒤가 공백이나 괄호면 닫힌다
+        "한국어 원문 **1.86초 → 1.24초**(전 → 후)",  # 굵게 안의 화살표는 표시와 붙어 있지 않다
+        "쓰기 호출도 **6 → 13건**으로 늘었다",  # 닫는 표시 앞뒤가 모두 한글이면 닫힌다
+        "`qwen3.5:4b` **55.6%**.",  # 인라인 코드 뒤 공백, 닫는 표시 뒤 마침표
+        "코드 안의 `**`는 세지 않는다",
+        "별표가 없는 줄",
+    )
+    for line in fine:
+        assert bold_marker_problems(line) == [], line
+    broken = (
+        "FLEURS는 **5.21%** → **6.94%**로 나빠졌다",  # 닫는 표시 앞이 %이고 뒤가 한글: 굵게가 풀린다
+        "짝이 없는 **표시",
+        "여는 표시 뒤가 공백인 ** 글**",
+        "닫는 표시 앞이 공백인 **글 **",
+        "한글에 붙여 괄호 앞에서 연 표시**(글)**",  # 여는 표시 뒤가 문장 부호인데 앞이 한글: 열지 못한다
+        # 아래 줄은 화면에서 깨지는 꼴이 아니다(기울임과 굵은 기울임으로 그려진다). 첫 화면이 굵게에 별표 두 개만
+        # 쓰기로 해서 알리는 것이다.
+        "별표 하나 *기울임*과 셋 ***굵은 기울임***",
+    )
+    for line in broken:
+        assert bold_marker_problems(line) != [], line
+    # 화살표 같은 기호는 변환기에 따라 문장 부호일 수도 아닐 수도 있다. 닫는 표시가 기호 바로 뒤에 있고 그 뒤가
+    # 한글이면 한쪽 해석에서 닫지 못하므로 알린다.
+    assert bold_marker_problems("**전 →**후") != []
+
+
+def test_readme_bold_markers_render_as_bold():
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    # 코드 울타리 안의 줄은 마크다운으로 읽히지 않으므로 뺀다(울타리 해석은 수치 검사 도구의 fence_mask 한 벌만 쓴다).
+    # strict=True: fence_mask가 줄 수와 다른 길이를 돌려주면 조용히 잘리지 않고 여기서 실패한다.
+    numbered = enumerate(zip(lines, fence_mask(text), strict=True), start=1)
+    outside = [(number, line) for number, (line, fenced) in numbered if not fenced]
+    # 굵게 표시를 하나도 읽지 못하면 아래 검사는 아무것도 보지 않은 채 통과한다(닫히지 않은 울타리가 뒤의 줄을 모두
+    # 가린 경우 등). 첫 화면은 표의 수치를 굵게 적으므로 표시가 하나도 없으면 읽기가 어긋난 것이다.
+    assert any("**" in line for _, line in outside), "코드 울타리 밖에서 굵게 표시를 하나도 읽지 못했다"
+    problems = [
+        f"README.md:{number}: {problem}" for number, line in outside for problem in bold_marker_problems(line)
+    ]
+    assert problems == []
