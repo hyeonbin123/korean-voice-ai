@@ -357,6 +357,9 @@ def test_number_tokens_skip_names_and_read_signs_like_call_summary():
     assert number_tokens("학습한 4B 0~1.5%, 14B 0~28%") == ["0", "1.5", "0", "28"]
     assert number_tokens(f"차이 {MINUS}0.0, -0.00") == ["0.0", "0.00"]
     assert number_tokens("**95.7** [93.3, 97.7]") == ["95.7", "93.3", "97.7"]
+    # 빼기 부호는 유니코드 빼기 기호뿐 아니라 일반 하이픈으로 적어도 읽는다. 위의 '-0.00'은 0이라 부호가 빠지므로
+    # 하이픈을 부호로 읽는지는 0이 아닌 수로 따로 본다.
+    assert number_tokens("-1.7%p [-5.8, +2.1]") == ["-1.7", "-5.8", "2.1"]
     # 정규식의 막기 규칙을 하나씩 따로: 밑줄 바로 뒤의 수("q8_0"의 0)는 읽지 않고, 점과 숫자가 이어지다 영문자에 걸리는
     # 수("1.5b")는 되돌아가 앞의 "1"만 읽는 일 없이 통째로 읽지 않는다.
     assert number_tokens("q8_0") == []
@@ -450,6 +453,11 @@ def test_last_line_without_a_newline_is_still_a_whole_line(fake):
     one_line = {key: value for key, value in number().items() if key != "section"}
     one_line.update(context="CER 1.96", condition="학습에서 본 문장")
     assert check(Declarations(numbers=[one_line]), fake) == []
+    # (5) 글의 첫 글자가 곧 수의 첫 글자다: 줄의 시작을 한 글자 늦게 잡으면 문서의 수가 '1.96'이 아니라 '.96'으로
+    # 읽혀 경계 검사가 걸린다.
+    put(fake / "README.md", "1.96% (학습에서 본 문장)")
+    one_line.update(context="1.96", condition="학습에서 본 문장")
+    assert check(Declarations(numbers=[one_line]), fake) == []
 
 
 def test_coverage_reports_a_section_that_is_not_in_the_file(fake):
@@ -477,6 +485,17 @@ def test_coverage_counts_percentages_inside_code_too(fake):
 def test_default_repo_is_the_checkout_that_holds_the_tool(fake, monkeypatch, capsys):
     # --repo를 주지 않으면 이 도구가 든 저장소(tools/의 부모)를 쓴다. 시험이 쓰는 저장소 뿌리(REPO)와 같은 곳이어야 한다.
     assert check_root_numbers.DEFAULT_REPO == REPO
+    # 그 값은 도구 파일의 위치에서 나와야 하고 현재 폴더에서 나오면 안 된다. 시험은 보통 저장소 뿌리에서 돌아 두 값이
+    # 같으므로, 현재 폴더를 다른 곳(시험용 폴더)으로 둔 새 프로세스에서 도구를 가져와 값을 찍어 본다.
+    env = {**os.environ, "PYTHONPATH": str(TOOLS), "PYTHONUTF8": "1"}
+    done = subprocess.run(
+        [sys.executable, "-c", "import check_root_numbers; print(check_root_numbers.DEFAULT_REPO)"],
+        capture_output=True,
+        cwd=fake,
+        env=env,
+        check=True,
+    )
+    assert Path(done.stdout.decode("utf-8").strip()) == REPO
     # main이 그 값을 실제로 쓰는지는 기본값을 시험용 저장소로 바꿔 두고 --repo 없이 불러 본다.
     put(fake / "root-numbers.toml", toml_text({"number": [BASE]}))
     monkeypatch.setattr(check_root_numbers, "DEFAULT_REPO", fake)

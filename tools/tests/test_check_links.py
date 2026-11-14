@@ -366,7 +366,7 @@ def test_documented_limits_of_the_link_reader(repo):
         "[괄호](docs/b_(1).md)",  # 대상은 첫 ')'에서 끝난다: 파일 이름의 '(1'까지만 읽는다
         "[인코딩](docs/b_%281%29.md)",  # 괄호를 %28·%29로 적으면 파일이 열린다
         "[공백](<docs/my file.md>)",  # 공백이 든 <대상>은 링크로 읽지 않는다
-        "[공백 없는 파일](<docs/없는 파일.md>)",  # 그래서 없는 파일이어도 조용히 지나간다
+        "[없는 파일](<docs/없는 파일.md>)",  # 그래서 없는 파일이어도 조용히 지나간다
         '<a id="x"></a>',
         "[직접 쓴 앵커](#x)",  # 제목에서 만든 앵커만 안다
     ]
@@ -396,7 +396,8 @@ def test_crlf_and_bom_documents_are_read_like_plain_ones(repo):
 
 def test_default_files_are_the_root_documents_in_a_fixed_order(repo):
     # 목록에 들면 안 되는 것(.md가 아닌 파일, docs의 하위 폴더, 다른 폴더의 README)을 섞어 만든다. 파일을 만드는 순서를
-    # 섞어도 나열 순서는 바뀌지 않으므로, 정렬을 지켜 주는 시험은 바로 아래의 시험이 따로 맡는다.
+    # 섞는 것으로는 정렬을 지켜 주지 못한다(이름순으로 나열하는 파일 시스템에서는 섞어도 나열 순서가 같다). 정렬은
+    # 바로 아래의 시험이 따로 맡는다.
     made = ["README.md", "docs/b.md", "docs/a.md", "docs/note.txt", "docs/sub/c.md", "e2e/README.md", "x/README.md"]
     for rel in made:
         write(repo, rel, "내용\n")
@@ -410,8 +411,9 @@ def test_default_files_are_the_root_documents_in_a_fixed_order(repo):
 
 def test_default_files_do_not_depend_on_the_order_the_file_system_lists(repo, monkeypatch):
     # 폴더를 나열하는 순서는 파일 시스템이 정하고 파이썬도 보장하지 않는다(NTFS에서는 이름순으로 나오지만 다른 파일
-    # 시스템도 그렇다는 보장이 없다). 파일을 만드는 순서를 섞는 것으로는 이를 시험할 수 없으므로, 나열 결과를 이름의
-    # 역순으로 돌려주도록 바꿔 둔다. 도구가 스스로 이름순으로 정렬하지 않으면 docs 문서가 c, b, a 순으로 나온다.
+    # 시스템도 그렇다는 보장이 없다). 이름순으로 나열하는 파일 시스템에서는 파일을 만드는 순서를 섞어도 정렬이 빠진
+    # 것이 드러나지 않으므로, 나열 결과를 이름의 역순으로 돌려주도록 바꿔 둔다. 도구가 스스로 이름순으로 정렬하지
+    # 않으면 docs 문서가 c, b, a 순으로 나온다.
     for rel in ("README.md", "docs/a.md", "docs/b.md", "docs/c.md"):
         write(repo, rel, "내용\n")
     real_glob = Path.glob
