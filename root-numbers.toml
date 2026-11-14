@@ -314,11 +314,13 @@ where = "README.md"
 
 # whisper-ko-ft: 결과 절 'test (단계마다 한 번 측정)' 표의 Zeroth test CER 줄. 4.48은 학습하지 않은
 # whisper-large-v3-turbo 열, 1.96은 turbo + LoRA 열이다(같은 줄의 whisper-small 열과 파인튜닝한 small 열은 옮기지 않는다).
+# 이 줄은 정답과 가설의 숫자 표기를 맞추지 않은 CER이라 첫 화면 칸에 그렇게 적는다. 위 docs/model-choices.md의
+# 4.22·2.68은 같은 절의 숫자 표기를 맞춘 CER 표에서 왔다(4.22는 같은 기준선 모델, 2.68은 숫자 표기를 바꿔 학습한 모델).
 
 [[number]]
 where = "README.md"
 section = "구성 요소"
-context = "whisper-large-v3-turbo 4.48"
+context = "large-v3-turbo 4.48"
 condition = "학습에서 본 문장"
 source = "whisper-ko-ft/README.md"
 source_section = "지금까지의 결과"
@@ -413,8 +415,9 @@ source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
 source_context = "| `qwen3.5:4b`, P1 | **55.6"
 value = "55.6"
 
-# call-summary: 결과 요약 절 표의 'Qwen3-4B QLoRA (1,500건 학습)' 줄(4bit 바탕 + 어댑터로 잰 값). 95.7은 test-a(같은
-# 생성기), 55.0은 test-c(학습에 없던 업종) 열이다. 서빙 형태(GGUF q8_0)의 값은 위 docs/model-choices.md 선언에 있다.
+# call-summary: 결과 요약 절 표의 'Qwen3-4B QLoRA (1,500건 학습)' 줄(글 전사로만 학습한 어댑터를 4bit 바탕 + 어댑터로
+# 잰 값). 95.7은 test-a(같은 생성기), 55.0은 test-c(학습에 없던 업종) 열이다. 서빙 모델은 학습 데이터 절반을 음성 인식을
+# 거친 전사로 바꿔 학습한 다른 어댑터(GGUF q8_0)이고, 그 값은 위 docs/model-choices.md 선언에 있다.
 
 [[number]]
 where = "README.md"
@@ -439,6 +442,7 @@ value = "55.0"
 # 구성 요소 표의 테스트 수. 구성 요소 기록 파일에 없는 수라 [[snapshot]]으로 적는다. 모두 main 커밋 51b6d62에서 돈
 # GitHub Actions push 실행(2026-11-10)의 작업 로그에 찍힌 pytest·Vitest·Playwright 요약 줄의 통과·건너뜀 수다.
 # voice-translator 백엔드는 주 시험 단계(uv run pytest -q)의 수만 옮기고, 측정 도구용 추가 시험 단계의 수는 옮기지 않는다.
+# 표의 테스트 칸은 줄을 <br>로 나눠 적는다(그 열을 좁혀 대표 수치 열을 넓히려고). 그래서 context에도 <br>이 들어 있다.
 
 [[snapshot]]
 where = "README.md"
@@ -451,7 +455,7 @@ evidence = "GitHub Actions run 42798650367, whisper-ko-ft.yml의 test 작업(mai
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "통과 779, 건너뜀 2"
+context = "통과 779<br>건너뜀 2"
 value = "2"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650367, whisper-ko-ft.yml의 test 작업(main 51b6d62): 779 passed, 2 skipped"
@@ -467,7 +471,7 @@ evidence = "GitHub Actions run 42798650185, stt-scratch.yml의 test 작업(main 
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "통과 284, 건너뜀 12"
+context = "통과 284<br>건너뜀 12"
 value = "12"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650185, stt-scratch.yml의 test 작업(main 51b6d62): 284 passed, 12 skipped"
@@ -475,7 +479,7 @@ evidence = "GitHub Actions run 42798650185, stt-scratch.yml의 test 작업(main 
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "주 시험 통과 742"
+context = "통과 742"
 value = "742"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650193, voice-translator.yml의 backend 작업 Test 단계(uv run pytest -q, main 51b6d62): 742 passed, 71 skipped"
@@ -483,7 +487,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 backend 작�
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "통과 742, 건너뜀 71"
+context = "통과 742<br>건너뜀 71"
 value = "71"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650193, voice-translator.yml의 backend 작업 Test 단계(uv run pytest -q, main 51b6d62): 742 passed, 71 skipped"
@@ -491,7 +495,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 backend 작�
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "화면 단위 시험 184"
+context = "Vitest 184"
 value = "184"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650193, voice-translator.yml의 frontend 작업(Vitest, main 51b6d62): 184 passed"
@@ -499,7 +503,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 frontend 작
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "브라우저 시험 8"
+context = "Playwright 8"
 value = "8"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650193, voice-translator.yml의 e2e 작업(Playwright, main 51b6d62): 8 passed"
@@ -515,7 +519,7 @@ evidence = "GitHub Actions run 42798650311, support-agent.yml의 test 작업(mai
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "통과 2,160, 건너뜀 36"
+context = "통과 2,160<br>건너뜀 36"
 value = "36"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650311, support-agent.yml의 test 작업(main 51b6d62): 2160 passed, 36 skipped"
@@ -531,7 +535,7 @@ evidence = "GitHub Actions run 42798650364, call-summary.yml의 test 작업(main
 [[snapshot]]
 where = "README.md"
 section = "구성 요소"
-context = "통과 495, 건너뜀 8"
+context = "통과 495<br>건너뜀 8"
 value = "8"
 as_of = "2026-11-10"
 evidence = "GitHub Actions run 42798650364, call-summary.yml의 test 작업(main 51b6d62): 495 passed, 8 skipped"
