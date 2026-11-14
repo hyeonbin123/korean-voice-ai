@@ -64,6 +64,9 @@ NOTICE_TARGETS = (
     "../voice-translator/README.md#모델과-데이터의-라이선스",
     # voice-translator: 참조 코드를 따라 옮겨 쓴 Supertonic 3 추론 코드(머리 docstring에 MIT 원문)
     "../voice-translator/backend/app/services/supertonic.py",
+    # voice-translator: 공식 코드의 계산을 따라 쓴 MetricX-24 점수 스크립트. 머리 docstring에 따른
+    # 코드의 커밋과 라이선스 이름만 있고 원문은 없어, 아래 표지 글 검색으로는 잡히지 않는다
+    "../voice-translator/backend/eval/metricx_score.py",
     # stt-scratch: 다시 배포하는 전사·가설의 데이터 귀속 절
     "../stt-scratch/docs/data.md#귀속-2026-10-24-확인",
 )
