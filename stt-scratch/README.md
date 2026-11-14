@@ -139,3 +139,7 @@ manifests/         분할 매니페스트, 어휘, mel 통계 (커밋)
 reports/           단계별 측정 결과 (커밋)
 web/               브라우저 자막 페이지
 ```
+
+## 저장소 이동 (2026-11-10)
+
+이날부터 이 폴더는 [korean-voice-ai](../README.md) 저장소의 `stt-scratch/` 폴더다. 커밋 이력을 해시 그대로 함께 옮겼으므로 위 기록이 가리키는 이 프로젝트의 커밋은 이 저장소에서 그대로 열린다. 위의 설명과 경로는 이 폴더 안을 기준으로 읽는다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
