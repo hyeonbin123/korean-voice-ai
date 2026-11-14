@@ -1,0 +1,299 @@
+# 루트 문서에 옮겨 적은 수치의 출처 선언.
+#
+# 무엇을 하나
+#   첫 화면(README.md)과 docs/ 문서는 구성 요소 폴더의 기록(README 등)에 적힌 수치를 옮겨 적는다. 옮겨 적은 수는
+#   출처가 바뀌어도 저절로 따라 바뀌지 않는다. 그래서 수마다 '루트 문서의 이 자리 글'과 '구성 요소 기록의 이 자리
+#   글'을 짝지어 여기에 적고, tools/check_root_numbers.py가 두 쪽의 마지막 수가 여전히 같은 글자인지 대조한다.
+#   수를 다시 계산하지는 않는다. 기록 자체를 다시 계산하는 일은 각 구성 요소의 시험이 한다(docs/measurement.md).
+#
+# 표와 키 (자세한 규칙은 tools/check_root_numbers.py 머리말)
+#   [[number]]    where·section: 루트 문서 파일과 그 안의 제목('#' 없이). context: 그 절에 정확히 한 번 나오는
+#                 한 줄 글이고 마지막 수가 value다. condition: context와 같은 줄에 있어야 하는 조건 글.
+#                 source·source_section·source_context: 구성 요소 기록 쪽의 같은 검사.
+#                 value: 쉼표 없이 적은 수 글자.
+#   [[coverage]]  where 파일(section이 없으면 파일 전체)에서 '%'·'%p'가 붙은 수가 모두 위 선언의 context 안에
+#                 들어 있는지 본다. 선언 없이 끼어든 퍼센트 수를 잡으려는 것이다.
+#
+# 주의
+#   - source_section은 구성 요소 기록의 제목을 글자 그대로 옮긴다(제목이 바뀌면 검사가 실패해 알려 준다).
+#   - context와 source_context는 그 절에서 한 번만 나와야 하므로, 같은 수가 여러 번 나오는 표에서는 줄 앞쪽 글까지
+#     넣어 자리를 하나로 정한다.
+
+# ---------------------------------------------------------------------------------------------
+# docs/model-choices.md
+# ---------------------------------------------------------------------------------------------
+
+[[coverage]]
+where = "docs/model-choices.md"
+
+# whisper-ko-ft: 고른 모델(숫자 표기를 바꿔 학습한 turbo + LoRA)의 test 결과. 출처 README 결과 절의
+# '정답의 숫자 표기를 바꿔 학습' 표(Zeroth는 숫자 표기를 맞춘 CER)와 재시도 디코딩 판정 문단.
+
+[[number]]
+where = "docs/model-choices.md"
+section = "whisper-ko-ft"
+context = "기준선 turbo 4.22"
+condition = "학습에서 본 문장"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "| Zeroth test, 맞춘 CER | 4.22"
+value = "4.22"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "whisper-ko-ft"
+context = "고른 모델 2.68"
+condition = "학습에서 본 문장"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "| Zeroth test, 맞춘 CER | 4.22% [3.53, 5.00] | 2.04% [1.47, 2.76] | 2.68"
+value = "2.68"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "whisper-ko-ft"
+context = "재시도 디코딩을 켜면 1.98"
+condition = "학습에서 본 문장"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "Zeroth test는 2.68% → 1.98"
+value = "1.98"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "whisper-ko-ft"
+context = "기준선 turbo 5.21"
+condition = "FLEURS 한국어 test"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "| FLEURS 한국어 test, CER | 5.21"
+value = "5.21"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "whisper-ko-ft"
+context = "고른 모델 5.55"
+condition = "FLEURS 한국어 test"
+source = "whisper-ko-ft/README.md"
+source_section = "지금까지의 결과"
+source_context = "| FLEURS 한국어 test, CER | 5.21% [4.19, 6.16] | 6.94% [5.73, 8.08] | 5.55"
+value = "5.55"
+
+# stt-scratch: 봉인 test 표의 전체 문맥(full) 열.
+
+[[number]]
+where = "docs/model-choices.md"
+section = "stt-scratch"
+context = "Zeroth 공식 test 3.67"
+condition = "봉인 test"
+source = "stt-scratch/README.md"
+source_section = "결과 (봉인 test, 2026-10-14 1회)"
+source_context = "| Zeroth 공식 test | 3.67"
+value = "3.67"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "stt-scratch"
+context = "처음 보는 문장만 15.55"
+condition = "봉인 test"
+source = "stt-scratch/README.md"
+source_section = "결과 (봉인 test, 2026-10-14 1회)"
+source_context = "| Zeroth test_H (처음 보는 문장만, 1,280발화) | 15.55"
+value = "15.55"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "stt-scratch"
+context = "FLEURS 한국어 14.62"
+condition = "봉인 test"
+source = "stt-scratch/README.md"
+source_section = "결과 (봉인 test, 2026-10-14 1회)"
+source_context = "| FLEURS 한국어 test | 14.62"
+value = "14.62"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "stt-scratch"
+context = "Common Voice 한국어 28.19"
+condition = "봉인 test"
+source = "stt-scratch/README.md"
+source_section = "결과 (봉인 test, 2026-10-14 1회)"
+source_context = "| Common Voice 22 한국어 test | 28.19"
+value = "28.19"
+
+# voice-translator: '측정해서 고른 결과' 표의 음성 인식·번역 줄(FLEURS test, 고른 설정만 한 번).
+
+[[number]]
+where = "docs/model-choices.md"
+section = "voice-translator"
+context = "한국어 CER 4.57"
+condition = "FLEURS test"
+source = "voice-translator/README.md"
+source_section = "측정해서 고른 결과"
+source_context = "| 음성 인식 | large-v3-turbo + VAD | 한국어 CER 4.57"
+value = "4.57"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "voice-translator"
+context = "영어 WER 4.95"
+condition = "FLEURS test"
+source = "voice-translator/README.md"
+source_section = "측정해서 고른 결과"
+source_context = "한국어 CER 4.57%, 영어 WER 4.95"
+value = "4.95"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "voice-translator"
+context = "한→영 55.7"
+condition = "FLEURS test"
+source = "voice-translator/README.md"
+source_section = "측정해서 고른 결과"
+source_context = "| 번역 | opus-mt-tc-big | chrF 한→영 55.7"
+value = "55.7"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "voice-translator"
+context = "영→한 36.1"
+condition = "FLEURS test"
+source = "voice-translator/README.md"
+source_section = "측정해서 고른 결과"
+source_context = "chrF 한→영 55.7, 영→한 36.1"
+value = "36.1"
+
+# support-agent: 새 세대 소형 모델 측정 결과 절의 시험용 표(40과제 × 4회).
+
+[[number]]
+where = "docs/model-choices.md"
+section = "support-agent"
+context = "qwen2.5 7B 18.1"
+condition = "시험용 40과제"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| 기준: qwen2.5 7B, P1 | 18.1"
+value = "18.1"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "support-agent"
+context = "`qwen3.5:4b` 55.6"
+condition = "시험용 40과제"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| `qwen3.5:4b`, P1 | **55.6"
+value = "55.6"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "support-agent"
+context = "차이 +37.5"
+condition = "시험용 40과제"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| `qwen3.5:4b`, P1 | **55.6%** | **+37.5"
+value = "37.5"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "support-agent"
+context = "쓰기가 6"
+condition = "시험용 40과제"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| 기준: qwen2.5 7B, P1 | 18.1% | | 2.5% | 6"
+value = "6"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "support-agent"
+context = "6건에서 13"
+condition = "시험용 40과제"
+source = "support-agent/README.md"
+source_section = "측정 결과 (8단계: 새 세대 소형 모델)"
+source_context = "| `qwen3.5:4b`, P1 | **55.6%** | **+37.5%p [+28.7, +46.2]** | 20.0% | 13"
+value = "13"
+
+# call-summary: 서빙 모델(GGUF q8_0)과 프롬프트만 쓴 qwen3.5:4b의 test exact(결과 요약의 2026년 비교 문장),
+# 서빙 형태별 dev exact(서빙 결과 요약 표).
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "test-a(같은 생성기) 95.7"
+condition = "생성한 가상 데이터"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "test-a 18.7 대 95.7"
+value = "95.7"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "업종) 49.5"
+condition = "생성한 가상 데이터"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "test-c 4.5 대 49.5"
+value = "49.5"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "받아 적은 전사) 79.3"
+condition = "생성한 가상 데이터"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "test-d v2 13.3 대 79.3"
+value = "79.3"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "`qwen3.5:4b`는 18.7"
+condition = "생성한 가상 데이터"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "test-a 18.7"
+value = "18.7"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "18.7, 4.5"
+condition = "생성한 가상 데이터"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "test-c 4.5"
+value = "4.5"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "4.5, 13.3"
+condition = "생성한 가상 데이터"
+source = "call-summary/README.md"
+source_section = "결과 요약 (3단계)"
+source_context = "test-d v2 13.3"
+value = "13.3"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "GGUF q8_0 94.6"
+condition = "dev 240건"
+source = "call-summary/README.md"
+source_section = "결과 요약 (5단계: 서빙)"
+source_context = "| **GGUF q8_0, 서비스 경유** | **94.6"
+value = "94.6"
+
+[[number]]
+where = "docs/model-choices.md"
+section = "call-summary"
+context = "q4_K_M 66.2"
+condition = "dev 240건"
+source = "call-summary/README.md"
+source_section = "결과 요약 (5단계: 서빙)"
+source_context = "| GGUF q4_K_M | 66.2"
+value = "66.2"
