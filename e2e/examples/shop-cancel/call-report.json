@@ -1,0 +1,200 @@
+{
+  "report": "call-e2e/1",
+  "wiring_only": true,
+  "notice": "모델 없는 오프라인 앱 두 개(support-agent의 규칙 대역, call-summary의 고정 답)를 HTTP로 이은 배선 시연이다. 상담 답과 후처리 기록은 모델이 만든 것이 아니므로 품질을 보여 주지 않는다.",
+  "script": {
+    "call_id": "shop-cancel",
+    "title": "주문 하나를 취소하는 통화",
+    "domain": "shop",
+    "sha256": "478bc3bb7acc079b8a755f1e981eeddf295a46fc8d84aa5c28fac953c65432e3"
+  },
+  "support_agent": {
+    "turns": [
+      {
+        "customer": "안녕하세요, 주문을 취소하려고요.",
+        "tools": [],
+        "approvals": [],
+        "replies": [
+          "본인 확인을 위해 성함과 가입하신 전화번호를 알려 주세요."
+        ],
+        "errors": [],
+        "end_status": "open"
+      },
+      {
+        "customer": "정예준이고 010-0000-9005입니다.",
+        "tools": [
+          {
+            "name": "find_customer",
+            "ok": true,
+            "error_code": null
+          }
+        ],
+        "approvals": [],
+        "replies": [
+          "처리했습니다. {\"customer_id\": \"C-9005\", \"name\": \"정예준\", \"grade\": \"normal\", \"grade_label\": \"일반\"}"
+        ],
+        "errors": [],
+        "end_status": "open"
+      },
+      {
+        "customer": "O-90005 주문 취소해 주세요.",
+        "tools": [
+          {
+            "name": "cancel_order",
+            "ok": true,
+            "error_code": null
+          }
+        ],
+        "approvals": [],
+        "replies": [
+          "처리했습니다. {\"order_id\": \"O-90005\", \"status\": \"cancelled\", \"status_label\": \"취소됨\", \"refund_won\": 89100, \"refund_method\": \"simple_pay\", \"refund_method_label\": \"간편결제\"}"
+        ],
+        "errors": [],
+        "end_status": "open"
+      }
+    ],
+    "unsent_turns": 0,
+    "session_status": "open",
+    "transcript": [
+      {
+        "role": "agent",
+        "text": "안녕하세요, 고객센터입니다. 무엇을 도와드릴까요?"
+      },
+      {
+        "role": "customer",
+        "text": "안녕하세요, 주문을 취소하려고요."
+      },
+      {
+        "role": "agent",
+        "text": "본인 확인을 위해 성함과 가입하신 전화번호를 알려 주세요."
+      },
+      {
+        "role": "customer",
+        "text": "정예준이고 010-0000-9005입니다."
+      },
+      {
+        "role": "agent",
+        "text": "처리했습니다. {\"customer_id\": \"C-9005\", \"name\": \"정예준\", \"grade\": \"normal\", \"grade_label\": \"일반\"}"
+      },
+      {
+        "role": "customer",
+        "text": "O-90005 주문 취소해 주세요."
+      },
+      {
+        "role": "agent",
+        "text": "처리했습니다. {\"order_id\": \"O-90005\", \"status\": \"cancelled\", \"status_label\": \"취소됨\", \"refund_won\": 89100, \"refund_method\": \"simple_pay\", \"refund_method_label\": \"간편결제\"}"
+      }
+    ],
+    "tool_calls": [
+      {
+        "name": "find_customer",
+        "args": {
+          "name": "정예준",
+          "contact": "010-0000-9005"
+        },
+        "ok": true,
+        "error_code": null
+      },
+      {
+        "name": "cancel_order",
+        "args": {
+          "order_id": "O-90005",
+          "reason": "changed_mind"
+        },
+        "ok": true,
+        "error_code": null
+      }
+    ],
+    "pending_approvals": []
+  },
+  "call_summary": {
+    "request": {
+      "domain": "shop",
+      "turns": [
+        {
+          "speaker": "상담원",
+          "text": "안녕하세요, 고객센터입니다. 무엇을 도와드릴까요?"
+        },
+        {
+          "speaker": "고객",
+          "text": "안녕하세요, 주문을 취소하려고요."
+        },
+        {
+          "speaker": "상담원",
+          "text": "본인 확인을 위해 성함과 가입하신 전화번호를 알려 주세요."
+        },
+        {
+          "speaker": "고객",
+          "text": "정예준이고 010-0000-9005입니다."
+        },
+        {
+          "speaker": "상담원",
+          "text": "처리했습니다. {\"customer_id\": \"C-9005\", \"name\": \"정예준\", \"grade\": \"normal\", \"grade_label\": \"일반\"}"
+        },
+        {
+          "speaker": "고객",
+          "text": "O-90005 주문 취소해 주세요."
+        },
+        {
+          "speaker": "상담원",
+          "text": "처리했습니다. {\"order_id\": \"O-90005\", \"status\": \"cancelled\", \"status_label\": \"취소됨\", \"refund_won\": 89100, \"refund_method\": \"simple_pay\", \"refund_method_label\": \"간편결제\"}"
+        }
+      ]
+    },
+    "model": "offline:canned",
+    "attempts": 1,
+    "record": {
+      "category": "배송 문의",
+      "resolution": "해결",
+      "entities": [
+        {
+          "type": "주문번호",
+          "value": "D7463343"
+        }
+      ],
+      "actions_taken": [],
+      "follow_up": {
+        "required": false,
+        "codes": []
+      },
+      "summary": "오프라인 모드의 고정 응답입니다."
+    },
+    "needs_confirmation": [
+      {
+        "type": "주문번호",
+        "value": "D7463343",
+        "reasons": [
+          "not_in_transcript"
+        ]
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "turns_completed",
+      "ok": true,
+      "detail": "대본 발화 3개 가운데 3개를 보냄; end 없이 끝난 턴 0개, error 이벤트가 있는 턴 0개"
+    },
+    {
+      "name": "tool_calls",
+      "ok": true,
+      "detail": "기대: find_customer(성공) → cancel_order(성공); 실제: find_customer(성공) → cancel_order(성공)"
+    },
+    {
+      "name": "session_status",
+      "ok": true,
+      "detail": "기대: open; 실제: open"
+    },
+    {
+      "name": "transcript_matches_script",
+      "ok": true,
+      "detail": "전사의 고객 말 3개와 대본 발화 3개가 차례대로 같음"
+    },
+    {
+      "name": "summary_model",
+      "ok": true,
+      "detail": "기대: offline:canned; 실제: offline:canned"
+    }
+  ],
+  "ok": true
+}

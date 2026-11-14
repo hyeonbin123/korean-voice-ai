@@ -28,6 +28,7 @@ support-agent와 call-summary에는 모델 없이 도는 오프라인 앱이 있
 이 순서는 개념이고, 다섯 구성 요소를 처음부터 끝까지 이은 하나의 서버나 프로그램은 없다. 이 저장소에서 구성 요소 사이를 실제 코드로 잇는 곳은 둘이다.
 
 - 통화 한 건 배선 시연(`e2e/`): support-agent의 오프라인 앱에 고객 발화를 HTTP로 보내고, 관리 API(`GET /api/admin/sessions/{id}`)로 읽은 대화를 call-summary의 오프라인 앱 `POST /summarize`에 넘겨 상담 후처리 기록을 받는다. 두 앱이 모델 없이 도는 오프라인 판이라 GPU가 필요 없다. call-summary 쪽이 늘 같은 기록을 돌려주므로 요약 품질을 재는 것이 아니라 두 서비스가 이어지는지만 보는 시연이다.
+  - 흐름·HTTP 계약·실행 명령은 [`e2e/README.md`](../e2e/README.md)에, 두 앱을 실제로 띄워 돌린 결과는 [예시 리포트](../e2e/examples/shop-cancel/call-report.md)에 있다.
 - 아래 [구성 요소 사이 의존](#구성-요소-사이-의존)의 파일 의존 네 군데.
 
 ## 구성 요소 사이 의존
