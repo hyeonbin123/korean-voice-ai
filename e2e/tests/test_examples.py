@@ -105,6 +105,9 @@ def test_readme_local_commands_avoid_service_ports():
     assert "127.0.0.1:18072" in code
     assert ":8062" not in code
     assert ":8072" not in code
+    # 포트를 실제로 잡는 것은 uvicorn에 주는 `--port` 값이다. 주소만 보면 그 값이 서비스 기본 포트로
+    # 바뀌어도 모르고 지나가므로, 그 값이 18062·18072 차례인지 따로 본다.
+    assert re.findall(r"'--port'\s*,\s*'(\d+)'", code) == ["18062", "18072"]
 
 
 # 위 도우미가 절과 울타리를 바르게 가르는지 고정한다. 도우미가 울타리를 빠뜨리면 README 시험의

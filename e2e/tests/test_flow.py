@@ -4,7 +4,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from fakes import SUMMARY_URL, SUPPORT_URL, TOKEN, FakeServices, sample_script
+from fakes import GREETING, SUMMARY_URL, SUPPORT_URL, TOKEN, FakeServices, sample_script
 
 from call_e2e.clients import CallSummaryClient, SupportAgentClient
 from call_e2e.flow import check_expectations, run_call, summary_turns, tool_calls_from_audit
@@ -33,6 +33,9 @@ def test_run_call_requests_in_order():
     assert [json.loads(r.content)["text"] for r in fake.requests[1:4]] == list(sample_script().customer_turns)
     assert json.loads(fake.requests[-1].content) == {"domain": "shop", "turns": summary_turns(fake.messages)}
     assert result["call_summary"]["request"] == json.loads(fake.requests[-1].content)
+    # 새 세션은 상담원 인사말 한 줄로 시작하고, 그 줄도 전사와 후처리 요청에 그대로 들어간다.
+    assert result["support_agent"]["transcript"][0] == {"role": "agent", "text": GREETING}
+    assert result["call_summary"]["request"]["turns"][0] == {"speaker": "상담원", "text": GREETING}
     assert result["support_agent"]["turns"][1]["tools"] == [
         {"name": "find_customer", "ok": True, "error_code": None}
     ]
@@ -113,7 +116,9 @@ def test_each_expectation_fails_independently(name):
     if name == "session_status":
         result["support_agent"]["session_status"] = "closed"
     elif name == "transcript_matches_script":
-        result["support_agent"]["transcript"][0]["text"] = "다른 고객 발화"
+        # 전사의 첫 줄은 상담원 인사말이므로, 첫 고객 말을 찾아 바꾼다.
+        first_customer = next(m for m in result["support_agent"]["transcript"] if m["role"] == "customer")
+        first_customer["text"] = "다른 고객 발화"
     else:
         result["call_summary"]["model"] = "different:model"
     assert [c["name"] for c in check_expectations(sample_script(), result) if not c["ok"]] == [name]

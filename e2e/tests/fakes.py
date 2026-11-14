@@ -16,6 +16,8 @@ TOKEN = "test-admin-token"
 SUPPORT_URL = "http://support.test"
 SUMMARY_URL = "http://summary.test"
 SCRIPT_PATH = Path(__file__).parents[1] / "calls" / "shop-cancel.json"
+# 실제 앱이 새 채팅 세션의 첫 줄로 넣는 상담원 인사말과 같은 글.
+GREETING = "안녕하세요, 고객센터입니다. 무엇을 도와드릴까요?"
 
 
 def sample_script():
@@ -49,7 +51,9 @@ class FakeServices:
         self.failures: dict[tuple[str, str], tuple[int, str]] = {}
         self.extra_events: dict[int, list[tuple[str, dict]]] = {}
         self.omit_end: set[int] = set()
-        self.messages: list[dict] = []
+        # 실제 앱의 새 채팅 세션은 상담원의 고정 인사말 한 줄로 시작한다(support-agent
+        # `src/support_agent/config.py`의 FIRST_AGENT_MESSAGE). 전사와 후처리 요청에도 그 줄이 들어간다.
+        self.messages: list[dict] = [{"role": "agent", "text": GREETING}]
         self.audit = [{"id": 1, "at": "2026-01-01", "kind": "session_started", "payload": {}}]
         self.pending_approvals: list[dict] = []
         self.model = "offline:canned"

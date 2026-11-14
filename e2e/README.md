@@ -49,12 +49,12 @@
 
 저장소 뿌리에서 Windows PowerShell로 돌린다(5.1에서 확인). 경로는 모두 저장소 뿌리 기준 상대 경로이고, uv 0.13.1 이상이 필요하다.
 
-준비: 새로 받은 복제본이면 두 서비스의 기본 의존성 환경과 이 폴더의 환경을 먼저 만든다(CI와 같은 설치 범위). 두 서비스 폴더에 이미 쓰는 환경(`.venv`)이 있으면 그 환경은 고치지 않고 그대로 쓰고, 없는 환경만 만든다. 아래 시연은 그 환경의 파이썬을 부르기만 한다. Windows에서는 줄바꿈을 바꾸지 않고 받은 복제본(`git clone -c core.autocrlf=false …`)에서 돌린다. `core.autocrlf=true`로 받으면 대본 파일이 CRLF로 풀려, 리포트의 대본 SHA-256이 예시와 달라지고 예시 시험([`tests/test_examples.py`](tests/test_examples.py))이 실패한다.
+준비: 새로 받은 복제본이면 두 서비스의 기본 의존성 환경과 이 폴더의 환경을 먼저 만든다(CI와 같은 설치 범위). 아래 세 줄은 그 폴더에 환경(`.venv`)이 아직 없을 때만 만든다. 이미 쓰는 환경이 있는 폴더에서 `uv sync`를 그대로 치면 uv가 그 환경을 지금 고른 의존성 그룹에 정확히 맞추느라 다른 그룹의 패키지를 지우므로, 있는 환경은 건드리지 않고 그대로 쓴다. 아래 시연은 그 환경의 파이썬을 부르기만 한다. CI는 세 환경을 파이썬 3.11로 만든다. 같은 판으로 맞추려면 `uv sync` 뒤에 `--python 3.11`을 붙인다. Windows에서는 줄바꿈을 바꾸지 않고 받은 복제본(`git clone -c core.autocrlf=false …`)에서 돌린다. `core.autocrlf=true`로 받으면 대본 파일이 CRLF로 풀려, 리포트의 대본 SHA-256이 예시와 달라지고 예시 시험([`tests/test_examples.py`](tests/test_examples.py))이 실패한다.
 
 ```powershell
-uv sync --frozen --no-dev --directory support-agent
-uv sync --frozen --no-dev --directory call-summary
-uv sync --frozen --directory e2e
+if (-not (Test-Path support-agent\.venv)) { uv sync --frozen --no-dev --directory support-agent }
+if (-not (Test-Path call-summary\.venv)) { uv sync --frozen --no-dev --directory call-summary }
+if (-not (Test-Path e2e\.venv)) { uv sync --frozen --directory e2e }
 ```
 
 시연: 아래 덩어리를 한 번에 붙여 넣는다. 두 앱을 포트 18062·18072에 띄우고, 통화 한 건을 돌리고, 두 앱을 멈춘다. 리포트는 `e2e/out/report-1/`에 생긴다(`e2e/out/`은 git이 무시한다). 출력의 끝 두 줄은 `검사 5/5 통과`와 `exit 0`이다.
@@ -90,7 +90,7 @@ try {
 Get-NetTCPConnection -LocalPort 18062,18072 -State Listen -ErrorAction SilentlyContinue
 ```
 
-예시 리포트는 대본이나 리포트 코드를 고쳤을 때만 다시 만든다. 덩어리를 돌린 뒤 두 파일을 예시 폴더로 복사한다.
+예시 리포트는 대본이나 리포트 코드를 고쳤을 때, 또는 두 오프라인 앱의 응답이 바뀌어 CI의 비교가 실패했을 때 다시 만든다(서비스 쪽 변경이 의도한 것이 아니면 예시가 아니라 서비스를 고친다). 덩어리를 돌린 뒤 두 파일을 예시 폴더로 복사한다.
 
 ```powershell
 Copy-Item e2e\out\report-1\call-report.* e2e\examples\shop-cancel\
