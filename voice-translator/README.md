@@ -190,3 +190,7 @@ uv run python -m eval.supertonic_download    # 한국어 합성 시험용 Supert
 - [docs/experiments.md](docs/experiments.md): 모델 측정 절차·규칙·결과
 - [docs/security.md](docs/security.md): 재현성 고정, 의존성 취약점 검사와 받아들인 위험
 - [docs/plan.md](docs/plan.md): 개발 시작 전 계획
+
+## 저장소 이동 (2026-11-10)
+
+이날부터 이 폴더는 [korean-voice-ai](../README.md) 저장소의 `voice-translator/` 폴더다. 커밋 이력을 해시 그대로 함께 옮겼으므로 위 기록이 가리키는 이 프로젝트의 커밋은 이 저장소에서 그대로 열린다. 위의 설명과 경로는 이 폴더 안을 기준으로 읽는다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
