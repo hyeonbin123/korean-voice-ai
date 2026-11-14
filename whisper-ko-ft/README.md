@@ -182,3 +182,7 @@ LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/expe
 | 모델 (9단계 학습 없이 평가, 10단계 LoRA) | Qwen3-ASR-1.7B, 0.6B (Transformers 판) | Apache 2.0 | [Qwen/Qwen3-ASR-1.7B-hf](https://huggingface.co/Qwen/Qwen3-ASR-1.7B-hf), [Qwen/Qwen3-ASR-0.6B-hf](https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf) |
 
 데이터와 학습 결과물은 저장소에 넣지 않는다.
+
+## 저장소 이동 (2026-11-10)
+
+이날부터 이 폴더는 [korean-voice-ai](../README.md) 저장소의 `whisper-ko-ft/` 폴더다. 커밋 이력을 해시 그대로 함께 옮겼으므로 위 기록이 가리키는 이 프로젝트의 커밋은 이 저장소에서 그대로 열린다. 위의 설명과 경로는 이 폴더 안을 기준으로 읽는다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
