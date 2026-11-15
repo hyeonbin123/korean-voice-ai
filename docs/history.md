@@ -4,11 +4,11 @@
 
 | 폴더 | 원래 저장소 | 합친 시점의 마지막 커밋 | 커밋 수 | 태그 |
 |---|---|---|---|---|
-| `whisper-ko-ft/` | https://github.com/hyeonbin123/whisper-ko-ft | `2541ec6926904228d2c8d54ae9e786f5578352df` | 94 | `archive/whisper-ko-ft` |
-| `stt-scratch/` | https://github.com/hyeonbin123/stt-scratch | `3b729ad801f5da3a639223ad4fbb832326548b1c` | 109 | `archive/stt-scratch` |
-| `call-summary/` | https://github.com/hyeonbin123/call-summary | `92b9601128412dda4a58604f29eeea9496727a48` | 144 | `archive/call-summary` |
-| `support-agent/` | https://github.com/hyeonbin123/support-agent | `1315de6cb1c2500f1cab041f80178dd960604f75` | 156 | `archive/support-agent` |
-| `voice-translator/` | https://github.com/hyeonbin123/voice-translator | `43aaa3c79226074e8511027dc147eea1fcee1b1b` | 212 | `archive/voice-translator` |
+| `whisper-ko-ft/` | `https://github.com/hyeonbin123/whisper-ko-ft` | `2541ec6926904228d2c8d54ae9e786f5578352df` | 94 | `archive/whisper-ko-ft` |
+| `stt-scratch/` | `https://github.com/hyeonbin123/stt-scratch` | `3b729ad801f5da3a639223ad4fbb832326548b1c` | 109 | `archive/stt-scratch` |
+| `call-summary/` | `https://github.com/hyeonbin123/call-summary` | `92b9601128412dda4a58604f29eeea9496727a48` | 144 | `archive/call-summary` |
+| `support-agent/` | `https://github.com/hyeonbin123/support-agent` | `1315de6cb1c2500f1cab041f80178dd960604f75` | 156 | `archive/support-agent` |
+| `voice-translator/` | `https://github.com/hyeonbin123/voice-translator` | `43aaa3c79226074e8511027dc147eea1fcee1b1b` | 212 | `archive/voice-translator` |
 
 원래 저장소 열의 주소는 합칠 때 각 저장소가 있던 주소를 기록으로 남긴 것이다. 태그 `archive/<폴더>`는 합친 시점의 마지막 커밋을 가리키고, 커밋 수는 `git rev-list --count archive/<폴더>`로 다시 셀 수 있다.
 
