@@ -32,7 +32,7 @@ flowchart LR
 
 ## 구성 요소
 
-| 구성 요소 | 무엇 | 대표 수치와 조건 | 테스트(CI, 2026-11-10) | 여기서부터 읽기 |
+| 구성 요소 | 무엇 | 대표 수치와 조건(인식 CER은 낭독 음성 데이터 기준) | 테스트(CI, 2026-11-10) | 여기서부터 읽기 |
 |---|---|---|---|---|
 | [whisper-ko-ft](whisper-ko-ft/) | Whisper 파인튜닝 | Zeroth test CER(숫자 표기 차이도 오류로 셈): large-v3-turbo **4.48%** → LoRA 파인튜닝 **1.96%**(처음 듣는 화자가 학습에서 본 문장을 읽는 조건). 다른 도메인 FLEURS 한국어 test는 **5.21%** → **6.94%**(나빠졌다. 판정은 '도메인 전용'이고 [범용 모델](docs/model-choices.md#whisper-ko-ft)은 따로 골랐다) | 통과 779<br>건너뜀 2 | [README](whisper-ko-ft/README.md#지금까지의-결과) |
 | [stt-scratch](stt-scratch/) | 처음부터 만든 스트리밍 인식 | 1회 잰 봉인 test CER(비스트리밍, 한글 전용 발화, 공백 제외): Zeroth 공식 test **3.67%**(문장 대부분이 학습 세트에도 있어 문장 암기 가능성), 처음 보는 문장만 **15.55%** | 통과 284<br>건너뜀 12 | [README](stt-scratch/README.md#결과-봉인-test-2026-10-14-1회) |
