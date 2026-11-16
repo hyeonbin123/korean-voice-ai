@@ -172,6 +172,6 @@ docker run --rm -p 127.0.0.1:8072:8072 --add-host host.docker.internal:host-gate
 
 음성 조건 v3(인식기 비교, 규칙은 docs/experiments.md "음성 조건 v3")은 두 번에 나눠 돈다. 1패스 `scripts/asr_condition.py --keep-audio [--only-ids]`는 발화를 다시 합성해 기준 인식기(large-v3-turbo)가 받은 WAV와 그 글을 `outputs/asr3/audio/`에 남기고, 2패스는 남긴 소리를 다른 인식기로 다시 듣는다: `asr_condition.py --recognise Th|L|N` (support-agent 음성 환경. N은 그 환경의 tokenizers가 turbo-n의 토크나이저 파일을 읽지 못해 whisper-ko-ft 환경), `uv run --no-sync python scripts/asr_qwen.py --arm Q|Qc` (이 프로젝트 환경, Qwen3-ASR-1.7B). 모델 없이 도는 쪽은 `python -m call_summary.asr_arms`: `context`(업종 맥락), `identity`(새 소리의 기준 인식기 글이 기록된 전사와 같은지), `gate`(번호 발화만의 싼 관문), `build`(팔마다 학생이 받는 파일, 이름이 `+I`로 끝나는 팔은 `call_summary.id_itn`의 번호 규칙을 거침), `compare`(값 보존율 짝지은 비교).
 
-## 저장소 이동 (2026-11-10)
+## 이 폴더의 글 읽는 법
 
-이날부터 이 폴더는 [korean-voice-ai](../README.md) 저장소의 `call-summary/` 폴더다. 커밋 이력을 해시 그대로 함께 옮겼으므로 위 기록이 가리키는 이 프로젝트의 커밋은 이 저장소에서 그대로 열린다. 위의 설명과 경로는 이 폴더 안을 기준으로 읽는다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+이 폴더는 [korean-voice-ai](../README.md) 저장소의 구성 요소 `call-summary/`다. 이 폴더의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/call-summary.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
