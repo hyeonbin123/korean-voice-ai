@@ -1,6 +1,6 @@
 # korean-voice-ai
 
-한국어 콜센터 음성 AI: 통화 한 건이 지나가는 네 단계(음성 인식 → 실시간 음성 계층 → 상담 에이전트 → 상담 후처리)에 해당하는 다섯 구성 요소를 따로 만들었고, 수치는 [측정 규칙을 먼저 커밋한 뒤](#측정-원칙) 쟀다.
+한국어 콜센터 음성 AI: 통화 한 건이 지나가는 네 단계(음성 인식 → 실시간 음성 계층 → 상담 에이전트 → 상담 후처리)에 해당하는 다섯 구성 요소로 이뤄진 프로젝트로, 수치는 [측정 규칙을 먼저 커밋한 뒤](#측정-원칙) 쟀다.
 
 [![whisper-ko-ft](https://github.com/hyeonbin123/korean-voice-ai/actions/workflows/whisper-ko-ft.yml/badge.svg?branch=main)](https://github.com/hyeonbin123/korean-voice-ai/actions/workflows/whisper-ko-ft.yml)
 [![stt-scratch](https://github.com/hyeonbin123/korean-voice-ai/actions/workflows/stt-scratch.yml/badge.svg?branch=main)](https://github.com/hyeonbin123/korean-voice-ai/actions/workflows/stt-scratch.yml)
@@ -34,11 +34,11 @@ flowchart LR
 
 | 구성 요소 | 무엇 | 대표 수치와 조건(인식 CER은 낭독 음성 데이터 기준) | 테스트(CI, 2026-11-10) | 여기서부터 읽기 |
 |---|---|---|---|---|
-| [whisper-ko-ft](whisper-ko-ft/) | Whisper 파인튜닝 | Zeroth test CER(숫자 표기 차이도 오류로 셈): large-v3-turbo **4.48%** → LoRA 파인튜닝 **1.96%**(처음 듣는 화자가 학습에서 본 문장을 읽는 조건). 다른 도메인 FLEURS 한국어 test는 **5.21%** → **6.94%**(나빠졌다. 판정은 '도메인 전용'이고 [범용 모델](docs/model-choices.md#whisper-ko-ft)은 따로 골랐다) | 통과 779<br>건너뜀 2 | [README](whisper-ko-ft/README.md#지금까지의-결과) |
-| [stt-scratch](stt-scratch/) | 처음부터 만든 스트리밍 인식 | 1회 잰 봉인 test CER(비스트리밍, 한글 전용 발화, 공백 제외): Zeroth 공식 test **3.67%**(문장 대부분이 학습 세트에도 있어 문장 암기 가능성), 처음 보는 문장만 **15.55%** | 통과 284<br>건너뜀 12 | [README](stt-scratch/README.md#결과-봉인-test-2026-10-14-1회) |
-| [voice-translator](voice-translator/) | 음성 번역 서비스 | 한국어 인식 CER **4.57%**(FLEURS test, 고른 설정만 1회). 대화 모드에서 말을 멈춘 뒤 번역 음성을 다 받기까지(재생 시작 전) 중앙값: 한국어 원문 **1.86초 → 1.24초**(최종 처리를 미리 시작하기 전 → 후, 실제 서비스 test) | 통과 742<br>건너뜀 71<br>Vitest 184<br>Playwright 8 | [README](voice-translator/README.md#측정해서-고른-결과) |
-| [support-agent](support-agent/) | 상담 에이전트와 평가 환경 | 시험용 40과제 × 4회 pass^1(한 번 시켜 성공한 비율), 규정 위반을 도구에서도 막는 구성: qwen2.5 7B **18.1%** → `qwen3.5:4b` **55.6%**(에이전트 모델만 바꿈). 과제가 요구하지 않은 쓰기 호출도 **6 → 13건**으로 늘었다 | 통과 2,160<br>건너뜀 36 | [README](support-agent/README.md#지금까지) |
-| [call-summary](call-summary/) | 상담 후처리 LLM | 가상 대화 exact(구조 필드 모두 일치), 글 전사로만 학습한 Qwen3-4B QLoRA: test-a(같은 생성기) **95.7%**, test-b(다른 모델이 쓴 대화) **90.0%**, test-c(학습에 없던 업종) **55.0%**([서빙 모델](docs/model-choices.md#call-summary)은 다름) | 통과 495<br>건너뜀 8 | [README](call-summary/README.md#결과-요약-3단계) |
+| whisper-ko-ft | Whisper 파인튜닝 | Zeroth test CER(숫자 표기 차이도 오류로 셈): large-v3-turbo **4.48%** → LoRA 파인튜닝 **1.96%**(처음 듣는 화자가 학습에서 본 문장을 읽는 조건). 다른 도메인 FLEURS 한국어 test는 **5.21%** → **6.94%**(나빠졌다. 판정은 '도메인 전용'이고 [범용 모델](docs/model-choices.md#whisper-ko-ft)은 따로 골랐다) | 통과 779<br>건너뜀 2 | [README](whisper-ko-ft/README.md#지금까지의-결과) |
+| stt-scratch | 처음부터 만든 스트리밍 인식 | 1회 잰 봉인 test CER(비스트리밍, 한글 전용 발화, 공백 제외): Zeroth 공식 test **3.67%**(문장 대부분이 학습 세트에도 있어 문장 암기 가능성), 처음 보는 문장만 **15.55%** | 통과 284<br>건너뜀 12 | [README](stt-scratch/README.md#결과-봉인-test-2026-10-14-1회) |
+| voice-translator | 음성 번역 서비스 | 한국어 인식 CER **4.57%**(FLEURS test, 고른 설정만 1회). 대화 모드에서 말을 멈춘 뒤 번역 음성을 다 받기까지(재생 시작 전) 중앙값: 한국어 원문 **1.86초 → 1.24초**(최종 처리를 미리 시작하기 전 → 후, 실제 서비스 test) | 통과 742<br>건너뜀 71<br>Vitest 184<br>Playwright 8 | [README](voice-translator/README.md#측정해서-고른-결과) |
+| support-agent | 상담 에이전트와 평가 환경 | 시험용 40과제 × 4회 pass^1(한 번 시켜 성공한 비율), 규정 위반을 도구에서도 막는 구성: qwen2.5 7B **18.1%** → `qwen3.5:4b` **55.6%**(에이전트 모델만 바꿈). 과제가 요구하지 않은 쓰기 호출도 **6 → 13건**으로 늘었다 | 통과 2,160<br>건너뜀 36 | [README](support-agent/README.md#지금까지) |
+| call-summary | 상담 후처리 LLM | 가상 대화 exact(구조 필드 모두 일치), 글 전사로만 학습한 Qwen3-4B QLoRA: test-a(같은 생성기) **95.7%**, test-b(다른 모델이 쓴 대화) **90.0%**, test-c(학습에 없던 업종) **55.0%**([서빙 모델](docs/model-choices.md#call-summary)은 다름) | 통과 495<br>건너뜀 8 | [README](call-summary/README.md#결과-요약-3단계) |
 
 ## 운영 문제별 근거
 
@@ -62,13 +62,13 @@ flowchart LR
 
 ## 증거 정책
 
-- 합치기 전 다섯 저장소의 원래 커밋을 해시 그대로 가져와, 구성 요소 문서에 적힌 그 저장소들의 커밋 해시가 여기서 열린다(예: `git show a5717ce`. 다른 프로젝트·모델 저장소의 해시는 제외). 파일 이력은 git 명령으로 본다([이력 따라가기](docs/history.md#이력-따라가기)).
+- 구성 요소 문서에 적힌 이 프로젝트의 커밋 해시는 이 저장소에서 그대로 열린다(예: `git show a5717ce`. 다른 프로젝트나 모델·데이터 저장소의 해시는 제외). 파일 이력은 git 명령으로 본다([이력 따라가기](docs/history.md#이력-따라가기)).
 - 기록한 수치·판정·규칙 문장은 고치지 않고 날짜를 붙여 덧붙인다. [whisper-ko-ft](whisper-ko-ft/tests/test_recorded_reports.py)·[support-agent](support-agent/tests/test_recorded_numbers.py)·[call-summary](call-summary/tests/test_numbers.py)의 기록 수치는 실행 기록에서 다시 계산하는 테스트가 CI에서 지킨다.
 - 첫 화면과 `docs/`의 측정 수치는 [`root-numbers.toml`](root-numbers.toml)이 출처 글과 짝짓고 [`tools/check_root_numbers.py`](tools/check_root_numbers.py)가 대조한다.
 
 ## AI 도구를 쓴 방식과 검증
 
-다섯 구성 요소는 Claude Code와 함께 만들었고 voice-translator는 일을 Codex와 나눴다. 이는 커밋 트레일러에 남아 있다(`Agent:` 줄, 그리고 2026-11-14에 센 원래 커밋 715개 가운데 712개에 있는 `Co-Authored-By: Claude` 줄). 검증 장치: [측정 규칙 선커밋](docs/measurement.md), 위의 재계산 테스트, stt-scratch의 [검증 기록](stt-scratch/docs/ai-verification.md), voice-translator의 교차 검토(`Reviewed-by: claude`).
+다섯 구성 요소는 Claude Code와 함께 만들었고 voice-translator는 일을 Codex와 나눴다. 이는 커밋 트레일러에 남아 있다(`Agent:` 줄, 그리고 2026-11-07까지의 커밋 715개 가운데 712개에 있는 `Co-Authored-By: Claude` 줄). 검증 장치: [측정 규칙 선커밋](docs/measurement.md), 위의 재계산 테스트, stt-scratch의 [검증 기록](stt-scratch/docs/ai-verification.md), voice-translator의 교차 검토(`Reviewed-by: claude`).
 
 ## 실행과 테스트
 
