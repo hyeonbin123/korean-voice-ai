@@ -1,5 +1,7 @@
 # whisper-ko-ft
 
+> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '음성 인식' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+
 공개 한국어 음성 데이터(Zeroth-Korean, 51.6시간)로 Whisper를 파인튜닝하고, **미리 정한 규칙으로 전후를 측정**하는 프로젝트. 같은 도메인에서 얼마나 좋아지는지뿐 아니라 다른 도메인(FLEURS)과 영어에서 무엇을 잃는지, 전화 음질(8kHz)에서는 어떻게 되는지를 함께 잰다. (2026-10-24 추가 확인: 같은 도메인의 Zeroth 수치는 처음 듣는 화자가 학습에서 본 문장을 읽는 조건이다. 아래 한계의 'Zeroth의 문장 겹침')
 
 계획은 [docs/plan.md](docs/plan.md), 측정 규칙과 결과는 [docs/experiments.md](docs/experiments.md).
