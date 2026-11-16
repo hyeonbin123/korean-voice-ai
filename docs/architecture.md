@@ -1,6 +1,6 @@
 # 구조와 연결
 
-이 저장소의 다섯 구성 요소는 폴더마다 자기 환경과 잠금 파일(파이썬은 `uv.lock`, voice-translator의 화면은 `package-lock.json`)을 가진 독립 프로젝트다. 서로의 `pyproject.toml`에 의존성으로 적혀 있지 않고, 각자 자기 폴더 안에서 설치하고 실행한다. 이 문서는 그 사이가 어디서 이어지는지를 적는다: 바깥으로 내놓는 인터페이스, 파일 경로로 이어진 의존, 코드로는 잇지 않은 관계. 파일 의존은 [`tools/cross-deps.toml`](../tools/cross-deps.toml)에 선언하고 [`tools/check_cross_deps.py`](../tools/check_cross_deps.py)로 검사한다.
+이 저장소의 다섯 구성 요소는 폴더마다 자기 환경과 잠금 파일(파이썬은 `uv.lock`, voice-translator의 화면은 `package-lock.json`)을 따로 가진다. 서로의 `pyproject.toml`에 의존성으로 적혀 있지 않고, 각자 자기 폴더 안에서 설치하고 실행한다. 이 문서는 그 사이가 어디서 이어지는지를 적는다: 바깥으로 내놓는 인터페이스, 파일 경로로 이어진 의존, 코드로는 잇지 않은 관계. 파일 의존은 [`tools/cross-deps.toml`](../tools/cross-deps.toml)에 선언하고 [`tools/check_cross_deps.py`](../tools/check_cross_deps.py)로 검사한다.
 
 ## 구성 요소와 인터페이스
 
@@ -56,4 +56,4 @@ uv run --no-project tools/check_cross_deps.py --local    # 가상환경과 모�
 ## 코드로 잇지 않은 관계
 
 - voice-translator에서 support-agent로 이어진 설계 계보. support-agent의 음성 계층이 쓰는 MeloTTS는 voice-translator에서 합성한 음성을 다시 인식한 오류를 재서 한국어용으로 고른 것이고, Windows에서 MeloTTS를 불러오기 전에 필요한 우회 세 가지도 voice-translator에서 가져왔다. support-agent는 voice-translator의 코드를 부르지 않는다. 근거는 support-agent의 [`speech.py` 4행](../support-agent/src/support_agent/voice/speech.py#L4)과 [174행](../support-agent/src/support_agent/voice/speech.py#L174), [`experiments.md` 344행](../support-agent/docs/experiments.md#L344)이다.
-- stt-scratch와 whisper-ko-ft의 같은 채점 정규화. stt-scratch의 주지표 CER_ns는 whisper-ko-ft와 같은 규칙으로 정규화해 재서 두 프로젝트의 수치를 나란히 놓을 수 있다. 규칙은 stt-scratch가 [`text.py`의 `normalize_score`](../stt-scratch/src/stt_scratch/text.py#L69)에 따로 구현했고 whisper-ko-ft의 코드를 가져다 쓰지 않는다. 두 수치를 견주는 문장은 stt-scratch의 [README 23행](../stt-scratch/README.md#L23)에 있다.
+- stt-scratch와 whisper-ko-ft의 같은 채점 정규화. stt-scratch의 주지표 CER_ns는 whisper-ko-ft와 같은 규칙으로 정규화해 재서 두 구성 요소의 수치를 나란히 놓을 수 있다. 규칙은 stt-scratch가 [`text.py`의 `normalize_score`](../stt-scratch/src/stt_scratch/text.py#L69)에 따로 구현했고 whisper-ko-ft의 코드를 가져다 쓰지 않는다. 두 수치를 견주는 문장은 stt-scratch의 [README 23행](../stt-scratch/README.md#L23)에 있다.
