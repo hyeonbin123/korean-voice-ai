@@ -1,5 +1,7 @@
 # voice-translator
 
+> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '실시간 음성 계층' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+
 영어↔한국어 음성 번역 웹 서비스. 말하거나 입력하면 음성 인식(STT), 번역, 음성 합성(TTS)을 거쳐 원문과 번역문을 보여 주고 번역문을 읽어 준다. 로그인한 사용자별로 번역 기록을 남긴다. 모델은 모두 로컬 GPU에서 돌고, 공개 평가 데이터(Google FLEURS)로 측정해서 골랐다.
 
 | 번역 화면 (데스크톱) | 기록 상세 (360px) |
