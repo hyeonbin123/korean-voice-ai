@@ -362,7 +362,7 @@ places = 0
 [[number]]
 where = "README.md"
 section = "결과 요약 (3단계)"
-context = "표의 학습한 4B 0~1.5"
+context = "표의 학습한 4B 0\\~1.5"
 kind = "point"
 metric = "hallucination"
 run = "reports/20260929-012208-Qwen_Qwen3-4B-s3-test-c-qwen3-4b-qlora-e2"
@@ -371,7 +371,7 @@ value = 1.5
 [[number]]
 where = "README.md"
 section = "결과 요약 (3단계)"
-context = "0~1.5%, 14B 0"
+context = "0\\~1.5%, 14B 0"
 kind = "point"
 metric = "hallucination"
 run = "reports/20260928-220111-qwen2.5_14b-instruct-s3-test-b-q14"
@@ -381,7 +381,7 @@ places = 0
 [[number]]
 where = "README.md"
 section = "결과 요약 (3단계)"
-context = "0~1.5%, 14B 0~28"
+context = "0\\~1.5%, 14B 0\\~28"
 kind = "point"
 metric = "hallucination"
 run = "reports/20260928-221159-qwen2.5_14b-instruct-s3-test-c-q14"
