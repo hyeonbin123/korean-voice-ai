@@ -1,5 +1,7 @@
 # call-summary
 
+> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '상담 후처리' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+
 고객센터 상담 대화 전사를 상담 후처리 기록(요약, 문의 유형, 처리 결과, 후속 조치, 핵심 값)의 JSON으로 바꾸는 소형 LLM을 LoRA/QLoRA로 학습하고, 로컬에서 서빙한다. 학습 전후와 큰 모델 대비 성능을 미리 정한 규칙으로 측정한다.
 
 - 계획: [docs/plan.md](docs/plan.md)
