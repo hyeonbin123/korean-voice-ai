@@ -4,7 +4,8 @@
 SummaryScore 하나와 답의 토큰 수)과 <run>/judge_summary.json을 쓴다. --out으로 다른 출력 파일을 정할 수
 있고(요약은 그 옆에 <stem>_summary.json으로 간다), 그래서 두 번째 판정 모델이 기록된 j1 판정을 덮어쓰지
 않는다. --hand <file>을 주면 사람 채점 JSONL({"item_id", "verdicts": [...], "wrong_statements": n})과
-사실 단위로 비교해 일치율을 요약에 더한다. 요약에는 코드 커밋과 실행 뒤의 Ollama /api/ps도 기록한다.
+사실 단위로 비교해 일치율을 요약에 더한다. 요약에는 코드 커밋(과 이 폴더의 커밋된 내용의 트리 해시)과 실행
+뒤의 Ollama /api/ps도 기록한다.
 """
 
 # [파일 역할] 기록된 평가 실행 하나의 요약을 판정 모델로 채점하는 명령줄 도구다. 건마다 판정(SummaryScore)과
@@ -25,12 +26,22 @@ import sys
 import time
 from pathlib import Path
 
-# evaluate.py의 도우미를 그대로 쓴다: THINK(--think 값 → 요청의 think), _git(커밋·작업 트리 상태),
-# loaded_models(/api/ps), model_fingerprint(Ollama digest 등 모델 지문), parse_option(KEY=VALUE 옵션 해석),
-# run_checks(잘린 답·생각 글·컨텍스트를 채운 답 세기). 평가와 판정이 같은 방식으로 실행 조건을 기록하게 하려는
-# 것이다.
+# evaluate.py의 도우미를 그대로 쓴다: THINK(--think 값 → 요청의 think), _git(커밋·트리 해시·이 폴더의 추적
+# 파일 변경 여부를 묻는 git 호출)과 그 인자 SCOPED_STATUS·TREE_REF(측정 출처를 이 구성 요소 폴더로 한정하는
+# 값, 이유는 evaluate.py의 설명), loaded_models(/api/ps), model_fingerprint(Ollama digest 등 모델 지문),
+# parse_option(KEY=VALUE 옵션 해석), run_checks(잘린 답·생각 글·컨텍스트를 채운 답 세기). 평가와 판정이 같은
+# 방식으로 실행 조건을 기록하게 하려는 것이다.
 from .dataset import load_items, manifest_data, read_jsonl, write_jsonl
-from .evaluate import THINK, _git, loaded_models, model_fingerprint, parse_option, run_checks
+from .evaluate import (
+    SCOPED_STATUS,
+    THINK,
+    TREE_REF,
+    _git,
+    loaded_models,
+    model_fingerprint,
+    parse_option,
+    run_checks,
+)
 from .judge import (
     JUDGE_NUM_CTX,
     JUDGE_VERSION,
@@ -82,11 +93,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int)
     args = ap.parse_args(argv)
 
-    # 판정 시작 시각과 코드 상태(커밋, 추적 파일이 바뀌었는지)를 먼저 기록한다. 판정 도중 코드를 바꿔도 시작
-    # 때의 상태가 남는다.
+    # 판정 시작 시각과 코드 상태(저장소의 커밋, 이 폴더의 커밋된 내용의 트리 해시, 이 폴더의 추적 파일이
+    # 바뀌었는지)를 먼저 기록한다. 판정 도중 코드를 바꿔도 시작 때의 상태가 남는다. 범위가 이 구성 요소
+    # 폴더뿐이라 다른 폴더의 바뀐 파일은 git_dirty를 참으로 만들지 않는다. git이 없으면
+    # git_commit·git_tree는 빈 글이고 git_dirty는 거짓으로 남는다(깨끗한 것처럼 보이는 기존 동작).
     started = time.strftime("%Y%m%d-%H%M%S")
     git_commit = _git("rev-parse", "HEAD")
-    git_dirty = bool(_git("status", "--porcelain", "--untracked-files=no"))
+    git_tree = _git("rev-parse", TREE_REF)
+    git_dirty = bool(_git(*SCOPED_STATUS))
     run = Path(args.run)
     manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
     # 판정에는 명세의 사실 목록과 전사가 필요하므로, 실행 manifest에 적힌 데이터 파일(또는 --data)에서 건을
@@ -135,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         "options": options,
         "fingerprint": model_fingerprint(judge),
         "git_commit": git_commit,
+        "git_tree": git_tree,
         "git_dirty": git_dirty,
         "started": started,  # 이번 호출의 시작 시각(이어 쓴 파일은 앞선 줄을 그대로 둔다)
         "finished": time.strftime("%Y%m%d-%H%M%S"),

@@ -43,10 +43,11 @@ from pathlib import Path
 import httpx
 
 # 프로젝트 모듈: Ollama /api/ps 조회와 모델 내리기(bench), 데이터셋 읽기, git·데이터 해시·모델 지문(evaluate의
-# 도우미, 다른 측정 도구와 같은 기록 꼴), 서비스와 같은 프롬프트, 서비스의 컨텍스트·라벨 판정 함수.
+# 도우미, 다른 측정 도구와 같은 기록 꼴. SCOPED_STATUS·TREE_REF는 측정 출처를 이 폴더로 한정하는 값이고
+# 이유는 evaluate.py의 같은 이름 설명에 있다), 서비스와 같은 프롬프트, 서비스의 컨텍스트·라벨 판정 함수.
 from call_summary.bench import ollama_get, unload
 from call_summary.dataset import Item, load_items
-from call_summary.evaluate import _file_hash, _git, _git_strict, model_fingerprint
+from call_summary.evaluate import SCOPED_STATUS, TREE_REF, _file_hash, _git, _git_strict, model_fingerprint
 from call_summary.prompts import PROMPT_VERSION, build_messages, format_transcript, prompt_hash
 from call_summary.providers import OllamaProvider
 from call_summary.schema import parse_reply, record_json_schema
@@ -245,13 +246,18 @@ def reference_agreement(dev: Sequence[dict], ref_dir: Path) -> dict | None:
     return out
 
 
-# 추적 파일 변경이 없는 깨끗한 트리인지. git 확인이 실패하면 깨끗하지 않은 것으로 친다(evaluate --official과
-# 같은 fail closed). 테스트가 바꿔 끼울 수 있게 함수로 둔다.
+# 이 폴더(call-summary)의 추적 파일이 바뀌지 않은 상태인지. 다른 구성 요소 폴더의 바뀐 파일은 세지 않는다
+# (SCOPED_STATUS). 이 스크립트를 어느 작업 폴더에서 돌려도 범위는 코드가 있는 폴더다. 이 폴더가 HEAD에
+# 있는 폴더인지도 함께 본다(TREE_REF가 풀리는지): 추적하지 않는 폴더에서는 status가 늘 빈 글이라 이 확인이
+# 없으면 바뀐 것을 놓친다(evaluate.py의 PROJECT_ROOT 설명). git 확인이 실패하면 바뀐 것으로 친다(evaluate
+# --official과 같은 fail closed). 테스트가 바꿔 끼울 수 있게 함수로 둔다.
 def tree_is_clean() -> bool:
     try:
-        return not _git_strict("status", "--porcelain", "--untracked-files=no")
+        changed = _git_strict(*SCOPED_STATUS)
+        _git_strict("rev-parse", TREE_REF)
     except (OSError, subprocess.CalledProcessError):
         return False
+    return not changed
 
 
 # 기록 시각: 이 PC의 시간대를 붙인 ISO 8601(초까지).
@@ -259,8 +265,9 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-# 명령줄 진입점. 전제 확인(깨끗한 트리, Ollama에 올라간 모델 없음) → 두 묶음 dev → 합성 입력 → 모델 내리기 →
-# 관문·참고 대조 → 기록 파일. 성공하면 0을 돌려준다(관문이 keep_default여도 0이다: 판정은 결과 자료다).
+# 명령줄 진입점. 전제 확인(이 폴더의 추적 파일이 바뀌지 않음, Ollama에 올라간 모델 없음) → 두 묶음 dev → 합성
+# 입력 → 모델 내리기 → 관문·참고 대조 → 기록 파일. 성공하면 0을 돌려준다(관문이 keep_default여도 0이다: 판정은
+# 결과 자료다).
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -302,13 +309,17 @@ def main(argv: list[str] | None = None) -> int:
         "--allow-dirty",
         action="store_true",
         help=(
-            "추적 파일이 바뀐 트리에서도 돈다(시험 실행용). 등록 측정은 규칙을 커밋한 깨끗한 트리에서만 한다"
+            "이 폴더의 추적 파일이 바뀐 상태에서도 돈다(시험 실행용). 등록 측정은 규칙을 커밋해 "
+            "이 폴더의 추적 파일이 바뀌지 않은 상태에서만 한다"
         ),
     )
     args = ap.parse_args(argv)
 
     if not args.allow_dirty and not tree_is_clean():
-        ap.error("needs a clean working tree (commit the rules first), or --allow-dirty for a trial run")
+        ap.error(
+            "needs the tracked files in this folder to be unchanged (commit the rules first), "
+            "or --allow-dirty for a trial run"
+        )
     try:
         dev_items = select_dev(load_items(args.dev), args.n_dev)
     except ValueError as exc:
@@ -372,7 +383,10 @@ def main(argv: list[str] | None = None) -> int:
         "rule": "docs/experiments.md 서비스 컨텍스트 초과 동작 확인 (2026-10-24 규칙)",
         "model": args.model,
         "fingerprint": fingerprint,
+        # git_commit은 저장소의 커밋, git_tree는 이 폴더의 커밋된 내용의 트리 해시, git_dirty는 이 폴더의 추적
+        # 파일이 바뀌었는지다(evaluate.py의 설명). git_dirty는 git 확인이 실패하면 참이다(tree_is_clean).
         "git_commit": _git("rev-parse", "HEAD"),
+        "git_tree": _git("rev-parse", TREE_REF),
         "git_dirty": not tree_is_clean(),
         "prompt_version": PROMPT_VERSION,
         "prompt_hash": prompt_hash(),

@@ -1,22 +1,24 @@
 """데이터셋 파일 전체에 모델을 돌리고 구조 필드를 채점한다.
 
 출력: <out>/<run_id>/manifest.json, items.jsonl(원 답 + 파싱 결과 + 건별 점수), summary.json.
-공식 실행(--official)은 깨끗한 git 작업 트리가 필요하고, 커밋할 수 있도록 reports/ 아래에 쓴다.
+공식 실행(--official)은 이 폴더의 추적 파일이 바뀌지 않은 상태에서만 돌고(다른 구성 요소 폴더의 바뀐 파일은
+보지 않는다), 커밋할 수 있도록 reports/ 아래에 쓴다.
 """
 
 # [파일 역할] 이 프로젝트의 평가 실행기다. 데이터셋 파일의 모든 건을 한 모델(Ollama 또는 transformers)에 같은
 # 프롬프트로 보내고, 답을 파싱해 구조 필드를 채점한 뒤 실행 기록(manifest.json, items.jsonl, summary.json)을
 # 남긴다. 2~5단계와 이후 비교의 모든 수치가 이 기록에서 나왔다.
 # [왜 필요한가] 측정 규칙(docs/experiments.md 공통)을 코드로 강제한다: 같은 프롬프트와 채점, 건별 결과를 남겨
-# 다시 계산할 수 있게 함, test 분할은 --allow-test 없이는 돌지 않음, 공식 측정(--official)은 깨끗한 작업
-# 트리에서만 돌고 reports/에 써서 커밋함. 어떤 가중치·프롬프트·서버 버전으로 잰 것인지 manifest에 남겨 나중에
-# 조건을 되짚을 수 있다.
-# [흐름] 인자 확인(test 보호, 공식 실행의 깨끗한 트리) → few-shot 예시 고르기 → 실행기 만들기 → manifest 먼저
-# 쓰기 → run_items(생성·파싱·채점) → items.jsonl, summary.json(점 추정, 부트스트랩 95% 구간, 지연,
-# run_checks).
+# 다시 계산할 수 있게 함, test 분할은 --allow-test 없이는 돌지 않음, 공식 측정(--official)은 이 폴더의 추적
+# 파일이 바뀌지 않은 상태에서만 돌고 reports/에 써서 커밋함. 어떤 가중치·프롬프트·서버 버전으로 잰 것인지
+# manifest에 남겨 나중에 조건을 되짚을 수 있다.
+# [흐름] 인자 확인(test 보호, 공식 실행의 이 폴더 추적 파일 확인) → few-shot 예시 고르기 → 실행기 만들기 →
+# manifest 먼저 쓰기 → run_items(생성·파싱·채점) → items.jsonl, summary.json(점 추정, 부트스트랩 95% 구간,
+# 지연, run_checks).
 # [연결] compare.py, judge_run.py, asr_report.py, judge_calib.py 등이 여기서 만든 실행 폴더를 읽는다.
 # judge_run·judge_calib·export는 이 파일의 도우미(THINK, _git, model_fingerprint, adapter_hash 등)를 가져다
-# 쓴다.
+# 쓴다. git 확인 도우미(_git, _git_strict)와 측정 출처의 범위 값(SCOPED_STATUS, TREE_REF)은 service_eval.py,
+# bench.py, scripts/ctx_probe.py도 가져다 쓴다.
 
 from __future__ import annotations
 
@@ -206,14 +208,48 @@ def run_items(
     return rows, scores
 
 
-# git 명령을 실행하고 실패하면 예외를 낸다. --official의 깨끗한 트리 확인처럼 실패를 그냥 넘기면 안 되는
-# 곳에서 쓴다.
+# [측정 출처의 범위] 측정이 어느 코드로 나왔는지 확인하고(--official의 검사) 기록에 남기는(git_dirty,
+# git_tree) 일은 모두 이 구성 요소(call-summary) 폴더만 본다. 이 폴더는 다른 구성 요소와 한 저장소에 함께
+# 있어서, 저장소 전체의 git status를 보면 다른 폴더의 바뀐 파일이 이 폴더의 공식 측정을 막고 기록의
+# git_dirty도 참으로 남긴다. 이 폴더의 코드와 규칙이 커밋된 상태인지만 알면 되므로 git이 보는 경로를 이
+# 폴더로 한정한다(docs/experiments.md "측정 출처를 이 폴더 기준으로").
+# PROJECT_ROOT: 이 구성 요소 폴더. 프로세스의 작업 폴더가 아니라 이 파일의 위치(src/call_summary/에서
+#   폴더를 둘 거슬러 올라간 곳)로 잡으므로, 측정 도구를 저장소 뿌리나 scripts/, 하위 폴더, 임시 폴더에서
+#   돌려도 같은 폴더를 본다(작업 폴더 기준이면 하위 폴더에서 돌릴 때 바뀐 src/를 놓친다). git을 부를
+#   때마다 읽으므로 시험이 임시 저장소의 폴더로 바꿔 끼울 수 있다.
+#   전제: 이 패키지를 <구성 요소 폴더>/src에서 바로 import한다(이 저장소의 기본 설치인 편집 설치,
+#   PYTHONPATH=src 같은 소스 직접 import). 패키지를 다른 곳에 복사해 설치하면(비편집 설치, site-packages)
+#   이 값이 엉뚱한 폴더가 된다. 그 폴더가 저장소 밖이면 git이 실패해 공식 검사가 멈추고 기록용 값은 빈
+#   글이 된다. 저장소 작업 트리 안의 추적하지 않는 폴더(예: 이 구성 요소의 가상환경)이면 SCOPED_STATUS는
+#   추적 파일이 바뀌어 있어도 늘 빈 글이라서, 공식 검사(evaluate·service_eval의 --official, ctx_probe의
+#   tree_is_clean)는 TREE_REF가 풀리는지도 함께 본다: 추적하지 않는 폴더에서는 HEAD:./가 풀리지 않아
+#   멈춘다. 이때 기록의 git_tree는 빈 글이 되고 그때의 git_dirty는 믿을 수 없다(bench·judge_run의 기록용
+#   값은 git 실패와 같게 거짓으로 남는다. 이 동작은 바꾸지 않았다).
+# SCOPED_STATUS: 이 폴더 안의 추적 파일 가운데 바뀐 것만 센다(끝의 "-- ."은 경로를 현재 폴더, 곧
+#   PROJECT_ROOT로 한정한다). --untracked-files=no라 추적하지 않는 파일은 예전처럼 세지 않는다. 출력이
+#   비면 바뀐 것이 없다.
+# TREE_REF: 이 폴더의 커밋된 내용의 트리 해시를 묻는 인자(git rev-parse HEAD:./, 앞의 ./는 git이 현재
+#   폴더로 읽는다). 기록의 git_tree가 이 값이고, 같은 값이면 이 폴더의 커밋된 내용이 같다. 다른 폴더만
+#   고친 커밋으로는 git_commit이 달라져도 git_tree는 그대로다. 작업 트리의 커밋하지 않은 변경은 가리키지
+#   않으며(그것은 SCOPED_STATUS와 git_dirty가 본다), 이 폴더가 저장소의 맨 위이면 저장소 전체의
+#   트리(HEAD^{tree})와 같다.
+PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
+SCOPED_STATUS: tuple[str, ...] = ("status", "--porcelain", "--untracked-files=no", "--", ".")
+TREE_REF: str = "HEAD:./"
+
+
+# git 명령을 이 구성 요소 폴더(PROJECT_ROOT)에서 실행하고 실패하면 예외를 낸다. --official의 변경 확인처럼
+# 실패를 그냥 넘기면 안 되는 곳에서 쓴다. cwd를 PROJECT_ROOT로 정해 두어 프로세스의 작업 폴더와 상관없이
+# 같은 폴더를 본다. git 인자 맨 앞에 -C를 넣지 않는 것도 일부러다: 시험이 _git을 바꿔 끼우고 첫
+# 인자(rev-parse, status)로 가르기 때문이다.
 def _git_strict(*args: str) -> str:
-    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
-# git 명령을 실행하되 실패하면 빈 문자열을 돌려준다. 기록용(커밋 해시 등)이라 git이 없어도 실행을 멈추지
-# 않는다.
+# git 명령을 실행하되 실패하면 빈 문자열을 돌려준다. 기록용(커밋 해시, 트리 해시 등)이라 git이 없거나 이
+# 폴더가 저장소 밖이어도(압축 파일로 받은 사본 등) 실행을 멈추지 않고 빈 글로 남긴다.
 def _git(*args: str) -> str:
     try:
         return _git_strict(*args)
@@ -345,7 +381,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--limit", type=int)
     ap.add_argument("--label", default="")
-    ap.add_argument("--official", action="store_true", help="깨끗한 작업 트리가 필요하다. reports/에 쓴다")
+    ap.add_argument(
+        "--official",
+        action="store_true",
+        help=(
+            "이 폴더의 추적 파일이 바뀌지 않은 상태에서만 돈다(다른 폴더의 변경은 보지 않는다). "
+            "reports/에 쓴다"
+        ),
+    )
     ap.add_argument("--allow-test", action="store_true", help="test-* 분할을 돌릴 때 필요하다")
     args = ap.parse_args(argv)
 
@@ -361,20 +404,29 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.limit:
         items = items[: args.limit]
-    # 공식 실행: 파일 전체를 써야 하고(--limit 금지), 추적 파일이 바뀌지 않은 깨끗한 트리여야 한다. 규칙을
-    # 먼저 커밋하고 재는 이 프로젝트의 방식을 강제한다.
-    # git 확인 자체가 실패하면 깨끗하다고 보지 않고 멈춘다(fail closed). 예전에는 git 실패가 깨끗한 트리로
-    # 통과했다(커밋 6d9defc).
+    # 공식 실행: 파일 전체를 써야 하고(--limit 금지), 이 폴더의 추적 파일이 바뀌지 않은 상태여야 한다.
+    # 보는 범위는 이 폴더뿐이라(SCOPED_STATUS) 다른 구성 요소 폴더의 바뀐 파일은 막지 않는다. 규칙을 먼저
+    # 커밋하고 재는 이 프로젝트의 방식을 강제한다.
+    # git 확인 자체가 실패하면 바뀐 것이 없다고 보지 않고 멈춘다(fail closed). 예전에는 git 실패가 변경
+    # 없음으로 통과했다(커밋 6d9defc).
     if args.official:
         if args.limit:
             ap.error("--official runs use the whole file")
-        try:  # fail closed: 읽지 못한 트리는 깨끗한 트리가 아니다
-            dirty = _git_strict("status", "--porcelain", "--untracked-files=no")
-            _git_strict("rev-parse", "HEAD")
+        try:  # fail closed: 읽지 못한 상태는 바뀌지 않은 상태가 아니다
+            dirty = _git_strict(*SCOPED_STATUS)
+            # 이 폴더가 HEAD에 있는 폴더인지도 본다(값은 쓰지 않고 풀리는지만 본다). PROJECT_ROOT가 저장소
+            # 작업 트리 안의 추적하지 않는 폴더를 가리키면 위 status는 바뀐 추적 파일이 있어도 늘 빈
+            # 글이지만, 그런 폴더에서는 HEAD:./가 풀리지 않아 여기서 멈춘다(PROJECT_ROOT의 전제).
+            # HEAD:./가 풀리면 HEAD도 있다.
+            _git_strict("rev-parse", TREE_REF)
         except (OSError, subprocess.CalledProcessError) as exc:
-            ap.error(f"--official needs git to verify a clean tree: {exc}")
+            ap.error(
+                f"--official needs git to verify that the tracked files in this folder are unchanged: {exc}"
+            )
         if dirty:
-            ap.error("--official needs a clean working tree (commit the rules first)")
+            ap.error(
+                "--official needs the tracked files in this folder to be unchanged (commit the rules first)"
+            )
 
     shots_for: Callable[[str], list[tuple[str, AfterCallRecord]]] | None = None
     # few-shot이면 데이터에 있는 업종마다 예시를 미리 고른다. 예시가 모자란 업종이 있으면 멈춘다: 예를 들어
@@ -453,7 +505,11 @@ def main(argv: list[str] | None = None) -> int:
         "num_ctx": args.num_ctx if args.backend == "ollama" else None,
         "think": args.think,
         "ollama_options": ollama_options,
+        # git_commit은 저장소의 커밋이라 다른 폴더의 커밋으로도 달라진다. git_tree는 이 폴더의 커밋된
+        # 내용의 트리 해시라 이 폴더가 바뀔 때만 달라진다(PROJECT_ROOT·TREE_REF의 설명). git이 없으면 둘
+        # 다 빈 글이다.
         "git_commit": _git("rev-parse", "HEAD"),
+        "git_tree": _git("rev-parse", TREE_REF),
         "official": args.official,
         "argv": sys.argv[1:] if argv is None else argv,
         "started": stamp,

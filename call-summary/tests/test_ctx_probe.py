@@ -295,6 +295,7 @@ def test_main_sends_the_registered_order_to_a_fake_ollama(tmp_path, monkeypatch)
     assert report["fingerprint"] == {"ollama_digest": "52a2d2f65261", "ollama_version": "0.35.1"}
     assert report["api_ps_before"] == {"models": []} and report["api_ps_after"] == {"models": []}
     assert report["reference"]["n"] == 3
+    assert report["git_tree"] == probe._git("rev-parse", probe.TREE_REF)
 
 
 # 다른 모델이 올라가 있으면(다른 GPU 작업) 재지 않고 멈춘다. 깨끗하지 않은 트리도 --allow-dirty 없이는 멈춘다.

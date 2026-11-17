@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 # ScriptedProvider·Reply로 판정 모델 답을 흉내 내고, make_spec으로 사실 목록이 있는 명세를 만든다.
-from call_summary import judge_calib, judge_run
+from call_summary import evaluate, judge_calib, judge_run
 from call_summary.dataset import Item, read_jsonl, write_jsonl
 from call_summary.judge import cohen_kappa, judge_reply
 from call_summary.judge_calib import Rater, decide, kappa_table
@@ -167,6 +167,8 @@ def test_judge_writes_one_row_per_key_with_token_counts_and_resumes(tmp_path, mo
     assert {r["key"] for r in rows} == keys
     meta = json.loads(out.with_suffix(".meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "m" and meta["num_gpu"] == 99 and meta["run_checks"]["context_full"] == 0
+    # 기대값은 이 모듈의 TREE_REF가 아니라 evaluate의 정의로 잡는다(이 모듈의 이름만 바뀌면 잡으려는 것)
+    assert meta["git_tree"] == judge_calib._git("rev-parse", evaluate.TREE_REF)
     assert len(provider.calls) == 4
     assert judge_calib.main(argv) == 0  # 이어 하기: 판정할 것이 남지 않았다
     assert len(provider.calls) == 4 and len(list(read_jsonl(out))) == 4
@@ -456,6 +458,7 @@ def test_judge_run_summary_records_the_commit_and_the_loaded_models(tmp_path, mo
     assert judge_run.main(["--run", str(runs["A"]), "--out", str(out)]) == 0
     summary = json.loads((runs["A"] / "judge-m_summary.json").read_text(encoding="utf-8"))
     assert summary["git_commit"] == "abc123" and summary["git_dirty"] is False
+    assert summary["git_tree"] == "abc123"
     assert summary["loaded_models_after"] == ps
     assert summary["started"] <= summary["finished"]
 

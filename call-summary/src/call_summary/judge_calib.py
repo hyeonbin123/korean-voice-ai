@@ -44,7 +44,7 @@ from pathlib import Path
 # 도우미를 쓴다. value_facts의 fact_value_ok(사실마다 숫자 값이 요약에 있는지)와 hybrid_verdicts(판정에 값
 # 확인을 덮기)로 V와 V+J를 만든다.
 from .dataset import Item, load_items, manifest_data, read_jsonl, write_jsonl
-from .evaluate import THINK, _git, loaded_models, model_fingerprint, parse_option, run_checks
+from .evaluate import THINK, TREE_REF, _git, loaded_models, model_fingerprint, parse_option, run_checks
 from .judge import (
     JUDGE_NUM_CTX,
     JUDGE_NUM_PREDICT,
@@ -180,8 +180,9 @@ def template_rows(sample: Sequence[dict]) -> list[dict]:
 # --------------------------------------------------------------------------------------------- 판정(judge)
 # 판정 모델 하나를 표본 전체에 돌린다. 이어 하기가 되어 이미 판정한 열쇠는 건너뛰고, 한 건마다 한 줄 쓰고
 # flush한다. 끝나면 <출력>.meta.json에 모델·판·요청 설정(num_ctx, num_predict, temperature, seed), 모델 지문,
-# 커밋, 실패 수, run_checks, 판정 뒤 /api/ps를 남긴다. run_checks는 채택 조건 (d)(컨텍스트를 채운 판정 0, 생각
-# 글 0)를 확인하는 데 쓴다.
+# 저장소의 커밋과 이 폴더의 커밋된 내용의 트리 해시(git_commit, git_tree. 범위는 evaluate.py의 TREE_REF
+# 설명), 실패 수, run_checks, 판정 뒤 /api/ps를 남긴다. run_checks는 채택 조건 (d)(컨텍스트를 채운 판정 0,
+# 생각 글 0)를 확인하는 데 쓴다.
 def judge_sample(
     sample_path: Path, out: Path, *, model: str, num_gpu: int | None, think: str, options: dict
 ) -> dict:
@@ -217,6 +218,7 @@ def judge_sample(
         "seed": getattr(provider, "seed", None),
         "fingerprint": model_fingerprint(provider),
         "git_commit": _git("rev-parse", "HEAD"),
+        "git_tree": _git("rev-parse", TREE_REF),
         "sample": str(sample_path),
         "started": started,
         "finished": time.strftime("%Y%m%d-%H%M%S"),

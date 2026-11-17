@@ -115,6 +115,7 @@ def test_run_records_ready_and_the_refreshed_model_fingerprint(monkeypatch, tmp_
     health = manifest["service_health"]
     assert (health["model_digest"], health["ollama_version"]) == (DIGEST, "0.35.1")
     assert manifest["provider"] == "service:ollama:m:q8_0" and fake.chat_calls == 1
+    assert manifest["git_tree"] == service_eval._git("rev-parse", service_eval.TREE_REF)
 
 
 # 모델 서버가 닿지 않아 /ready가 503(no_model_server)이면 공식 실행은 요청을 하나도 보내지 않고 이유를 찍으며

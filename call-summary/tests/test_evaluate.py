@@ -451,6 +451,7 @@ def test_run_records_context_options_and_run_checks(tmp_path, monkeypatch):
     manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["num_ctx"] == 8192 and manifest["think"] == "off"
     assert manifest["ollama_options"] == {"presence_penalty": 0, "repeat_penalty": 1}
+    assert manifest["git_tree"] == evaluate._git("rev-parse", evaluate.TREE_REF)
     rows = list(read_jsonl(run / "items.jsonl"))
     assert [r["done_reason"] for r in rows] == ["stop", "length", "stop"]
     assert [r["thinking_chars"] for r in rows] == [0, 0, 2]

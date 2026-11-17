@@ -27,10 +27,11 @@ from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
-# evaluate.py의 도우미(데이터 파일 해시, git 커밋, 깨끗한 트리 확인, 요약 표)를 그대로 써서 일반 평가 실행과
-# 기록 형식·규칙을 맞춘다.
+# evaluate.py의 도우미(데이터 파일 해시, git 커밋과 트리 해시, 이 폴더의 추적 파일 변경 확인, 요약 표)를
+# 그대로 써서 일반 평가 실행과 기록 형식·규칙을 맞춘다. 측정 출처를 이 구성 요소 폴더로 한정하는
+# 값(SCOPED_STATUS, TREE_REF)과 이유는 evaluate.py의 같은 이름 설명에 있다.
 from .dataset import Item, load_items, write_jsonl
-from .evaluate import _file_hash, _git, _git_strict, summary_table
+from .evaluate import SCOPED_STATUS, TREE_REF, _file_hash, _git, _git_strict, summary_table
 from .schema import ParseResult, parse_reply
 from .scoring import ItemScore, pctl, score_item
 
@@ -131,7 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--official",
         action="store_true",
-        help="깨끗한 작업 트리에서만, 서비스의 /ready가 200일 때만 돌고 결과를 reports/에 쓴다",
+        help=(
+            "이 폴더의 추적 파일이 바뀌지 않은 상태에서만(다른 폴더의 변경은 보지 않는다), 서비스의 /ready가 "
+            "200일 때만 돌고 결과를 reports/에 쓴다"
+        ),
     )
     ap.add_argument("--allow-test", action="store_true")
     ap.add_argument("--timeout", type=float, default=300.0)
@@ -143,18 +147,24 @@ def main(argv: list[str] | None = None) -> int:
     # 않는다(docs/experiments.md 첫머리: test 세트는 단계가 끝날 때 고른 것만 한 번 잰다).
     if any(it.split.startswith("test") for it in items) and not args.allow_test:
         ap.error("test items: pass --allow-test once the stage's pick is fixed")
-    # 공식 실행(reports/에 남김)은 전체 파일만, 그리고 추적 파일에 바뀐 것이 없는 깨끗한 작업 트리에서만 돈다.
-    # 결과가 어느 커밋의 코드로 나왔는지 확실히 하려는 규칙이다(docs/experiments.md "공통"). git을 부르지
-    # 못하면 깨끗하다고 넘기지 않고 멈춘다(evaluate.py와 같은 규칙).
+    # 공식 실행(reports/에 남김)은 전체 파일만, 그리고 이 폴더의 추적 파일에 바뀐 것이 없을 때만 돈다(보는
+    # 범위는 이 폴더뿐이라 다른 구성 요소 폴더의 바뀐 파일은 막지 않는다). 결과가 어느 커밋의 코드로
+    # 나왔는지 확실히 하려는 규칙이다(docs/experiments.md "공통"). git을 부르지 못하면 바뀐 것이 없다고
+    # 넘기지 않고 멈춘다(evaluate.py와 같은 규칙).
     if args.official:
         if args.limit:
             ap.error("--official runs use the whole file")
         try:
-            dirty = _git_strict("status", "--porcelain", "--untracked-files=no")
+            dirty = _git_strict(*SCOPED_STATUS)
+            # 이 폴더가 HEAD에 있는 폴더인지도 본다: 추적하지 않는 폴더에서는 위 status가 늘 빈 글이지만
+            # HEAD:./는 풀리지 않는다(evaluate.py의 PROJECT_ROOT 설명). 값은 쓰지 않고 예외로만 판정한다.
+            _git_strict("rev-parse", TREE_REF)
         except Exception as exc:  # noqa: BLE001
-            ap.error(f"--official needs git to verify a clean tree: {exc}")
+            ap.error(
+                f"--official needs git to verify that the tracked files in this folder are unchanged: {exc}"
+            )
         if dirty:
-            ap.error("--official needs a clean working tree")
+            ap.error("--official needs the tracked files in this folder to be unchanged")
     items = items[: args.limit]
 
     with httpx.Client(base_url=args.url, timeout=args.timeout) as client:
@@ -191,7 +201,10 @@ def main(argv: list[str] | None = None) -> int:
             "n_items": len(items),
             "prompt_version": "p1",
             "prompt_hash": health.get("prompt_hash"),
+            # git_commit은 저장소의 커밋, git_tree는 이 폴더의 커밋된 내용의 트리 해시다(evaluate.py의
+            # 설명). git이 없으면 둘 다 빈 글이다.
             "git_commit": _git("rev-parse", "HEAD"),
+            "git_tree": _git("rev-parse", TREE_REF),
             "official": args.official,
             "started": stamp,
         }

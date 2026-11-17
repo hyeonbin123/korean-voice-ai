@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from call_summary import bench
+from call_summary import bench, evaluate
 from call_summary.bench import is_idle, parse_smi_line, pctl, server_log_lines, summarize_rows
 from call_summary.providers import OllamaProvider
 
@@ -192,8 +192,9 @@ def test_wait_idle_with_psutil_samples_as_before(monkeypatch):
 # bench.main을 GPU·nvidia-smi·Ollama 없이 끝까지 돌린다: datasets/dev.jsonl의 첫 건 하나, 가짜
 # /api/ps(올라간 모델 없음)·/api/version, 가짜 /api/chat 응답, 가짜 표본기. sample_for가 받은 초(쉬는 상태
 # 확인 60, 기준값 5)를 순서대로 남기고, 쓴 보고서(JSON)와 그 목록을 돌려준다. cpu는 가짜 표본의 cpu_pct
-# 값이다.
-def _run_main(monkeypatch, tmp_path, extra_args, cpu):
+# 값이다. git은 bench가 git을 부르는 자리(bench._git)에 끼울 함수다. 주지 않으면 어떤 인자에도 빈 글을 돌려
+# 주어(git이 없는 것처럼) 보고서의 git 값이 모두 비게 한다.
+def _run_main(monkeypatch, tmp_path, extra_args, cpu, git=None):
     seconds = []
     sample = {
         "samples": 2,
@@ -223,7 +224,7 @@ def _run_main(monkeypatch, tmp_path, extra_args, cpu):
     monkeypatch.setattr(bench, "Sampler", FakeSampler)
     monkeypatch.setattr(bench, "ollama_get", fake_get)
     monkeypatch.setattr(bench, "unload", lambda base, model: None)
-    monkeypatch.setattr(bench, "_git", lambda *args: "")
+    monkeypatch.setattr(bench, "_git", git or (lambda *args: ""))
     monkeypatch.setattr(httpx, "post", lambda url, **kw: Resp())
     monkeypatch.setattr(bench.time, "sleep", _must_not_be_called("time.sleep"))
     out = tmp_path / "bench.json"
@@ -241,6 +242,7 @@ def test_main_records_cpu_available_with_psutil(monkeypatch, tmp_path):
     assert report["cpu_unavailable"] is False
     assert report["idle_check"]["idle"] is True and report["idle_check"]["checks"] == 1
     assert seconds == [60.0, 5] and report["n_items"] == 1
+    assert report["git_tree"] == ""  # 기본 스텁은 git이 없는 것처럼 빈 글을 돌려준다
 
 
 # --allow-no-cpu: psutil 없이도 재되, 쉬는 상태는 기다리지 않고(60초 표본 없음, 기준값 5초 표본만) 보고서에
@@ -251,3 +253,22 @@ def test_main_allow_no_cpu_measures_without_waiting(monkeypatch, tmp_path):
     assert report["cpu_unavailable"] is True
     assert report["idle_check"]["idle"] is None and "psutil" in report["idle_check"]["reason"]
     assert seconds == [5] and report["n_items"] == 1 and report["baseline"]["cpu_pct"] is None
+
+
+# 보고서의 git 값은 이 구성 요소 폴더 기준이다(evaluate.py의 SCOPED_STATUS·TREE_REF 설명). git 호출을
+# 인자로 가르는 스텁으로 확인한다: 인자가 정확히 evaluate.SCOPED_STATUS일 때만 바뀐 줄을, ("rev-parse",
+# evaluate.TREE_REF)일 때만 트리 값을 돌려준다. 저장소 전체 status처럼 다른 인자로 부르면 스텁이 빈 글을
+# 돌려주어 git_dirty가 거짓, git_tree가 빈 글이 되므로 시험이 실패한다. 스텁이 보는 인자는 bench가 아니라
+# evaluate의 정의다(bench의 이름이 다른 값으로 바뀌면 잡으려는 것이다).
+def test_main_records_the_git_state_of_this_folder(monkeypatch, tmp_path):
+    def git(*args):
+        if args == evaluate.SCOPED_STATUS:
+            return " M a.py"
+        if args == ("rev-parse", evaluate.TREE_REF):
+            return "tree-of-this-folder"
+        return ""
+
+    monkeypatch.setitem(sys.modules, "psutil", _fake_psutil())
+    report, _ = _run_main(monkeypatch, tmp_path, [], cpu={"min": 4.0, "mean": 5.0, "max": 6.0}, git=git)
+    assert report["git_dirty"] is True and report["git_tree"] == "tree-of-this-folder"
+    assert report["git_commit"] == ""

@@ -49,7 +49,7 @@ from pathlib import Path
 # 가져온다. 정확도 확인용으로 채점기(score_item, exact_rate)도 쓴다. 백분위는 scoring.pctl(evaluate와 같은
 # 계산: p50은 가운데 원소, p95는 int(0.95·(n−1)) 위치)이라 이전 실행 기록의 지연과 그대로 견줄 수 있다.
 from .dataset import load_items
-from .evaluate import _git
+from .evaluate import SCOPED_STATUS, TREE_REF, _git
 from .prompts import PROMPT_VERSION, build_messages, prompt_hash
 from .providers import OllamaProvider
 from .schema import parse_reply, record_json_schema
@@ -441,8 +441,13 @@ def main(argv: list[str] | None = None) -> int:
         },
         "prompt_version": PROMPT_VERSION,
         "prompt_hash": prompt_hash(),
+        # 측정 출처는 이 구성 요소 폴더만 본다(evaluate.py의 SCOPED_STATUS·TREE_REF 설명). git_commit은
+        # 저장소의 커밋, git_tree는 이 폴더의 커밋된 내용의 트리 해시, git_dirty는 이 폴더의 추적 파일이
+        # 바뀌었는지다. git이 없으면 git_commit·git_tree는 빈 글이고 git_dirty는 거짓으로 남는다(깨끗한
+        # 것처럼 보이는 기존 동작).
         "git_commit": _git("rev-parse", "HEAD"),
-        "git_dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
+        "git_tree": _git("rev-parse", TREE_REF),
+        "git_dirty": bool(_git(*SCOPED_STATUS)),
         "ollama_version": ollama_get(args.ollama, "/api/version").get("version"),
         "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - run_s)),
         "run_s": round(run_s, 1),
