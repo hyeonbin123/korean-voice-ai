@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
 from collections import Counter
@@ -45,6 +44,7 @@ from stt_scratch.evaluate import autocast, check_vocab, decode_offline, decode_s
 from stt_scratch.model.features import FIRST_PACKET_EXTRA, LogMel
 from stt_scratch.model.mask import ChunkSpec
 from stt_scratch.model.streaming import StreamingEncoder, graph_status
+from stt_scratch.provenance import scoped_git_state
 from stt_scratch.service.endpoint import EndpointConfig
 from stt_scratch.service.session import StreamSession, warm_up
 from stt_scratch.text import Vocab
@@ -500,29 +500,20 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# 측정을 시작할 때의 코드 커밋. git_head = `git rev-parse HEAD`, git_dirty = 추적 파일에 커밋하지 않은 변경이
-# 있는지(`git status --porcelain --untracked-files=no`; 미추적 파일은 셈하지 않음). git이 없거나 ROOT가 저장소
-# 밖이면 둘 다 None이다. scripts/followup.py provenance·scripts/confidence_eval.py와 같은 두 필드다. 왜: 규칙
-# 변경 27(서버 기본값의 종단·드리프트·연속 음성 측정)은 결과마다 체크포인트 SHA-256과 코드 커밋을 남기기로
-# 했는데, 이 도구의 결과 파일(drift 등)에는 체크포인트 SHA-256만 있었다(2026-11-02 drift-defaults.json).
+# 측정을 시작할 때의 코드 출처 세 필드: git_head(저장소의 HEAD 커밋), git_dirty(이 폴더 안의 추적 파일에
+# 커밋하지 않은 변경이 있는지; 미추적 파일은 셈하지 않음), git_tree(이 폴더의 git 트리 해시; 폴더가 HEAD
+# 커밋에 없으면 None). git이 없거나 ROOT가 저장소 밖이면 셋 다 None이다. 계산은
+# stt_scratch.provenance.scoped_git_state가 하고(각 필드의 뜻과 왜 이 폴더 기준인지는 그 설명),
+# scripts/followup.py provenance·scripts/confidence_eval.py·scripts/itn_eval.py가 같은 함수를 쓴다. ROOT는
+# 호출할 때 읽는다(시험이 바꿔 끼운다). 왜 남기나: 규칙 변경 27(서버 기본값의 종단·드리프트·연속 음성 측정)은
+# 결과마다 체크포인트 SHA-256과 코드 커밋을 남기기로 했는데, 이 도구의 결과 파일(drift 등)에는 체크포인트
+# SHA-256만 있었다(2026-11-02 drift-defaults.json). git_dirty를 이 폴더 기준으로 보고 git_tree를 더한 것은
+# 규칙 변경 31부터다.
 def git_state() -> dict:
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return {"git_head": None, "git_dirty": None}
-    return {"git_head": head, "git_dirty": bool(status)}
+    return scoped_git_state(ROOT)
 
 
-# 하위 명령을 실행하고 결과에 체크포인트 경로·SHA-256·코드 커밋(git_head·git_dirty, 시작할 때 값)·장치·구성·
+# 하위 명령을 실행하고 결과에 체크포인트 경로·SHA-256·코드 출처(git_head·git_dirty·git_tree)·장치·구성·
 # limit·소요 시간을 붙여 저장한다. 같은 체크포인트·구성·전수일 때만 결과를 다시 쓰거나 7단계 사전 검사에서
 # 통과로 보게 하려는 출처 기록이다(규칙 변경 24·25; 코드 커밋은 규칙 변경 27의 공통 조건). 결과 파일이 이미
 # 있어도 덮어쓰므로 등록 결과와 다른 측정은 --name으로 이름을 바꾼다.

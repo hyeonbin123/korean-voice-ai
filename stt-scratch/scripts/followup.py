@@ -68,6 +68,7 @@ from stt_scratch.model.decode import greedy_batch
 from stt_scratch.model.features import LogMel
 from stt_scratch.model.mask import ChunkSpec
 from stt_scratch.model.streaming import StreamingEncoder
+from stt_scratch.provenance import scoped_git_state
 from stt_scratch.service.endpoint import EndpointConfig
 from stt_scratch.service.session import StreamSession, warm_up
 from stt_scratch.text import Vocab
@@ -144,28 +145,15 @@ def percentiles(values) -> dict:
     }
 
 
-# 결과마다 남기는 출처: 체크포인트 SHA-256, 코드 커밋, 장치, torch 버전, 시각.
+# 결과마다 남기는 출처: 체크포인트 SHA-256, 코드 출처(git_head·git_dirty·git_tree), 장치, torch 버전, 시각.
+# 코드 출처는 stt_scratch.provenance.scoped_git_state(ROOT)의 값 그대로다(이 폴더의 추적 파일만 본 git_dirty와
+# 이 폴더의 트리 해시 git_tree; git이 안 되면 셋 다 None. 각 필드의 뜻은 그 함수의 설명). 규칙 변경 31부터
+# git_dirty를 이 폴더 기준으로 보고 git_tree를 더했다. ROOT는 호출할 때 읽는다(시험이 바꿔 끼운다).
 def provenance(args, device: torch.device) -> dict:
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
-        ).stdout.strip()
-        dirty = bool(
-            subprocess.run(
-                ["git", "status", "--porcelain", "--untracked-files=no"],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-        )
-    except (OSError, subprocess.CalledProcessError):
-        head, dirty = None, None
     return {
         "checkpoint": args.checkpoint,
         "checkpoint_sha256": hashlib.sha256((ROOT / args.checkpoint).read_bytes()).hexdigest(),
-        "git_head": head,
-        "git_dirty": dirty,
+        **scoped_git_state(ROOT),
         "device": str(device),
         "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "torch": torch.__version__,

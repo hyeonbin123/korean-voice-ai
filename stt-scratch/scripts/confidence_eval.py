@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 import time
 from collections import Counter
@@ -44,6 +43,7 @@ import numpy as np
 from stt_scratch import confidence as conf
 from stt_scratch.data import read_manifest
 from stt_scratch.evaluate import score
+from stt_scratch.provenance import scoped_git_state
 from stt_scratch.text import Vocab, normalize_hyp_ws, normalize_train
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -93,21 +93,13 @@ def cer_ns_hangul(utts, hyps: dict[str, str]) -> float:
     return rate(score(utts, hyps))
 
 
+# 채점 때의 코드 출처 세 필드(git_head, 이 폴더 기준의 git_dirty, 이 폴더의 트리 해시 git_tree; git이 안 되면
+# 셋 다 None). 계산은 stt_scratch.provenance.scoped_git_state가 하고 각 필드의 뜻은 그 설명에 있다
+# (scripts/stage6.py·followup.py·itn_eval.py가 같은 함수를 쓴다). ROOT는 호출할 때 읽는다(시험이 바꿔
+# 끼운다). scripts/bias_eval.py가 이 함수를 불러 쓴다. 규칙 변경 31부터 git_dirty를 이 폴더 기준으로 보고
+# git_tree를 더했다.
 def git_state() -> dict:
-    try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return {"git_head": None, "git_dirty": None}
-    return {"git_head": head, "git_dirty": bool(status)}
+    return scoped_git_state(ROOT)
 
 
 # 재현 조건(등록). 대조할 수 있는 경우(덤프 체크포인트 = P1 체크포인트, 구성 = P1 구성, 전수 덤프)에만

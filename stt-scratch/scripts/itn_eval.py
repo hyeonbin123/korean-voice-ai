@@ -34,7 +34,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -55,6 +54,7 @@ from stt_scratch.metrics import (
 )
 from stt_scratch.model.features import LogMel
 from stt_scratch.model.mask import ChunkSpec
+from stt_scratch.provenance import scoped_git_state
 from stt_scratch.text import Vocab, has_digit, normalize_hyp_ws
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -368,20 +368,13 @@ def scoring_consistency(dev_hyps: str, limit: int, dev_utts: dict, stored: dict)
     return out
 
 
-# 채점 때의 코드 커밋(측정 스크립트가 커밋된 코드로 돌았는지 결과에서 확인하려고). git이 없으면 None.
+# 채점 때의 코드 출처(측정 스크립트가 커밋된 코드로 돌았는지 결과에서 확인하려고): git_head, 이 폴더 기준의
+# git_dirty, 이 폴더의 트리 해시 git_tree. git이 안 되면 셋 다 None. 계산은
+# stt_scratch.provenance.scoped_git_state가 하고 각 필드의 뜻은 그 설명에 있다(scripts/stage6.py·followup.py·
+# confidence_eval.py가 같은 함수를 쓴다). ROOT는 호출할 때 읽는다(시험이 바꿔 끼운다). 규칙 변경 31부터
+# git_dirty를 이 폴더 기준으로 보고 git_tree를 더했다.
 def git_state() -> dict:
-    def git(*cmd: str) -> str:
-        return subprocess.run(
-            ["git", *cmd], cwd=ROOT, capture_output=True, text=True, check=True
-        ).stdout.strip()
-
-    try:
-        return {
-            "git_head": git("rev-parse", "HEAD"),
-            "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
-        }
-    except (OSError, subprocess.CalledProcessError):
-        return {"git_head": None, "git_dirty": None}
+    return scoped_git_state(ROOT)
 
 
 # 채점 명령(규칙 변경 30). 순서: 결과 파일 확인(있으면 --overwrite 없이 거부) → --decode 결과(decode.json,

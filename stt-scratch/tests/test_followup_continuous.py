@@ -7,7 +7,7 @@ docs/experiments.md 규칙 변경 27의 (B)·(C)를 재는 도구다. 확인하�
 (stream_text 이음)·2-pass(확정 텍스트 이음) 가설, 규칙별 세그먼트 수를 맞게 기록하고 서버 명령행 기본 구성을
 쓴다, (4) drift의 --step-path·--final-pass·--warm-up이 세션에 전달되고 기본값은 이전 동작(eager, 2차 패스
 없음, 예열 없음, rule2 1.2 s, 캐시 초기화)이다, (5) stage6.py 결과 파일에 체크포인트 SHA-256과 함께 측정 때의
-코드 커밋(git_head·git_dirty)이 남는다.
+코드 출처(git_head·git_dirty·git_tree)가 남는다.
 """
 
 # [방식] tests/test_service.py와 같은 작은 무작위 모델(d=32, 2층)과 8토큰 어휘로 CPU에서 돈다. 두 스크립트의
@@ -271,11 +271,13 @@ def test_drift_passes_the_step_path_and_final_pass(fake_root, monkeypatch) -> No
     assert closes >= 1 and out["final_pass_ms"]["n"] == closes and out["final_pass_ms"]["p50"] > 0
 
 
-# 확인: stage6.py가 쓰는 결과 파일(여기서는 drift)에 체크포인트 SHA-256과 함께 측정 때의 코드 커밋(git_head·
-# git_dirty)이 남고, 그 값이 같은 폴더에서 git으로 직접 물은 값과 같다(git 저장소 밖이면 둘 다 None). 가짜
-# 저장소(ROOT = tmp_path)는 pytest 임시 폴더라 보통 이 저장소 작업 트리 안이다(pyproject의 --basetemp). 왜:
-# 규칙 변경 27의 공통 조건은 결과마다 체크포인트 SHA-256과 코드 커밋을 남기는 것인데, drift 결과 파일에는
-# 체크포인트 SHA-256만 있었다(코드 커밋은 문서와 커밋 메시지에만 있었음).
+# 확인: stage6.py가 쓰는 결과 파일(여기서는 drift)에 체크포인트 SHA-256과 함께 측정 때의 코드 출처(git_head·
+# git_dirty·git_tree)가 남고, 그 값이 같은 폴더에서 git으로 직접 물은 값과 같다(git 저장소 밖이면 셋 다 None).
+# git_dirty의 기대값은 그 폴더 안의 추적 파일만 보는 `git status ... -- .`로 만든다(규칙 변경 31). 가짜
+# 저장소(ROOT = tmp_path)는 pytest 임시 폴더라 보통 이 저장소 작업 트리 안이지만(pyproject의 --basetemp)
+# 커밋에 없는 폴더라 폴더 트리 해시 git_tree는 None이다. 왜: 규칙 변경 27의 공통 조건은 결과마다 체크포인트
+# SHA-256과 코드 커밋을 남기는 것인데, drift 결과 파일에는 체크포인트 SHA-256만 있었다(코드 커밋은 문서와
+# 커밋 메시지에만 있었음).
 def test_stage6_results_record_the_code_commit(fake_root, monkeypatch) -> None:
     monkeypatch.setattr(stage6, "ROOT", fake_root)
     VOCAB.save(fake_root / "manifests" / "vocab.json")
@@ -288,9 +290,10 @@ def test_stage6_results_record_the_code_commit(fake_root, monkeypatch) -> None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=fake_root, capture_output=True, text=True)
     if head.returncode != 0:
         assert result["git_head"] is None and result["git_dirty"] is None
+        assert result["git_tree"] is None
         return
     status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
+        ["git", "status", "--porcelain", "--untracked-files=no", "--", "."],
         cwd=fake_root,
         capture_output=True,
         text=True,
@@ -298,3 +301,4 @@ def test_stage6_results_record_the_code_commit(fake_root, monkeypatch) -> None:
     )
     assert result["git_head"] == head.stdout.strip() and len(result["git_head"]) == 40
     assert result["git_dirty"] is bool(status.stdout.strip())
+    assert result["git_tree"] is None  # fake_root는 커밋에 없는 임시 폴더라 폴더 트리 해시가 없다
