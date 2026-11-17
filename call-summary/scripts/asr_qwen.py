@@ -51,10 +51,12 @@ from pathlib import Path
 # 패스가 같은 기록 형식을 쓰게 하려는 것이다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from asr_condition import (  # noqa: E402
+    CODE_SCOPE,
     DEFAULT_AUDIO,
     LISTEN_RATE,
     WavStore,
     _append_jsonl,
+    _code_trees,
     _git_commit,
     _read_jsonl,
     write_hyp_meta,
@@ -228,8 +230,10 @@ def main(argv: list[str] | None = None) -> int:
     import transformers
 
     model, processor, dtype = load(args.device, args.precision, args.max_memory_gb)
-    # hyp 옆에 메타(팔, 모델, revision, 디코딩, 정밀도, 메모리 상한, 어텐션, 맥락, 버전, 커밋, 시작 시각)를 한
-    # 번 쓴다. 이어 돌릴 때는 write_hyp_meta가 같은 팔·모델·디코딩인지 확인한다.
+    # hyp 옆에 메타(팔, 모델, revision, 디코딩, 정밀도, 메모리 상한, 어텐션, 맥락, 버전, 커밋, 트리 해시, 시작
+    # 시각)를 한 번 쓴다. 이어 돌릴 때는 write_hyp_meta가 같은 팔·모델·디코딩인지 확인한다. 이 스크립트는
+    # 이 프로젝트 자기 환경에서 돌고 support-agent의 코드를 쓰지 않으므로, 커밋과 트리 해시는 CODE_SCOPE의
+    # 첫 폴더(이 구성 요소 폴더)만 본다(asr_condition.py의 2패스는 형제 폴더의 코드 경로도 본다).
     watch = NonFiniteWatch(model.lm_head)
     write_hyp_meta(
         hyp,
@@ -245,7 +249,8 @@ def main(argv: list[str] | None = None) -> int:
             "attention": model.config._attn_implementation,
             "context": context,
             "versions": {"torch": torch.__version__, "transformers": transformers.__version__},
-            "commit": _git_commit(),
+            "commit": _git_commit(CODE_SCOPE[:1]),
+            "trees": _code_trees(CODE_SCOPE[:1]),
             "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
     )

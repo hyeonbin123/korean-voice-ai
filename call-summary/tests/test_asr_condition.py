@@ -440,3 +440,217 @@ def test_the_pass_one_plan_counts_what_it_would_synthesise(tmp_path, monkeypatch
         store.check_identity({"a": 2}, write=False)
     asr.save_wavs(ch, items, store, "dev", only_ids=True)
     assert asr.keep_plan(ch, items, store, only_ids=True)["done"] == 1
+
+
+# --- hyp 메타의 출처 기록(_git_commit, _code_trees) --------------------------------------------------------
+# 이 스크립트는 support-agent의 음성 환경과 소스(PYTHONPATH=../support-agent/src)로 돌므로, 결과에 영향을 주는
+# 코드는 이 구성 요소 폴더와 그 형제 폴더의 코드 경로(src, pyproject.toml, uv.lock)다. hyp 메타의 commit은
+# 그 경로들에서 추적 파일이 바뀌었는지만 보고(저장소 전체를 보지 않는다), trees는 두 폴더의 커밋된 내용의 트리
+# 해시다(docs/experiments.md "측정 출처를 이 폴더 기준으로"). 아래 시험은 임시 git 저장소에 폴더 둘을 만들어
+# scope로 주고 확인한다. 음성 모델, GPU, 네트워크는 쓰지 않는다.
+
+# 임시 저장소의 git 명령마다 주는 설정: 시험용 사용자(커밋에 필요), 줄바꿈 변환 끔(Windows에서 바이트가 바뀌지
+# 않게), 서명 끔(서명을 켜 둔 PC에서 시험 커밋이 입력을 기다리며 멈추지 않게). 이 PC나 CI의 전역 설정에 기대지
+# 않는다.
+_REPO_GIT_CONFIG = ("user.name=t", "user.email=t@t", "core.autocrlf=false", "commit.gpgsign=false")
+
+
+# 임시 저장소 root에서 git을 실행하고 출력(앞뒤 공백을 뗀 글)을 돌려준다. 실패하면 예외가 나 시험이 멈춘다.
+def _repo_git(root: Path, *args: str) -> str:
+    options = [part for setting in _REPO_GIT_CONFIG for part in ("-c", setting)]
+    done = subprocess.run(["git", *options, *args], cwd=root, check=True, capture_output=True, text=True)
+    return done.stdout.strip()
+
+
+# 파일 하나를 UTF-8·LF로 쓴다(없는 폴더는 만든다. Windows에서 줄바꿈이 바뀌어 시험이 PC마다 달라지지 않게).
+def _write_lf(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+# 임시 git 저장소 하나에 폴더 둘을 첫 커밋으로 넣고 (저장소 뿌리, scope)를 돌려준다. a/는 이 스크립트가 있는
+# 구성 요소 폴더(전체가 코드 경로 ".")를, b/는 형제 폴더를 흉내 낸다. b/의 코드 경로는 src, pyproject.toml,
+# uv.lock뿐이고 reports/는 코드 경로가 아니다. scope는 CODE_SCOPE와 같은 꼴이다.
+# 주의: pytest의 tmp_path는 이 구성 요소의 .pytest-tmp 아래(진짜 저장소 안의, 추적하지 않는 폴더)다. 그 안에서
+# git init한 폴더는 자기 .git이 먼저 잡히므로 진짜 저장소와 섞이지 않는다.
+@pytest.fixture
+def code_repo(tmp_path):
+    repo = tmp_path / "repo"
+    files = ("a/x.py", "b/src/y.py", "b/pyproject.toml", "b/uv.lock", "b/reports/r.json")
+    for rel in files:
+        _write_lf(repo / rel, f"{rel}\n")
+    _repo_git(repo, "init", "--quiet")
+    _repo_git(repo, "add", *files)
+    _repo_git(repo, "commit", "--quiet", "-m", "first")
+    scope = ((repo / "a", (".",)), (repo / "b", ("src", "pyproject.toml", "uv.lock")))
+    return repo, scope
+
+
+# 코드 경로 밖의 파일(b/reports/)만 바뀌었거나 추적하지 않는 새 파일만 생겼으면 +dirty가 붙지 않고 커밋 해시
+# 그대로다(40자). 전제로, 경로를 한정하지 않고 저장소 전체로 보면 그 변경이 센다는 것을 먼저 확인한다:
+# 그렇지 않으면 이 시험은 범위를 좁히지 않아도 통과한다. 추적하지 않는 파일은 코드 경로 안이어도 세지
+# 않는다(예전과 같다, --untracked-files=no). 전제를 만드는 status는 추적하지 않는 파일을 세는
+# 옵션(--untracked-files=normal)을 명시해, 사용자의 전역 설정(status.showUntrackedFiles)에 기대지 않는다.
+def test_commit_is_clean_when_only_unlisted_paths_change(code_repo):
+    repo, scope = code_repo
+    head = _repo_git(repo, "rev-parse", "HEAD")
+    assert len(head) == 40 and asr._git_commit(scope) == head  # 처음에는 깨끗하다
+    _write_lf(repo / "b" / "reports" / "r.json", "changed\n")
+    assert _repo_git(repo, "status", "--porcelain", "--untracked-files=no") != ""  # 전제: 전체로 보면 센다
+    assert asr._git_commit(scope) == head
+    _write_lf(repo / "b" / "src" / "new.py", "untracked\n")
+    counted = _repo_git(repo, "status", "--porcelain", "--untracked-files=normal", "--", "b/src")
+    assert counted != ""  # 전제: 추적하지 않는 파일까지 세면 센다
+    assert asr._git_commit(scope) == head
+
+
+# 코드 경로의 추적 파일이 바뀌면 +dirty로 끝난다. 형제 폴더의 코드 경로(src, pyproject.toml, uv.lock)와 이
+# 구성 요소 폴더의 파일 모두 센다. 되돌리면 다시 깨끗하다(+dirty는 그때그때의 작업 트리 상태다).
+def test_commit_is_dirty_when_sibling_code_changes(code_repo):
+    repo, scope = code_repo
+    head = _repo_git(repo, "rev-parse", "HEAD")
+    for rel in ("b/src/y.py", "b/pyproject.toml", "b/uv.lock", "a/x.py"):
+        original = (repo / rel).read_text(encoding="utf-8")
+        _write_lf(repo / rel, original + "changed\n")
+        assert asr._git_commit(scope) == head + "+dirty", rel
+        _write_lf(repo / rel, original)
+        assert asr._git_commit(scope) == head, rel
+
+
+# trees는 폴더 이름을 키로, 그 폴더의 커밋된 내용의 트리 해시(git rev-parse HEAD:<폴더>)를 값으로 하고 scope의
+# 순서를 지킨다. 다른 폴더만 고친 커밋으로는 이 폴더의 트리가 그대로이고, 커밋하지 않은 변경은 가리키지 않는다
+# (그것은 +dirty가 본다).
+def test_trees_name_each_folder(code_repo):
+    repo, scope = code_repo
+    trees = asr._code_trees(scope)
+    assert trees == {"a": _repo_git(repo, "rev-parse", "HEAD:a"), "b": _repo_git(repo, "rev-parse", "HEAD:b")}
+    assert list(trees) == ["a", "b"] and all(len(tree) == 40 for tree in trees.values())
+    _write_lf(repo / "a" / "x.py", "changed but not committed\n")
+    assert asr._code_trees(scope) == trees  # 커밋하지 않은 변경은 트리 해시에 나타나지 않는다
+    _repo_git(repo, "add", "a/x.py")
+    _repo_git(repo, "commit", "--quiet", "-m", "change a")
+    after = asr._code_trees(scope)
+    assert after["a"] == _repo_git(repo, "rev-parse", "HEAD:a") != trees["a"]
+    assert after["b"] == trees["b"]  # a/만 고친 커밋이라 b/의 트리는 그대로다
+
+
+# git이 읽지 못하면 지금까지의 표시가 그대로다: commit은 "?"이고 trees의 값은 모두 None이다(null로 기록된다).
+# 저장소가 아닌 폴더 만들기: tmp_path는 이 구성 요소의 .pytest-tmp 아래라 진짜 저장소 안에 있다. 그래서 .git이
+# 없는 보통 폴더라도 git이 위 폴더로 올라가며 바깥의 진짜 저장소를 찾아 성공해 버린다.
+# GIT_CEILING_DIRECTORIES에 그 폴더의 부모를 주면 git이 그 폴더에서 위로 올라가지 않으므로, .git이 없는 이
+# 폴더는 저장소가 아닌 것이 된다. 이 전제가 어긋나면(git이 위로 올라가면) 시험이 아무것도 확인하지 못한 채
+# 통과하지 않도록 먼저 단언한다.
+# 형제 폴더가 없을 때도 같다(이 스크립트는 그 폴더 없이는 돌지 못한다). 이때 이 구성 요소 폴더의 트리는
+# 읽힌다.
+def test_outside_a_repository_the_old_markers_stay(code_repo, tmp_path, monkeypatch):
+    repo, _ = code_repo
+    plain = {name: tmp_path / name for name in ("plain_a", "plain_b")}
+    for folder in plain.values():
+        folder.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    for folder in plain.values():
+        found = subprocess.run(["git", "rev-parse", "HEAD"], cwd=folder, capture_output=True, text=True)
+        assert found.returncode != 0, "premise failed: git found a repository above the plain folder"
+    outside = tuple((folder, (".",)) for folder in plain.values())
+    assert asr._git_commit(outside) == "?"
+    assert asr._code_trees(outside) == {"plain_a": None, "plain_b": None}
+    missing = ((repo / "a", (".",)), (repo / "no-such-folder", ("src",)))
+    assert asr._git_commit(missing) == "?"
+    assert asr._code_trees(missing) == {"a": _repo_git(repo, "rev-parse", "HEAD:a"), "no-such-folder": None}
+
+
+# 폴더가 작업 트리에는 있는데 HEAD에는 없으면(저장소 안의 추적하지 않는 폴더: 형제 폴더를 따로 받아 둔
+# 사본이나 가상환경 폴더를 가리킨 경우) 그 폴더로 한정한 status는 늘 빈 글이다. 그래서 status만 보면 읽지
+# 못한 것이 깨끗한 것처럼 보여 맨 해시가 나온다. commit은 scope의 폴더마다 HEAD에 있는 폴더인지도 봐서 "?"를
+# 낸다(패키지 쪽 공식 검사가 같은 까닭으로 같은 확인을 한다, docs/experiments.md "측정 출처를 이 폴더
+# 기준으로"의 덧붙임). 그 폴더가 첫째여도 둘째여도 같다. trees는 그 폴더만 None이다. 전제로, 그 폴더로
+# 한정한 status가 빈 글이고 HEAD:./가 풀리지 않는다는 것을 먼저 단언한다. 대조로, 같은 저장소의 커밋된
+# 폴더만 주면 맨 해시가 나온다.
+def test_a_folder_missing_from_head_gives_the_old_marker(code_repo):
+    repo, scope = code_repo
+    loose = repo / "loose"
+    _write_lf(loose / "src" / "z.py", "not committed\n")
+    assert _repo_git(loose, "status", "--porcelain", "--untracked-files=no", "--", "src") == ""  # 전제
+    found = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD:./"], cwd=loose, capture_output=True, text=True
+    )
+    assert found.returncode != 0, "premise failed: HEAD:./ resolves in a folder that is not committed"
+    assert asr._git_commit(scope) == _repo_git(repo, "rev-parse", "HEAD")  # 대조
+    loose_second = ((repo / "a", (".",)), (loose, ("src",)))
+    loose_first = ((loose, (".",)), (repo / "b", ("src", "pyproject.toml", "uv.lock")))
+    assert asr._git_commit(loose_second) == "?"
+    assert asr._git_commit(loose_first) == "?"
+    assert asr._code_trees(loose_second) == {"a": _repo_git(repo, "rev-parse", "HEAD:a"), "loose": None}
+
+
+# git 실행 파일을 찾지 못해도(압축 파일로 받은 사본, git이 없는 컨테이너) 지금까지의 표시가 그대로다:
+# commit은 "?"이고 trees의 값은 모두 None이다. PATH를 빈 폴더로 바꿔 git을 못 찾게 하고, 전제로 정말 못
+# 찾는지 먼저 단언한다(git이 있는데 이 시험이 통과하는 일이 없게). shutil은 이 파일 위쪽 import 묶음에
+# 없고, 그 묶음에 줄을 더하면 다른 문서가 줄 번호로 가리키는 33행이 밀리므로 함수 안에서 불러온다.
+def test_without_git_the_old_markers_stay(code_repo, tmp_path, monkeypatch):
+    import shutil
+
+    _, scope = code_repo
+    no_git = tmp_path / "bin-without-git"
+    no_git.mkdir()
+    monkeypatch.setenv("PATH", str(no_git))
+    assert shutil.which("git") is None, "premise failed: git is still on PATH"
+    assert asr._git_commit(scope) == "?"
+    assert asr._code_trees(scope) == {"a": None, "b": None}
+
+
+# 기본 scope(CODE_SCOPE)는 이 스크립트가 있는 구성 요소 폴더 전체와 형제 support-agent의 코드 경로다. 폴더는
+# 프로세스의 작업 폴더가 아니라 스크립트 파일의 위치로 잡는다(scripts/에서 하나 위가 이 구성 요소 폴더, 둘
+# 위가 저장소 뿌리). 기본값이 저장소 뿌리로 잘못 잡히면 +dirty가 다시 저장소 전체를 보게 된다. 인자 없이
+# 부르는 기존 호출(run_pass_two가 하는 꼴)도 돈다: 이 PC의 실제 저장소 상태에 기대지 않고 결과의 꼴만 본다.
+# 이 호출은 진짜 저장소의 git을 부르므로, 다른 git 명령과 색인 잠금을 다투지 않게 선택적 잠금을 끈다.
+# 마지막에는 작업 폴더를 다른 곳으로 옮긴 뒤 스크립트를 새로 읽어도 기본 범위가 같은지 본다(pytest는 늘 이
+# 구성 요소 폴더에서 돌아 작업 폴더가 ROOT와 같으므로, 이렇게 옮기지 않으면 범위를 작업 폴더로 잡는 실수가
+# 시험에 드러나지 않는다).
+def test_default_scope_is_this_folder_and_the_sibling_code(monkeypatch, tmp_path):
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "0")
+    script = (ROOT / "scripts" / "asr_condition.py").resolve()
+    assert asr.CODE_SCOPE == (
+        (script.parents[1], (".",)),
+        (script.parents[2] / "support-agent", ("src", "pyproject.toml", "uv.lock")),
+    )
+    # 위 식과는 따로, 이 시험 파일의 위치에서 잡은 폴더와도 같다
+    assert asr.CODE_SCOPE[0][0] == ROOT and asr.CODE_SCOPE[1][0] == SUPPORT_AGENT
+    assert re.fullmatch(r"[0-9a-f]{40}(\+dirty)?|\?", asr._git_commit())
+    trees = asr._code_trees()
+    assert list(trees) == [folder.name for folder, _paths in asr.CODE_SCOPE]
+    assert all(tree is None or re.fullmatch(r"[0-9a-f]{40}", tree) for tree in trees.values())
+    monkeypatch.chdir(tmp_path)
+    assert _load("asr_condition_elsewhere", script).CODE_SCOPE == asr.CODE_SCOPE
+
+
+# 메타를 쓰는 두 호출 자리(asr_condition.py의 run_pass_two와 asr_qwen.py의 main)는 음성 모델과 GPU가 있어야
+# 돌아서 이 환경에서는 실행하는 시험을 둘 수 없다. 그래서 소스를 ast로 읽어 write_hyp_meta에 넘기는 dict를
+# 고정한다: commit 바로 다음 키가 trees이고, 두 값의 호출 꼴이 asr_condition은 기본 범위(두 폴더),
+# asr_qwen은 이 폴더만(CODE_SCOPE[:1])이다. 위의 시험들은 두 함수와 기본 범위만 고정하고 이 연결은 보지
+# 않으므로, trees 줄이 빠지거나 키 순서가 바뀌거나 asr_qwen이 형제 폴더까지 보게 되어도 다른 시험은 모두
+# 통과한 채 기록되는 값만 달라진다. ast는 이 파일 위쪽 import 묶음에 없고, 그 묶음에 줄을 더하면 다른 문서가
+# 줄 번호로 가리키는 33행이 밀리므로 함수 안에서 불러온다.
+@pytest.mark.parametrize(
+    "script,commit_call,trees_call",
+    [
+        ("asr_condition.py", "_git_commit()", "_code_trees()"),
+        ("asr_qwen.py", "_git_commit(CODE_SCOPE[:1])", "_code_trees(CODE_SCOPE[:1])"),
+    ],
+    ids=["asr_condition", "asr_qwen"],
+)
+def test_hyp_meta_records_trees_right_after_commit(script, commit_call, trees_call):
+    import ast
+
+    tree = ast.parse((ROOT / "scripts" / script).read_text(encoding="utf-8"))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    writes = [call for call in calls if getattr(call.func, "id", None) == "write_hyp_meta"]
+    assert len(writes) == 1  # 메타를 쓰는 자리는 하나다
+    metas = [arg for arg in writes[0].args if isinstance(arg, ast.Dict)]
+    assert len(metas) == 1  # 메타는 dict 리터럴로 넘긴다
+    keys = [key.value for key in metas[0].keys]
+    assert len(keys) == len(set(keys))  # 키가 겹치면 뒤의 값이 앞의 값을 덮는다
+    at = keys.index("commit")
+    assert keys[at + 1] == "trees"
+    commit_value, trees_value = metas[0].values[at], metas[0].values[at + 1]
+    assert (ast.unparse(commit_value), ast.unparse(trees_value)) == (commit_call, trees_call)

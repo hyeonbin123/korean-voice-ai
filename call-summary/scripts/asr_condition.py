@@ -605,21 +605,71 @@ def whisper_transcriber(listener) -> Callable[[bytes, str | None], str]:
     return run
 
 
-# 지금 커밋 해시. 추적 파일이 바뀌어 있으면 "+dirty"를 붙인다. git이 없으면 "?". hyp 메타에 남긴다.
-def _git_commit() -> str:
+# [측정 출처의 범위] hyp 메타의 commit과 trees가 보는 코드 경로다(docs/experiments.md "측정 출처를 이 폴더
+# 기준으로"). 이 스크립트는 support-agent의 음성 환경(.venv)과 소스(PYTHONPATH=../support-agent/src)로 돌므로,
+# 결과에 영향을 주는 코드는 이 구성 요소 폴더와 support-agent의 코드 경로(src, pyproject.toml, uv.lock)다.
+# 저장소 전체를 보면 상관없는 구성 요소 폴더의 바뀐 파일이 commit에 "+dirty"를 붙이고, 이 폴더만 보면 형제
+# 폴더의 코드 변경을 놓친다.
+# CODE_SCOPE: (폴더, 그 폴더 안에서 볼 경로들)의 목록이다. 첫째는 이 구성 요소 폴더 전체(".")이고 commit의
+# 해시도 이 폴더에서 읽는다. 둘째는 형제 support-agent 폴더의 코드 경로다. 폴더는 프로세스의 작업 폴더가
+# 아니라 이 파일의 위치로 잡으므로(scripts/의 한 위가 이 구성 요소 폴더, 두 위가 저장소 뿌리다. TURBO_N과
+# 같은 기준) 어느 폴더에서 돌려도 같은 폴더를 본다. 폴더 이름은 _code_trees의 키라서 서로 달라야 한다.
+CODE_SCOPE: tuple[tuple[Path, tuple[str, ...]], ...] = (
+    (Path(__file__).resolve().parents[1], (".",)),
+    (Path(__file__).resolve().parents[2] / "support-agent", ("src", "pyproject.toml", "uv.lock")),
+)
+
+
+# folder에서 git을 불러(git -C) 출력(앞뒤 공백을 뗀 글, 비면 "")을 돌려준다. 프로세스의 작업 폴더에 기대지
+# 않아 어디서 돌려도 같은 폴더를 본다. git이 없거나, 폴더가 없거나 저장소 밖이거나, 종료 코드가 0이 아니면
+# (풀리지 않는 이름 포함) None이다. 이 값을 기록용 표시("?", None)로 바꾸는 것은 부르는 쪽이고, 어느 쪽도
+# 실행을 멈추지 않는다.
+def _git_in(folder: Path, *args: str) -> str | None:
     import subprocess
 
     try:
-        out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout
-        dirty = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+        done = subprocess.run(["git", "-C", str(folder), *args], capture_output=True, text=True, check=True)
     except (OSError, subprocess.CalledProcessError):
+        return None
+    return done.stdout.strip()
+
+
+# folder의 커밋된 내용의 git 트리 해시(그 폴더에서 부른 git rev-parse HEAD:./)다. git이 읽지 못하거나(저장소
+# 밖, 폴더가 없음) 그 폴더가 HEAD에 없으면(저장소 작업 트리 안의 추적하지 않는 폴더) None이다. --verify
+# --quiet는 풀리지 않을 때 오류 글 없이 실패로만 끝나게 한다. _code_trees는 이 값을 기록하고, _git_commit은
+# 풀리는지만 본다.
+def _folder_tree(folder: Path) -> str | None:
+    return _git_in(folder, "rev-parse", "--verify", "--quiet", "HEAD:./") or None
+
+
+# hyp 메타의 commit. scope(기본 CODE_SCOPE)의 첫 폴더에서 읽은 지금 커밋 해시이고, scope의 폴더마다 그 코드
+# 경로의 추적 파일이 하나라도 바뀌어 있으면 "+dirty"를 붙인다(추적하지 않는 파일은 예전처럼 세지 않는다:
+# --untracked-files=no). git 호출이 하나라도 실패하거나 scope의 폴더가 하나라도 HEAD에 없으면(git이 없음,
+# 저장소 밖, 폴더가 없음, 추적하지 않는 폴더) 지금까지의 표시 "?"다. 폴더가 HEAD에 있는지도 보는 까닭: 작업
+# 트리에는 있고 HEAD에는 없는 폴더에서는 경로를 한정한 status가 그 폴더의 코드가 바뀌어 있어도 늘 빈 글이라,
+# 읽지 못한 것이 깨끗한 것처럼 보인다(패키지 쪽 공식 검사가 같은 까닭으로 같은 확인을 한다: evaluate.py의
+# PROJECT_ROOT 설명, docs/experiments.md의 덧붙임). 형제 폴더가 없을 때도 "?"다. 이 스크립트는 그 폴더
+# 없이는 돌지 못한다. 인자 없이 부르는 기존 호출이 그대로 돈다. asr_qwen.py는 이 프로젝트 자기 환경에서 돌아
+# 형제 폴더의 코드를 쓰지 않으므로 CODE_SCOPE[:1]을 넘겨 이 폴더만 본다.
+def _git_commit(scope: tuple[tuple[Path, tuple[str, ...]], ...] = CODE_SCOPE) -> str:
+    head = _git_in(scope[0][0], "rev-parse", "HEAD")
+    states = [
+        _git_in(folder, "status", "--porcelain", "--untracked-files=no", "--", *paths)
+        for folder, paths in scope
+    ]
+    trees = [_folder_tree(folder) for folder, _paths in scope]
+    if not head or None in states or None in trees:
         return "?"
-    return out.strip() + ("+dirty" if dirty.strip() else "")
+    return head + ("+dirty" if any(states) else "")
+
+
+# hyp 메타의 trees. 폴더 이름(Path.name)마다 그 폴더의 커밋된 내용의 git 트리 해시(_folder_tree)를 scope의
+# 순서대로 돌려준다. 같은 값이면 그 폴더의 커밋된 내용이 같다. 다른 폴더의 커밋으로 commit이 달라져도 이
+# 값은 그대로다. 커밋된 내용만 가리키므로 작업 트리의 바뀐 파일은 commit의 "+dirty"가 본다. 읽지 못한
+# 폴더(저장소 밖, 폴더가 없음, HEAD에 없는 폴더)만 None이다(JSON에서는 null). hyp 메타는 처음 한 번만
+# 쓰므로(write_hyp_meta) commit과 trees는 그 팔의 첫 실행을 시작할 때의 값이다.
+def _code_trees(scope: tuple[tuple[Path, tuple[str, ...]], ...] = CODE_SCOPE) -> dict[str, str | None]:
+    return {Path(folder).name: _folder_tree(folder) for folder, _paths in scope}
 
 
 # 모델 출처 기록: 로컬 폴더(turbo-n)면 model.bin의 sha256(16 MB씩 읽어 메모리를 아낌), 허브 모델이면 내려받지
@@ -675,7 +725,7 @@ def add_torch_cuda_dlls() -> None:
 # 2패스 실행: 저장된 소리가 없거나 맥락 팔에 --context가 없으면 멈춘다. 모델을 올린 뒤 특징 추출기의 멜 필터
 # 수가 모델의 n_mels와 맞는지 확인한다: whisper-ko-ft의 6단계 모델을 faster-whisper로 돌린 첫 시도가 멜 필터
 # 수가 맞지 않아 모든 발화에서 실패한 적이 있어(docs/experiments.md "계획과 달라진 것") 미리 막는다. 그 뒤 hyp
-# 메타(모델 파일 지문, 버전, 파이썬 경로, 커밋)를 쓰고 recognise를 돈다.
+# 메타(모델 파일 지문, 버전, 파이썬 경로, 커밋, 코드 폴더의 트리 해시)를 쓰고 recognise를 돈다.
 def run_pass_two(args) -> int:
     from support_agent.voice.speech import WhisperListener, versions
 
@@ -711,6 +761,7 @@ def run_pass_two(args) -> int:
             "versions": versions("faster-whisper", "ctranslate2", "tokenizers", "av"),
             "python": sys.executable,
             "commit": _git_commit(),
+            "trees": _code_trees(),
             "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
     )
