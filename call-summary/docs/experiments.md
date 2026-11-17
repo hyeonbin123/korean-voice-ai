@@ -1761,3 +1761,7 @@ uv run --no-sync python -m call_summary.perturb report --control reports/<대조
 ### 읽는 법
 - `git_tree`가 같으면 이 폴더의 커밋된 내용이 같다. 다른 폴더의 커밋으로 `git_commit`이 달라져도 `git_tree`는 달라지지 않는다. 같은 값은 이 폴더에서 `git rev-parse HEAD:./`로 얻는다
 - `git_tree`는 커밋된 내용만 가리키므로, 작업 트리의 커밋하지 않은 변경은 `git_dirty`(또는 `--official`의 검사)가 본다
+
+### 2026-11-18 덧붙임: 공식 검사는 이 폴더가 커밋에 있는지도 본다 (코드를 고치기 전)
+- `evaluate`·`service_eval`의 `--official` 검사와 `scripts/ctx_probe.py`의 검사는 이 폴더가 커밋에 들어 있는 폴더인지도 함께 확인한다 (`git rev-parse HEAD:./`가 풀리는지). 검사의 기준 폴더는 작업 폴더가 아니라 코드가 있는 위치로 잡는데, 패키지를 소스 폴더가 아닌 곳에 따로 설치해 쓰면 그 위치가 저장소가 추적하지 않는 폴더가 될 수 있고, 그런 폴더로 한정한 `git status`는 이 폴더의 추적 파일이 바뀌어 있어도 빈 출력을 낸다. 그래서 그런 폴더에서는 git을 읽지 못한 때와 똑같이 멈춘다
+- 위 "바뀌지 않는 것"의 "바뀌는 것은 보는 범위뿐"에 이 확인 하나가 더해진다. 기록에 남는 값(`git_commit`, `git_tree`, `git_dirty`)의 뜻은 위에 적은 그대로다
