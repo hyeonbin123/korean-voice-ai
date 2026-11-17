@@ -31,8 +31,8 @@
 # 전사·화자가 매니페스트와 같은지, 결합이 일대일인지, 짝마다 정규화 정답이 같은지 확인한 뒤에만 계산한다. 잘못
 # 이은 짝은 그럴듯하지만 틀린 수치를 내므로 하나라도 어긋나면 멈춘다.
 # [출처] 다른 저장소의 정답·가설 문자열은 결과에 복사하지 않고, 수치와 출처(저장소 이름, 그 저장소 안의 경로,
-# 그 파일을 마지막으로 바꾼 커밋, 파일 SHA-256)만 남긴다. whisper-ko-ft의 '맞춘 채점'(그 저장소의 숫자 표기
-# 변환 코드)은 다른 저장소 코드를 불러와야 재현되므로 여기서 하지 않는다.
+# 그 파일을 마지막으로 바꾼 커밋과 blob 해시, 파일 SHA-256)만 남긴다. whisper-ko-ft의 '맞춘 채점'(그 저장소의
+# 숫자 표기 변환 코드)은 다른 저장소 코드를 불러와야 재현되므로 여기서 하지 않는다.
 # [순서] 짝지은 발화는 두 저장소가 공유하는 원래 id 순으로 정렬해 재표본한다. 1,000회 백분위 구간의 끝값은
 # 발화 순서에 따라 소수 둘째 자리(%)가 달라질 수 있어(재표본 오차) 순서를 고정해야 같은 값이 재현된다.
 # [연결] 입력: scripts/stage7.py가 쓴 reports/final/test_zeroth-{full,streaming}.hyps.jsonl,
@@ -287,15 +287,48 @@ def anchor_notation(pairs: list[AnchorPair], digit_ids: set[str], train: set[str
     return out
 
 
-# 입력 파일의 출처: 저장소 이름(git 최상위 폴더 이름), 그 저장소 안의 경로, 그 파일을 마지막으로 바꾼 커밋,
-# 커밋 뒤 수정 여부, 파일 SHA-256. 로컬 절대 경로는 남기지 않는다. git이 없거나 저장소 밖 파일이면
-# 저장소·커밋은 null로 두고 경고한다(SHA-256은 항상 남는다).
+# 입력 파일의 출처를 결과 JSON에 남길 dict로 만든다. 필드의 뜻은 docs/experiments.md의 규칙 변경 31이 정한다.
+# 입력: 출처를 남길 파일의 경로(저장소 안이든 밖이든 된다).
+# 출력(키 순서 고정):
+#   repository           git 최상위 폴더의 이름(저장소를 받은 폴더의 이름이라 받은 곳에 따라 다르다)
+#   path                 저장소 뿌리 기준 경로(로컬 절대 경로는 남기지 않는다. 저장소 밖이면 파일 이름만)
+#   commit               그 파일의 내용을 마지막으로 바꾼 커밋(이름·폴더만 옮긴 커밋은 건너뛴다)
+#   blob                 HEAD가 가진 그 파일의 git blob 해시. git에 저장된 내용만으로 정해지므로, 이력을 다시
+#                        쓰거나 저장소를 옮겨 커밋 해시가 달라져도 같은 내용이면 같다
+#   uncommitted_changes  그 파일이 HEAD와 다른가(작업 트리·스테이징의 변경을 센다. HEAD에 없는 파일은 추적하지
+#                        않는 것도 무시 목록에 든 것도 센다)
+#   sha256               지금 파일 바이트의 SHA-256(항상 남는다)
+# [commit] `git --literal-pathspecs log -1 --follow -M100% --diff-filter=AM --format=%H -- <경로>`로 구한다.
+#   --follow는 입력 파일이 구성 요소를 합치며 폴더를 옮겨 다닌 이름 바꾸기를 따라간다. 경로만 한정한
+#   `git log`는 옮긴 커밋을 마지막 변경으로 답한다. --diff-filter=AM은 새로 더하거나(A) 고친(M) 커밋만 세어
+#   이름만 바꾼(R) 커밋을 건너뛴다. -M100%는 이름 바꾸기를 '내용이 한 글자도 안 바뀐 이동'으로만 보게 한다.
+#   이게 없으면 git의 기본 감지(유사도 50 % 이상)가 옮기면서 내용도 고친 커밋까지 이름 바꾸기로 보고
+#   건너뛰어 그보다 앞선 커밋을 답하므로 '내용을 마지막으로 바꾼 커밋'이라는 뜻과 어긋난다(임시 저장소로
+#   확인한 동작이고 시험이 고정한다).
+#   --follow는 내용이 바이트까지 같은 복사도 따라간다(-M100%나 diff.renames=false로도 끌 수 없다). 그래서
+#   이 파일과 내용이 같은 파일이 다른 경로에 먼저 있었다면 그 원본이 그 내용을 갖게 된 커밋이 나온다(그
+#   커밋에는 이 경로가 없고 같은 blob이 원본의 경로로 들어 있다). 닮았지만 같지는 않은 복사는 -M100%가 막아
+#   이 파일을 더한 커밋이 나온다(임시 저장소로 확인한 동작).
+#   경로는 --literal-pathspecs로 글자 그대로 읽는다(status도 같다). 없으면 파일 이름의 `[`·`*`·`?` 같은 글자가
+#   glob으로 읽혀 a[1].json의 커밋과 변경에 이웃 a1.json의 것이 섞인다. --follow와 함께 쓸 수 있고 시험이
+#   고정한다. 경로 앞에 :(literal)을 붙이는 방법은 쓰지 않는다(아래 코드 주석).
+# [얕은 복제] 이력이 잘려 있으면 경계 커밋이 모든 파일을 처음 더한 것처럼 보여, 그 파일을 바꾼 적 없는 경계
+#   커밋을 '마지막으로 바꾼 커밋'으로 잘못 적게 된다. 그래서 commit은 None으로 두고 경고한다(나머지 필드는
+#   정상으로 구한다).
+# [blob이 None] HEAD에 그 파일이 없을 때: 추적하지 않거나 무시 목록에 든 파일, 스테이징만 하고 커밋하지 않은
+#   파일, HEAD에서 지운 경로에 다시 만든 파일. 이때도 repository와 path는 채워지고 commit은 None,
+#   uncommitted_changes는 True다. 지우기 전의 커밋은 지금 파일의 것이 아니라 적지 않고, `git status`가 세지
+#   않는 파일(무시 목록)도 HEAD에는 없으므로 변경이 있는 것으로 센다. blob은 HEAD 쪽 내용이라
+#   uncommitted_changes가 True이면 sha256이 가리키는 내용과 다를 수 있다.
+# [git이 안 될 때] git 실행 파일이 없거나 저장소 밖이거나 커밋이 없는 저장소면 sha256만 값이 있고 나머지는
+#   None이다 (path는 파일 이름). 기록용이라 멈추지 않고 경고만 한다.
 def file_provenance(path: Path) -> dict:
     path = path.resolve()
     info = {
         "repository": None,
         "path": path.name,
         "commit": None,
+        "blob": None,
         "uncommitted_changes": None,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
@@ -309,17 +342,50 @@ def file_provenance(path: Path) -> dict:
 
         top = Path(run("-C", str(path.parent), "rev-parse", "--show-toplevel")).resolve()
         rel = path.relative_to(top).as_posix()
-        commit = run("-C", str(top), "log", "-1", "--format=%H", "--", rel)
-        dirty = bool(run("-C", str(top), "status", "--porcelain", "--", rel))
+
+        # log와 status에는 경로를 pathspec으로 넘긴다. git의 --literal-pathspecs로 파일 이름의 [ * ? 같은
+        # 글자를 glob이 아니라 글자 그대로 읽게 한다(rev-parse HEAD:<경로>는 pathspec이 아니라 원래 글자
+        # 그대로다). `:(literal)<경로>` 접두를 쓰지 않는 까닭: 사용자가 GIT_LITERAL_PATHSPECS=1을 환경에
+        # 걸어 두면 그 접두가 마법으로 읽히지 않아 git log가 오류 없이 빈 결과를 낸다(임시 저장소로 확인한
+        # 동작). 이 옵션은 그 환경 변수를 이 호출에서 덮어쓴다.
+        def run_literal(*args: str) -> str:
+            return run("-C", str(top), "--literal-pathspecs", *args)
+
+        shallow = run("-C", str(top), "rev-parse", "--is-shallow-repository") == "true"
+        # 얕은 복제에서는 마지막 변경 커밋을 믿을 수 없어 묻지 않는다(빈 글은 아래에서 None이 된다). log를
+        # blob보다 먼저 부르는 순서도 지킨다: 커밋이 없는 저장소에서는 log가 실패해 '출처 없음'이 된다.
+        log_args = ["log", "-1", "--follow", "-M100%", "--diff-filter=AM", "--format=%H", "--", rel]
+        commit = "" if shallow else run_literal(*log_args)
+        try:
+            blob = run("-C", str(top), "rev-parse", "--verify", "--quiet", f"HEAD:{rel}")
+        except subprocess.CalledProcessError as exc:
+            # HEAD에 그 파일이 없으면 --verify --quiet가 아무것도 찍지 않고 종료 코드 1로 끝난다. 출처가 없는
+            # 것이 아니라 blob만 모르는 것이므로 막지 않는다. 다른 종료 코드는 진짜 실패라 그대로 올린다.
+            if exc.returncode != 1:
+                raise
+            blob = None
+        if blob is None:
+            # HEAD에 그 파일이 없으면 log가 답한 커밋은 지우기 전의 옛 파일의 것이다. 지금 파일의 것으로
+            # 적지 않는다.
+            commit = ""
+        # HEAD에 없는 파일은 `git status`가 세지 않는 것(무시 목록)도 HEAD와 다르다. HEAD에 있는 파일만
+        # status로 변경을 확인한다.
+        dirty = blob is None or bool(run_literal("status", "--porcelain", "--", rel))
     except (OSError, subprocess.CalledProcessError, ValueError):
         print(f"warning: no git provenance for {path.name}", file=sys.stderr)
         return info
+    if shallow:
+        print(
+            f"warning: {top.name} is a shallow clone; the commit that last changed {rel} cannot be told, "
+            "so commit is null",
+            file=sys.stderr,
+        )
     if dirty:
         print(
             f"warning: {top.name}/{rel} has uncommitted changes; the sha256 identifies the content",
             file=sys.stderr,
         )
-    info.update(repository=top.name, path=rel, commit=commit or None, uncommitted_changes=dirty)
+    info.update(repository=top.name, path=rel, commit=commit or None, blob=blob, uncommitted_changes=dirty)
     return info
 
 
@@ -404,7 +470,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "앵커 분석에는 0단계가 내려받은 Zeroth parquet(행 번호 id를 원래 id로 잇는 데 씀)와 "
             "whisper-ko-ft 체크아웃이 필요하다. 다른 저장소의 정답·가설 문자열은 결과에 복사하지 않고 "
-            "수치와 출처(커밋, SHA-256)만 남긴다."
+            "수치와 출처(커밋, blob, SHA-256)만 남긴다."
         ),
     )
     p.add_argument(
