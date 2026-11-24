@@ -29,6 +29,8 @@
 
 그래서 다섯 구성 요소의 환경(위 표의 그룹까지 붙인 것)은 한 가상환경에 함께 설치할 수 없다(예: support-agent의 `voice` 그룹은 `transformers==4.27.4`를, whisper-ko-ft는 `transformers>=4.57`을 요구한다). 잠금 파일 하나로 합치려면 다섯의 의존성을 다시 풀어야 하고, 그때 판이 바뀌면 기록된 수치를 낸 환경과 달라진다. 예를 들어 whisper-ko-ft의 영어 보조 지표 정규화는 transformers 판에 따라 동작이 바뀔 수 있어 5.17.0을 기준으로 규칙을 적었다([`src/whisper_ko_ft/en_norm.py`](../whisper-ko-ft/src/whisper_ko_ft/en_norm.py) 머리 주석).
 
+잠금 파일은 등록한 갱신으로만 바뀐다. 추적되는 `uv.lock`과 `package-lock.json`마다 그 파일을 들인 커밋과 그 뒤의 갱신(어느 커밋이 어떤 판을 왜 바꿨는지)을 [`tools/locks.toml`](../tools/locks.toml)에 적어 두고, [`tools/check_lock_drift.py`](../tools/check_lock_drift.py)가 CI에서 그 등록을 git 이력과 맞춰 본다. 등록하지 않은 변경이 있으면 실패한다.
+
 ## 쓰는 법
 
 - 각 구성 요소 폴더 안에서 잠금 파일대로 가상환경을 새로 만든다: `uv sync --frozen`에 위 표의 그룹을 붙인다(예: call-summary는 `uv sync --frozen --group train`). `--frozen`은 잠금 파일을 고치지 않고 그 판 그대로 설치한다.

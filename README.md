@@ -83,7 +83,7 @@ git clone -c core.autocrlf=false https://github.com/hyeonbin123/korean-voice-ai
 | voice-translator | `backend/`: `uv sync --frozen`, `frontend/`: `npm ci` | [테스트 절](voice-translator/README.md#테스트)(백엔드는 DB 필요) |
 | 나머지 넷 | `uv sync --frozen`(whisper-ko-ft는 `--group ct2` 추가) | `uv run pytest` |
 
-루트 검사 셋은 저장소 루트에서 `uv run --no-project tools/<이름>.py`로 돈다: `check_root_numbers.py`(수치 대조), `check_links.py`(링크), `check_cross_deps.py`(구성 요소 사이 의존).
+루트 검사 다섯은 저장소 루트에서 `uv run --no-project tools/<이름>.py`로 돈다: `check_root_numbers.py`(수치 대조), `check_links.py`(링크), `check_cross_deps.py`(구성 요소 사이 의존), `check_evidence.py`(근거로 적은 커밋 해시), `check_lock_drift.py`(잠금 파일).
 
 ## 문서
 
