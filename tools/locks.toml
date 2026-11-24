@@ -30,16 +30,58 @@
 #                변화는 적을 수 없어 검사가 그대로 문제로 알린다.
 #     why        왜 바꿨는지 공개 문서나 커밋 메시지를 가리키는 한 줄
 #
-# 예(자리 표시만 적었다. 해시는 40자 소문자 16진수로 채운다):
-#
-#   [[lock]]
-#   path = "<구성 요소>/uv.lock"
-#   added = "<그 폴더를 들인 커밋 40자>"
-#   base = "<그 커밋에서의 blob 40자>"
-#   what = "<구성 요소>의 파이썬 잠금"
-#
-#     [[lock.update]]
-#     commit = "<잠금을 바꾼 커밋 40자>"
-#     date = "<YYYY-MM-DD>"
-#     changes = ["<패키지> <옛 판> -> <새 판>", "+ <새로 들어온 패키지> <판>", "- <빠진 패키지> <판>"]
-#     why = "<까닭을 적은 문서나 커밋>"
+# 아래가 이 저장소의 실제 등록이다.
+
+[[lock]]
+path = "whisper-ko-ft/uv.lock"
+added = "9a5ff2a1fc2f1c97adf13a87de335490f5296973"
+base = "4f556ed829e1ac6e2da7c239734ed5d4a0352352"
+what = "whisper-ko-ft의 파이썬 잠금(uv). 합치기 전 저장소의 잠금을 폴더째 옮긴 것"
+
+[[lock]]
+path = "stt-scratch/uv.lock"
+added = "4c1dac2d165febfa86e1e9717530d52f246bf8b3"
+base = "8caac3098da91fb6943e8bd19b4fb7484e17bbf4"
+what = "stt-scratch의 파이썬 잠금(uv). 합치기 전 저장소의 잠금을 폴더째 옮긴 것"
+
+  [[lock.update]]
+  commit = "25241a5a2a0196d2b8816ed8bb12cfcdacbaf14e"
+  date = "2026-11-15"
+  changes = ["opentelemetry-api 1.45.1 -> 1.45.2"]
+  why = "새로 공개된 권고 CVE-2026-126360 때문에 opentelemetry-api의 판만 올렸다(잠금에서 바뀐 것은 그 패키지의 판·sdist·wheel 세 줄뿐). stt-scratch/docs/security.md의 '의존성 갱신 (2026-11-15, 새 권고로 opentelemetry-api를 올림)' 절"
+
+[[lock]]
+path = "voice-translator/backend/uv.lock"
+added = "345969b22645fc518340af7016c238ba36af3925"
+base = "0b4684f3a7bddd434ee48e3af5a293a74ddfce39"
+what = "voice-translator 백엔드의 파이썬 잠금(uv). 합치기 전 저장소의 잠금을 폴더째 옮긴 것"
+
+  [[lock.update]]
+  commit = "d8949c6740d9d6df26a3018fd755f422f3e80d31"
+  date = "2026-11-15"
+  changes = ["dnspython 2.9.1 -> 2.9.2", "opentelemetry-api 1.45.1 -> 1.45.2"]
+  why = "그 뒤 공개된 권고 둘(dnspython의 CVE-2026-128089, opentelemetry-api의 CVE-2026-126360) 때문에 두 패키지의 판만 올렸다(잠금 diff는 두 패키지의 판·sdist·wheel 여섯 줄뿐). voice-translator/docs/security.md의 '2026-11-15 덧붙임: 그 뒤 공개된 Python 권고 10건 가운데 둘' 단락"
+
+[[lock]]
+path = "voice-translator/frontend/package-lock.json"
+added = "345969b22645fc518340af7016c238ba36af3925"
+base = "6311a71a64a643400bde4668b9673b4028e285e6"
+what = "voice-translator 화면(frontend)의 npm 잠금. 합치기 전 저장소의 잠금을 폴더째 옮긴 것"
+
+[[lock]]
+path = "support-agent/uv.lock"
+added = "06edbe607119482eb39f0cb7df27cc906a48850a"
+base = "6e1a7687e630a996b16f1b53d873e031ef359229"
+what = "support-agent의 파이썬 잠금(uv). 합치기 전 저장소의 잠금을 폴더째 옮긴 것"
+
+[[lock]]
+path = "call-summary/uv.lock"
+added = "5432507cdcf029ff684bdfb7efb7e8f2df4cbc37"
+base = "bc239e3ea1c0f358d3a8c0b42ad8d8569b8c302c"
+what = "call-summary의 파이썬 잠금(uv). 합치기 전 저장소의 잠금을 폴더째 옮긴 것"
+
+[[lock]]
+path = "e2e/uv.lock"
+added = "aaf62b00a1464466dbec1ccf46655fff88427c6d"
+base = "1792695d2959ddc20ab84b8884f00291be33ad6f"
+what = "e2e(통화 한 건 배선 시연)의 파이썬 잠금(uv). 옮겨 온 것이 아니라 이 저장소에서 처음 만든 잠금"

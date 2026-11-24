@@ -34,7 +34,8 @@ second → third)을 쌓고, 그 사이에 갈라진 side 브랜치에만 있는
 없이 적으면 낱말이 아니므로, 시험이 표시 없이 문서에 적는 해시는 short()로 줄인 것만 쓴다(해시는 고를 수 없어
 앞 7자가 숫자뿐인 진짜 커밋은 만들 수 없다. 그런 낱말이 풀리는 쪽은 가짜 커밋을 넣은 순수 함수로 본다). 등록
 파일은 저장소 안 tools/evidence.toml에 추적하지 않는 파일로 쓴다(도구는 등록 파일만 작업 트리에서 읽고, 검사
-대상은 HEAD에서 읽는다). 이 저장소 자신을 대상으로 하는 시험은 이 파일에 없다.
+대상은 HEAD에서 읽는다). 이 저장소 자신을 읽는 시험은 맨 끝의 하나뿐이다(등록 파일의
+꼴만 본다. 이 저장소의 이력으로 검사 전체를 돌리는 시험은 이 파일에 없다).
 """
 
 import json
@@ -48,6 +49,7 @@ from pathlib import Path
 
 import check_evidence
 import pytest
+from conftest import REPO
 from check_evidence import (
     Problem,
     Registry,
@@ -1681,3 +1683,27 @@ def test_malformed_pair_entries_are_problems_of_that_entry(tmp_path, changes, ke
     assert all("[[pair]] 1번째" in str(problem) for problem in problems)
     assert any(f"{key} -" in str(problem) for problem in problems)
     assert registry.pair_total == 1  # 꼴이 틀린 항목도 등록한 항목이라 센다
+
+
+# ---------------------------------------------------------------------------------------------
+# 이 저장소의 실제 등록
+# ---------------------------------------------------------------------------------------------
+#
+# 아래 시험은 시험용 저장소가 아니라 이 저장소 자신의 등록 파일(tools/evidence.toml)을 읽는다. 등록 파일의 꼴만 본다.
+# 이 저장소의 이력으로 검사 전체를 돌려 종료 코드 0을 단언하는 시험은 일부러 두지 않았다: 그 검사는 워크플로에서 처음
+# 두 주 동안 보고만 하는 단계로 도는데(--report-only), 같은 검사를 이 시험이 막으면 그 기간이 뜻을 잃는다. 그 인자를 뗄 때
+# 그 시험을 함께 넣는다.
+
+
+def test_repository_registry_is_well_formed():
+    registry = load_registry(REPO / "tools" / "evidence.toml")
+    # 꼴 오류(모르는 키, 빠진 키, 빈 글, 꼴이 틀린 해시, 겹친 등록)가 하나도 없다. 꼴이 틀린 항목은 검사에서 빠지므로
+    # (문제로는 알려진다) 여기서 0인지 본다. 세 표의 꼴 오류가 모두 registry.problems에 모인다.
+    assert registry.problems == (), [str(problem) for problem in registry.problems]
+    # 기록 파일 묶음은 여덟이다. 줄이거나 늘리면 이 수를 함께 고친다(묶음 하나가 조용히 빠지는 것을 막는다).
+    assert len(registry.records) == 8
+    # '규칙 → 결과' 짝은 처음 등록한 열넷보다 줄지 않는다(새 측정마다 더한다). 꼴이 맞는 짝의 수와 등록한 짝의 수가 같다.
+    assert len(registry.pairs) >= 14
+    assert registry.pair_total == len(registry.pairs)
+    # 이 저장소의 커밋이 아닌 해시의 등록이 있다((낱말, 파일)마다 하나).
+    assert len(registry.externals) >= 1

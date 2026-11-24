@@ -37,4 +37,415 @@
 # 긴 16진수가 값으로 오는 키(hash, rule, result)의 이름은 '토큰'이나 '키' 같은 뜻이 든 말을 피했다. 커밋 전 비밀값
 # 검사가 그런 이름 뒤의 긴 16진수를 비밀값으로 볼 수 있어서다. keys의 값은 키 이름의 목록이라 해당하지 않는다.
 #
-# 지금은 등록한 항목이 없다.
+# 아래가 이 저장소의 실제 등록이다.
+
+# ---------------------------------------------------------------------------------------------
+# 이 저장소의 커밋이 아닌 해시 (문서가 커밋 참조처럼 적은 것)
+#
+# 갈래는 셋이다: 다른 프로젝트 저장소의 커밋, Hugging Face 모델·데이터셋의 revision, 파일 해시나 다이제스트의 앞부분.
+# 등록하기 전에 그 문서의 그 줄을 읽어 무엇의 해시인지 확인했다. 차례는 파일 경로 순, 그 안에서 낱말 순이다.
+# ---------------------------------------------------------------------------------------------
+
+[[external]]
+hash = "31385c9"
+where = "call-summary/README.md"
+what = "llama.cpp 저장소의 릴리스 b11255 태그 커밋"
+
+[[external]]
+hash = "52a2d2f65261"
+where = "call-summary/README.md"
+what = "Ollama 모델 call-summary-4b-dq:q8_0의 digest 앞 12자"
+
+[[external]]
+hash = "81bc6b8"
+where = "call-summary/README.md"
+what = "llama.cpp 저장소의 커밋(GGUF 변환 스크립트를 받은 체크아웃)"
+
+[[external]]
+hash = "04ece58adfad"
+where = "call-summary/docs/experiments.md"
+what = "섞어 학습한 학생(고치기 전 코드)의 final 어댑터 가중치 파일의 SHA-256 앞 12자"
+
+[[external]]
+hash = "1a0d59ea41c2"
+where = "call-summary/docs/experiments.md"
+what = "섞어 학습한 학생(고친 코드로 다시 학습)의 epoch1 어댑터 가중치 파일의 SHA-256 앞 12자"
+
+[[external]]
+hash = "21d6574d0427"
+where = "call-summary/docs/experiments.md"
+what = "call-summary의 datasets/dev-asr.jsonl의 SHA-256 앞 12자(실행 기록의 data_sha)"
+
+[[external]]
+hash = "2ac914084f35"
+where = "call-summary/docs/experiments.md"
+what = "call-summary의 datasets/perturb/dev-inject.jsonl의 SHA-256 앞 12자"
+
+[[external]]
+hash = "2b5c4bfdcbc7"
+where = "call-summary/docs/experiments.md"
+what = "깨끗한 학생(고치기 전 코드)의 final 어댑터 가중치 파일 adapter_model.safetensors의 SHA-256 앞 12자"
+
+[[external]]
+hash = "31385c9"
+where = "call-summary/docs/experiments.md"
+what = "llama.cpp 저장소의 릴리스 b11255 태그 커밋"
+
+[[external]]
+hash = "31385c9ce"
+where = "call-summary/docs/experiments.md"
+what = "llama.cpp 빌드 11255의 커밋(llama-quantize가 찍은 판 줄 안의 줄임 해시, 앞 9자)"
+
+[[external]]
+hash = "4cead4cf6510"
+where = "call-summary/docs/experiments.md"
+what = "프롬프트 판 p1의 지문(prompt_hash, SHA-256 앞 12자)"
+
+[[external]]
+hash = "52a2d2f65261"
+where = "call-summary/docs/experiments.md"
+what = "Ollama 모델 call-summary-4b-dq:q8_0의 digest 앞 12자"
+
+[[external]]
+hash = "7a4e5be2bec9"
+where = "call-summary/docs/experiments.md"
+what = "깨끗한 학생(고친 코드로 다시 학습)의 epoch1 어댑터 가중치 파일의 SHA-256 앞 12자"
+
+[[external]]
+hash = "81bc6b8"
+where = "call-summary/docs/experiments.md"
+what = "llama.cpp 저장소의 커밋(GGUF 변환 스크립트를 받은 체크아웃)"
+
+[[external]]
+hash = "a0fc4c327b15"
+where = "call-summary/docs/experiments.md"
+what = "call-summary의 datasets/perturb/dev-swap.jsonl의 SHA-256 앞 12자"
+
+[[external]]
+hash = "a1a270206d72"
+where = "call-summary/docs/experiments.md"
+what = "call-summary의 datasets/perturb/dev-neutral.jsonl의 SHA-256 앞 12자"
+
+[[external]]
+hash = "a9d15030d610"
+where = "call-summary/docs/experiments.md"
+what = "깨끗한 학생(고친 코드로 다시 학습)의 final 어댑터 가중치 파일의 SHA-256 앞 12자"
+
+[[external]]
+hash = "b86579a20d93"
+where = "call-summary/docs/experiments.md"
+what = "섞어 학습한 학생(고친 코드로 다시 학습)의 final 어댑터 가중치 파일의 SHA-256 앞 12자"
+
+[[external]]
+hash = "bcd2b5b7f32b480ab5790554cfa8347f246a14f3"
+where = "call-summary/docs/experiments.md"
+what = "Hugging Face 모델 Qwen/Qwen3-ASR-1.7B-hf의 revision"
+
+[[external]]
+hash = "cb64eb0a5431"
+where = "call-summary/docs/experiments.md"
+what = "call-summary의 datasets/dev.jsonl의 SHA-256 앞 12자(실행 기록의 data_sha)"
+
+[[external]]
+hash = "e956c969"
+where = "call-summary/docs/experiments.md"
+what = "support-agent의 src/support_agent/voice/verbalize.py(커밋 a5717ce 시점)의 git blob 해시 앞 8자"
+
+[[external]]
+hash = "168de34"
+where = "stt-scratch/docs/data.md"
+what = "Hugging Face 데이터셋 google/fleurs의 refs/convert/parquet 브랜치 커밋 앞 7자"
+
+[[external]]
+hash = "1fe9378"
+where = "stt-scratch/docs/data.md"
+what = "Hugging Face 데이터셋 kresnik/zeroth_korean의 커밋 앞 7자"
+
+[[external]]
+hash = "ae911de"
+where = "stt-scratch/docs/data.md"
+what = "Hugging Face 데이터셋 fsicoli/common_voice_22_0의 커밋 앞 7자"
+
+[[external]]
+hash = "0edcdef34593"
+where = "support-agent/docs/experiments.md"
+what = "Ollama 모델 qwen3:4b-instruct-2507-q4_K_M의 digest 앞 12자"
+
+[[external]]
+hash = "2a654d98e6fb"
+where = "support-agent/docs/experiments.md"
+what = "Ollama 모델 qwen3.5:4b의 digest 앞 12자"
+
+[[external]]
+hash = "845dbda0ea48"
+where = "support-agent/docs/experiments.md"
+what = "Ollama 모델 qwen2.5:7b-instruct의 digest 앞 12자"
+
+[[external]]
+hash = "0207e5adfc90129a51b6b03d89be6d84360ed323"
+where = "support-agent/docs/voice.md"
+what = "Hugging Face 모델 myshell-ai/MeloTTS-Korean의 스냅숏(커밋)"
+
+[[external]]
+hash = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+where = "support-agent/docs/voice.md"
+what = "Hugging Face 모델 mobiuslabsgmbh/faster-whisper-large-v3-turbo의 스냅숏(커밋)"
+
+[[external]]
+hash = "1779cc0982ada0216dd6de0dd4e86fb78201926d"
+where = "support-agent/docs/voice.md"
+what = "Hugging Face 모델 kykim/bert-kor-base의 스냅숏(커밋)"
+
+[[external]]
+hash = "2091453"
+where = "support-agent/docs/voice.md"
+what = "myshell-ai/MeloTTS 저장소의 커밋(MeloTTS를 고정한 git rev의 앞 7자)"
+
+[[external]]
+hash = "aafc6e3"
+where = "voice-translator/README.md"
+what = "Hugging Face 모델 supertone-oss-archive/supertonic-3의 revision 앞 7자"
+
+[[external]]
+hash = "0a363e9"
+where = "voice-translator/docs/api.md"
+what = "Hugging Face 모델 mobiuslabsgmbh/faster-whisper-large-v3-turbo의 revision 앞 7자"
+
+[[external]]
+hash = "1e9799e"
+where = "voice-translator/docs/experiments.md"
+what = "supertone-oss-archive/supertonic 저장소의 커밋(참조 코드 py/helper.py)의 앞 7자"
+
+[[external]]
+hash = "2091453"
+where = "voice-translator/docs/experiments.md"
+what = "myshell-ai/MeloTTS 저장소의 커밋(MeloTTS 고정 rev의 앞 7자)"
+
+[[external]]
+hash = "2760a223ac957f30acfb18c8aa649b01cf1d75f2"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 Unbabel/wmt22-comet-da의 revision"
+
+[[external]]
+hash = "50b7223e98fcd124b0cabb1ec81bc6324c7df107"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 google/mt5-large의 revision"
+
+[[external]]
+hash = "51e875ba5c525c81627cfd135ee10f43c87dce00"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 google/metricx-24-hybrid-large-v2p6의 revision"
+
+[[external]]
+hash = "9a341cd1b679d3efd23b46e847b01745a71ed792"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 tencent/Hy-MT2-1.8B의 revision"
+
+[[external]]
+hash = "a0c709d9fac510f2c807aa3af52872340dc37a4a"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 tencent/Hy-MT2-1.8B-GGUF의 revision"
+
+[[external]]
+hash = "aafc6e32416a594460b32413efc49d7fe4ce6d46"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 supertone-oss-archive/supertonic-3의 revision"
+
+[[external]]
+hash = "c23d21b0620b635a76227c604d44e43a9f0ee389"
+where = "voice-translator/docs/experiments.md"
+what = "Hugging Face 모델 FacebookAI/xlm-roberta-large의 revision"
+
+[[external]]
+hash = "f2c39fe"
+where = "voice-translator/docs/experiments.md"
+what = "ONNX Runtime 1.30.0 빌드 정보의 커밋(GitHub 태그 v1.30.0의 커밋) 앞 7자"
+
+[[external]]
+hash = "fc4978e"
+where = "voice-translator/docs/experiments.md"
+what = "google-research/metricx 저장소의 커밋 앞 7자"
+
+[[external]]
+hash = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
+where = "voice-translator/docs/security.md"
+what = "Hugging Face 모델 mobiuslabsgmbh/faster-whisper-large-v3-turbo의 revision"
+
+[[external]]
+hash = "41f01f3fe87f28c78e2fbf8b568835947dd65ed9"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "Hugging Face 모델 openai/whisper-large-v3-turbo의 revision"
+
+[[external]]
+hash = "6e3be77"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "openai/whisper 저장소의 첫 커밋 앞 7자"
+
+[[external]]
+hash = "7f1569a48a89f3e3f4dc3a5c9d28bddd903bc76c"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "Hugging Face 모델 Qwen/Qwen3-ASR-0.6B-hf의 revision"
+
+[[external]]
+hash = "bcd2b5b7f32b480ab5790554cfa8347f246a14f3"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "Hugging Face 모델 Qwen/Qwen3-ASR-1.7B-hf의 revision"
+
+[[external]]
+hash = "ea1c266"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "openai/whisper 저장소의 커밋 앞 7자"
+
+# ---------------------------------------------------------------------------------------------
+# 기록 파일의 커밋 값
+# ---------------------------------------------------------------------------------------------
+
+[[record]]
+glob = "call-summary/reports/*/manifest.json"
+keys = ["git_commit"]
+component = "call-summary"
+what = "call-summary 측정 기록의 manifest가 남긴 측정 코드 커밋"
+
+[[record]]
+glob = "call-summary/reports/judge2/*.meta.json"
+keys = ["git_commit"]
+component = "call-summary"
+what = "call-summary 판정 모델 보정 기록의 meta가 남긴 측정 코드 커밋"
+
+[[record]]
+glob = "call-summary/reports/*.json"
+keys = ["git_commit"]
+component = "call-summary"
+what = "call-summary reports 폴더 바로 아래의 기록(컨텍스트 초과 확인, 서빙 벤치)이 남긴 측정 코드 커밋"
+
+[[record]]
+glob = "call-summary/datasets/dev-asr-v3-*-itn.jsonl"
+keys = ["commit"]
+component = "call-summary"
+what = "음성 인식을 거쳐 만든 call-summary 개발용 데이터의 줄마다 남긴 인식 코드 커밋"
+
+[[record]]
+glob = "support-agent/reports/*/manifest.json"
+keys = ["commit", "original_commit", "rerun_commit", "source_commit"]
+component = "support-agent"
+what = "support-agent 평가 기록의 manifest가 남긴 측정 코드 커밋과, 이어 붙이거나 다시 돌린 기록이 가리키는 원래 커밋"
+
+[[record]]
+glob = "stt-scratch/reports/followup/*.json"
+keys = ["git_head"]
+component = "stt-scratch"
+what = "stt-scratch 후속 측정 기록이 남긴 측정 코드 커밋"
+
+[[record]]
+glob = "stt-scratch/reports/final/zeroth_anchor_notation.json"
+keys = ["commit"]
+component = "stt-scratch"
+what = "stt-scratch 사후 분석 기록이 남긴 입력 파일(whisper-ko-ft 리포트)의 출처 커밋"
+
+[[record]]
+glob = "whisper-ko-ft/reports/*/*.json"
+keys = ["commit"]
+component = "whisper-ko-ft"
+what = "whisper-ko-ft 측정 리포트의 요약이 남긴 측정 코드 커밋(앞 7자)"
+
+# ---------------------------------------------------------------------------------------------
+# 규칙 커밋 → 결과 커밋
+# ---------------------------------------------------------------------------------------------
+
+[[pair]]
+id = "first-page-lora-example"
+rule = "51616d5"
+result = "a6fff10"
+where = "README.md"
+what = "첫 화면이 예로 드는 whisper-ko-ft LoRA 파인튜닝 수치: 규칙 커밋(2026-09-18) → 결과 커밋(2026-09-19)"
+
+[[pair]]
+id = "whisper-ko-ft-retry-decoding"
+rule = "146cc68"
+result = "d681a44"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "whisper-ko-ft 재시도 디코딩과 출력 숫자 변환 실험(2026-10-04 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "whisper-ko-ft-qwen3-asr-baseline"
+rule = "1f0caa9"
+result = "f6ba516"
+where = "whisper-ko-ft/docs/experiments.md"
+what = "whisper-ko-ft가 다른 기준 모델 Qwen3-ASR-1.7B를 학습 없이 잰 실험(2026-10-04 결과): 규칙 커밋 → fp32 점검과 측정 코드 커밋"
+
+[[pair]]
+id = "call-summary-cites-asr-baseline-first"
+rule = "1f0caa9"
+result = "809ebce"
+where = "call-summary/docs/experiments.md"
+what = "call-summary가 인식기를 바꾸는 근거로 인용한 whisper-ko-ft의 Qwen3-ASR 실험: 규칙 커밋 → 결과 커밋 둘 가운데 첫째"
+
+[[pair]]
+id = "call-summary-cites-asr-baseline-second"
+rule = "1f0caa9"
+result = "2070fd4"
+where = "call-summary/docs/experiments.md"
+what = "call-summary가 인식기를 바꾸는 근거로 인용한 whisper-ko-ft의 Qwen3-ASR 실험: 규칙 커밋 → 결과 커밋 둘 가운데 둘째"
+
+[[pair]]
+id = "call-summary-speech-condition-v2"
+rule = "ac9a670"
+result = "08b3a1f"
+where = "call-summary/docs/experiments.md"
+what = "call-summary 음성 조건 v2(운송장번호 읽기 고침, 2026-10-04 결과): 규칙 커밋 → 코드·데이터 커밋"
+
+[[pair]]
+id = "call-summary-judge-calibration"
+rule = "2455fea"
+result = "7eeda02"
+where = "call-summary/docs/experiments.md"
+what = "call-summary 요약 판정 재보정의 판정 모델 보정(2026-10-09 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "support-agent-guard-cause-check"
+rule = "982c84e"
+result = "48e309f"
+where = "support-agent/docs/experiments.md"
+what = "support-agent 가드 실험의 원인 확인 측정(2026-11-03 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "support-agent-prompt-injection-tasks"
+rule = "ed88afc"
+result = "3554236"
+where = "support-agent/docs/experiments.md"
+what = "support-agent 프롬프트 주입 과제 묶음 측정(2026-11-03 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "support-agent-read-tool-output"
+rule = "cb3e65e"
+result = "8f9140f"
+where = "support-agent/docs/experiments.md"
+what = "support-agent 읽기 도구 출력 실험(주문 조회에 배송 시각, 2026-11-03 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "voice-translator-regex-cache-latency"
+rule = "0fc10fd"
+result = "1f67dbf"
+where = "voice-translator/docs/experiments.md"
+what = "voice-translator 한국어 합성 전처리의 정규식 캐시 지연 재측정: 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "voice-translator-mbr-decoding"
+rule = "2939e6b"
+result = "a4a4b2b"
+where = "voice-translator/docs/experiments.md"
+what = "voice-translator 번역 디코딩 시험(n-best에서 문장 chrF MBR로 고르기, 2026-11-03 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "voice-translator-speech-level-postprocess"
+rule = "19f7ce4"
+result = "a4a4b2b"
+where = "voice-translator/docs/experiments.md"
+what = "voice-translator 영→한 말투 일관성 후처리 시험(2026-11-03 결과): 규칙 커밋 → 측정 코드 커밋"
+
+[[pair]]
+id = "stt-scratch-threshold-before-main-run"
+rule = "3dc3a1b"
+result = "df73059"
+where = "stt-scratch/docs/experiments.md"
+what = "stt-scratch 주 모델 학습(2026-10-11 시작): 선택 임계의 계산을 담아 측정 전에 커밋한 sweep 스크립트 → 주 모델 학습을 시작한 코드 커밋"

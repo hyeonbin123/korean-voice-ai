@@ -11,6 +11,7 @@
     4. 잠금 읽기: lock_versions, 읽을 수 없는 잠금, package-lock.json, 작업 트리와 무관함, git 설정(log.follow)과 무관함.
     5. 등록 파일의 꼴: 읽을 수 없으면 멈추고, 항목의 꼴 오류는 그 항목의 문제로 알린다.
     6. 명령줄: 종료 코드와 출력 꼴, 파이프로 나가는 UTF-8 출력, 읽기만 한다는 것.
+    7. 이 저장소의 실제 등록: 등록한 base가 합치기 전 저장소의 잠금과 같고, 이 저장소의 잠금 일곱이 등록과 맞는다.
 
 시험용 저장소는 잠금 파일을 들인 커밋 → 판을 올린 커밋 → 무관한 커밋을 쌓아 만든다(build_world). git으로 저장소를 만드는
 일이 시험 시간의 대부분이라, 같은 잠금 글로 만드는 저장소는 모듈 범위로 한 번만 만들어 두고(Prototypes) 시험마다 쓴다.
@@ -18,8 +19,8 @@
 - share_world / shared_world: 원본을 그대로 나눠 쓴다. 저장소는 읽기만 하고, 등록 파일만 시험마다 임시 폴더에 써서
   --registry로 준다. 원본이 고쳐지면 모듈이 끝날 때 알아챈다.
 커밋 시각은 환경 변수로 고정해 날짜 시험이 실행하는 날과 상관없고 복사본의 커밋 해시가 원본과 같다. 등록 파일은 시험마다
-저장소의 실제 커밋 해시로 만든다. 이 저장소 자신의 잠금 파일을 읽는 시험은 이 파일에 없다(이 저장소의 실제 등록이 들어올
-때 그 등록과 함께 둔다).
+저장소의 실제 커밋 해시로 만든다. 이 저장소 자신의 등록(tools/locks.toml)과 잠금을 읽는 시험은 맨 끝 구역의 둘뿐이고, 그
+둘은 저장소를 읽기만 한다.
 """
 
 import copy
@@ -35,6 +36,7 @@ from pathlib import Path
 import check_lock_drift
 import pytest
 from check_lock_drift import check, load_registry, lock_versions, main
+from conftest import REPO
 
 # 이 파일은 <저장소>/tools/tests/에 있다. parents[1] = tools. 도구를 스크립트로 직접 돌리는 시험이 쓴다.
 TOOLS = Path(__file__).resolve().parents[1]
@@ -1319,3 +1321,54 @@ def test_output_is_utf8_when_piped(shared_world):
     lines = done.stdout.decode("utf-8").splitlines()
     assert lines[0].endswith(f"date - YYYY-MM-DD 꼴이 아니다: 2026{minus}03{minus}02")
     assert lines[-1] == "잠금 1개, 문제 1개"
+
+
+# ---------------------------------------------------------------------------------------------
+# 7. 이 저장소의 실제 등록
+# ---------------------------------------------------------------------------------------------
+#
+# 아래 두 시험은 시험용 저장소가 아니라 이 저장소 자신(tools/locks.toml과 HEAD의 이력)을 읽고, 읽기만 한다. 태그 archive/<이름>과
+# 전체 이력이 있어야 해서, 얕은 체크아웃이나 태그를 받지 않은 체크아웃에서는 건너뛰지 않고 실패한다(tools/tests/test_docs.py의
+# 실제 저장소 시험과 같은 관습: 읽지 못했는데 통과하는 길을 두지 않는다). 이 시험을 돌리는 CI는 전체 이력과 태그를 받는다
+# (actions/checkout의 fetch-depth: 0).
+
+# 등록한 잠금 → (합치기 전 저장소의 이름, 그 저장소 안의 옛 경로). 이름은 태그 archive/<이름>과 같다: 그 태그가 합친 시점의 그
+# 저장소 마지막 커밋이다. 구성 요소 다섯의 잠금 여섯이다. e2e/uv.lock은 이 저장소에서 처음 만든 잠금이라 합치기 전 저장소가
+# 없어 이 표에 없다.
+ORIGINAL_LOCKS = {
+    "whisper-ko-ft/uv.lock": ("whisper-ko-ft", "uv.lock"),
+    "stt-scratch/uv.lock": ("stt-scratch", "uv.lock"),
+    "call-summary/uv.lock": ("call-summary", "uv.lock"),
+    "support-agent/uv.lock": ("support-agent", "uv.lock"),
+    "voice-translator/backend/uv.lock": ("voice-translator", "backend/uv.lock"),
+    "voice-translator/frontend/package-lock.json": ("voice-translator", "frontend/package-lock.json"),
+}
+
+
+def test_registry_bases_are_the_original_locks():
+    # 폴더째 옮겨 들인 잠금은 합치기 전 저장소의 것과 한 바이트도 다르면 안 된다. 등록한 base(들일 때의 blob)가 태그 archive/<이름>에서
+    # 옛 경로로 읽은 blob과 같으면 그렇다(도구의 규칙 2가 added 커밋에서의 blob이 base와 같음을 보므로, 둘을 이으면 옮긴 커밋의
+    # 잠금이 옛 저장소의 잠금과 같다). 등록은 이 저장소의 실제 tools/locks.toml을 읽어 쓰고 값을 여기 다시 적지 않는다.
+    registered = {lock.path: lock for lock in load_registry(REPO / "tools" / "locks.toml")}
+    for path, (name, old_path) in ORIGINAL_LOCKS.items():
+        assert path in registered, f"tools/locks.toml에 {path}가 없다"
+        try:
+            original = git(REPO, "rev-parse", f"archive/{name}:{old_path}")
+        except subprocess.CalledProcessError as error:
+            pytest.fail(
+                f"archive/{name}:{old_path}를 읽을 수 없다. 태그와 전체 이력이 있어야 한다"
+                f"(얕은 복제는 git fetch --unshallow, 태그는 git fetch --tags): {error.stderr.strip()}"
+            )
+        assert registered[path].base == original, (
+            f"{path}의 base {registered[path].base}가 archive/{name}:{old_path}의 {original}와 다르다"
+        )
+
+
+def test_repository_locks_match_the_registry(capsys):
+    # 이 저장소의 HEAD에서 추적되는 잠금 일곱이 등록과 맞는다: 등록하지 않은 잠금이나 변경이 없고, 등록한 갱신의 판 변경이
+    # 실제와 같다. 인자 없이 도구를 돌릴 때와 같은 검사다(기본 저장소 뿌리와 기본 등록). 이력을 읽을 수 없으면 종료 코드 2가
+    # 나와 이 시험이 실패한다. 새 잠금을 등록하면 아래 개수도 함께 고친다.
+    code = main(["--repo", str(REPO)])
+    captured = capsys.readouterr()
+    assert code == 0, captured.out + captured.err
+    assert captured.out.splitlines()[-1] == "잠금 7개, 문제 0개"
