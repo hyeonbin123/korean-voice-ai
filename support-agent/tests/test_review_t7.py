@@ -11,14 +11,14 @@
 
 from __future__ import annotations
 
-# threading: 동시 결정과 동시 턴을 흉내 낸다. TestClient: FastAPI 앱을 실제 서버 없이 부른다. test_service의
+# threading: 동시 결정과 동시 턴을 흉내 낸다. local_client: FastAPI 앱을 실제 서버 없이 서비스의 주소
+# (127.0.0.1)로 부르는 TestClient(test_service.py). test_service의
 # engine·seeded_template은 fixture라 import해 두어야 이 파일에서도 쓸 수 있다(F401·F811 경고는 그래서 끈다).
 import json
 import threading
 
 import pytest
 from conftest import NOW
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,6 +31,7 @@ from test_service import (
     ask_for_big_cancel,
     engine,  # noqa: F401 - fixture
     events_of,
+    local_client,
     make_client,
     order_status,
     say,
@@ -256,7 +257,7 @@ def test_turns_over_the_limit_are_turned_away(engine):  # noqa: F811
             return super().chat(*args, **kwargs)
 
     settings = Settings(max_concurrent_turns=1)
-    with TestClient(create_app(settings, provider=Slow(["네."]), engine=engine)) as client:
+    with local_client(create_app(settings, provider=Slow(["네."]), engine=engine)) as client:
         first, second = (client.post("/api/sessions").json()["session_id"] for _ in range(2))
         done: list[list] = []
         worker = threading.Thread(target=lambda: done.append(say(client, first, "안녕하세요")))
@@ -290,7 +291,7 @@ def test_speech_over_the_limit_is_turned_away(engine):  # noqa: F811
     settings = Settings(max_concurrent_speech=1)
     front_end = VoiceFrontEnd(Slow(), FakeListener())
     app = create_app(settings, provider=ScriptedProvider(["고장입니다."]), engine=engine, voice=front_end)
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with local_client(app, raise_server_exceptions=False) as client:
         session_id = client.post("/api/sessions").json()["session_id"]
         url = f"/api/sessions/{session_id}/speech"
         greeting = {"text": "안녕하세요"}  # 고정 첫 인사의 일부라 모델 답 없이도 합성 대상이다

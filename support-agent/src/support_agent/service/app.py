@@ -35,6 +35,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -200,6 +201,28 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.expose_openapi else None,
+    )
+
+    # Host 허용 목록(DNS 리바인딩 차단): Host 헤더가 settings.host_allow_list()(기본 127.0.0.1·localhost에
+    # SUPPORT_AGENT_ALLOWED_HOSTS로 더한 이름)에 없는 요청은 화면·정적 파일·API 어디로 가든, 없는 경로로 가는
+    # 요청이어도 경로와 본문을 보기 전에 400("Invalid host header")으로 돌려보낸다. 비교는 포트를 뗀 호스트
+    # 부분만 한다.
+    #
+    # 왜 필요한가: 이 서비스는 로그인 없는 고객 API와 공유 토큰 하나뿐인 관리자 API를 127.0.0.1에만 열어
+    # 쓰는데, 공격자 페이지의 이름을 공격자의 DNS가 127.0.0.1로 다시 풀면(DNS 리바인딩) 그 페이지의 fetch가
+    # 같은 출처 요청으로 이 포트에 닿는다. 같은 출처라 CORS 사전 요청이 없고 사용자 정의 헤더(X-Admin-Token)도
+    # 붙일 수 있다. 그 요청의 Host는 공격자의 이름이라 여기서 걸린다(docs/service.md "정한 것과 이유").
+    #
+    # 순서: Starlette는 나중에 등록한 미들웨어가 바깥에 온다. 이 미들웨어를 아래 보안 헤더 미들웨어보다 먼저
+    # 등록해 안쪽에 두므로, 이 미들웨어가 낸 400 응답에도 보안 헤더(CSP, nosniff, 프레임 금지, /api/는
+    # no-store)가 붙는다. 아래 422 처리기는 라우터 안의 요청 검증 오류만 받으므로 이 검사와 겹치지 않는다:
+    # Host가 틀린 요청은 거기까지 가지 못한다.
+    #
+    # www_redirect=False: Starlette 기본값은 목록에 `www.`가 붙은 이름이 있으면 그쪽으로 리다이렉트하는데 이
+    # 서비스에는 쓸 일이 없다. 와일드카드는 목록에 들어오지 못한다(Settings가 거절한다): `*` 하나가 이 검사를
+    # 통째로 끈다.
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=list(settings.host_allow_list()), www_redirect=False
     )
 
     # 모든 응답에 보안 헤더를 붙인다. setdefault라서 처리기가 직접 정한 헤더는 덮어쓰지 않는다.

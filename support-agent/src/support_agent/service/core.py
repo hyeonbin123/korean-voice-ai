@@ -255,6 +255,22 @@ class SessionNotFoundError(LookupError):
     pass
 
 
+# 세션 번호에 NUL 문자(0x00)가 든 요청은 DB에 묻지 않고 '없는 세션'으로 돌려보낸다(SessionNotFoundError →
+# 404). 요청 경로의 `%00`은 디코딩되어 이 문자로 처리기에 오는데, PostgreSQL의 text 값에는 NUL을 넣을 수
+# 없어서 PostgreSQL 드라이버(psycopg 3)는 그런 문자열을 쿼리 인자로 쓰려는 순간(서버로 보내기 전, 클라이언트
+# 쪽에서) DataError를 낸다. 웹 계층은 그 예외를 잡지 않아, 로그인 전의 누구나 요청 하나로 500과 트레이스백을
+# 낼 수 있었다(SQLite는 NUL이 든 인자도 받아 404로 끝나서 SQLite 위의 시험과 보안 스캔에는 잡히지 않았다).
+# 서비스가 만드는 번호는 `secrets.token_urlsafe`(영숫자와 `-`·`_`)라 NUL이 들어 있을 수 없으므로, 그런
+# 번호는 없는 세션이 맞고 '없는 세션은 404'라는 기존 계약이 그대로다. 경로 패턴으로 거절해 422를 내는 방식은
+# 쓰지 않았다: NUL이 든 번호만 404가 아닌 422가 되어 계약이 갈리고, `mcp-` 접두 번호도 관리자 조회 대상이라
+# 패턴이 번호의 모든 꼴을 알아야 한다. 번호를 DB에 묻는 서비스 메서드 두 곳(세션 행을 읽는 _row, 상태 열만
+# 읽는 session_status)에서 막으면 웹 계층의 모든 길(대화 조회, 글·음성 메시지, 답 읽어 주기, 관리자 조회)과
+# 웹 밖의 호출이 한꺼번에 지켜진다.
+def _refuse_a_session_id_with_nul(session_id: str) -> None:
+    if "\x00" in session_id:
+        raise SessionNotFoundError(session_id)
+
+
 # 닫힌 세션(handoff·closed)에 메시지가 옴. 예외 값이 세션 상태다.
 class SessionClosedError(RuntimeError):
     pass
@@ -404,8 +420,10 @@ class ChatService:
     # 있는지 확인하는 데 쓴다(app.py open_session). transcript는 대화 전체(state JSON. 시스템 프롬프트와 도구
     # 결과까지 들어 있어 세션이 길수록 커진다)와 승인 대기열까지 읽으므로, 상태 하나를 보려고 그것을 부르면
     # 턴마다 대화 길이에 비례한 읽기가 한 번 더 생긴다(2026-10-24까지 그랬다). 이 질의는 status 열 하나뿐이다.
-    # 없는 세션이면 SessionNotFoundError.
+    # 없는 세션이면 SessionNotFoundError. NUL이 든 번호는 DB에 묻기 전에 없는 세션으로 본다(위
+    # _refuse_a_session_id_with_nul).
     def session_status(self, session_id: str) -> str:
+        _refuse_a_session_id_with_nul(session_id)
         with Session(self.engine) as db_session:
             status = db_session.scalar(select(ChatSession.status).where(ChatSession.id == session_id))
         if status is None:
@@ -940,8 +958,10 @@ class ChatService:
             error_facts=self.config.errors == "E1",
         )
 
-    # 세션 행을 읽고, 없으면 SessionNotFoundError.
+    # 세션 행을 읽고, 없으면 SessionNotFoundError. NUL이 든 번호는 DB에 묻기 전에 없는 세션으로 본다(위
+    # _refuse_a_session_id_with_nul).
     def _row(self, db_session: Session, session_id: str) -> ChatSession:
+        _refuse_a_session_id_with_nul(session_id)
         row = db_session.get(ChatSession, session_id)
         if row is None:
             raise SessionNotFoundError(session_id)

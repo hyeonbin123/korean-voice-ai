@@ -173,6 +173,20 @@ def test_of_two_deciders_one_carries_the_write_out_on_postgresql(engine):
     assert order_status(engine, "O-10097") == "cancelled"
 
 
+# 경로의 세션 번호에 NUL(%00)이 있으면 PostgreSQL 드라이버(psycopg)는 그 문자열을 쿼리 인자로 쓰려는
+# 순간(서버로 보내기 전, 클라이언트 쪽에서) DataError를 낸다. 서비스가 이 예외를 잡지 않아 로그인 전의
+# 누구나 500과 트레이스백을 낼 수 있었다. SQLite는 NUL이 든 인자를 받아 '없는 세션'(404)으로 끝나서, SQLite
+# 위의 시험과 보안 스캔(모두 SQLite 오프라인 앱)에는 잡히지 않았다. 이제 그런 번호는 없는 세션(404)이다.
+# make_client의 클라이언트는 처리되지 않은 예외를 시험으로 다시 던지므로, 500이 나면 이 시험이 DataError로
+# 실패한다. 같은 확인을 PostgreSQL 서버 없이 하는 시험은 tests/test_session_id_nul.py다.
+def test_a_session_id_with_a_nul_is_an_unknown_session_on_postgresql(engine):
+    with make_client(engine, []) as client:
+        for path in ("/api/sessions/%00abc", "/api/sessions/abc%00"):
+            assert client.get(path).status_code == 404, path
+            assert client.post(f"{path}/messages", json={"text": "안녕하세요"}).status_code == 404, path
+        assert client.get("/api/admin/sessions/%00abc", headers=ADMIN).status_code == 404
+
+
 # ---------------------------------------------------------------- 두 세션이 같은 순간에 쓰기 (2026-10-15)
 # 쓰기 도구의 행 잠금(주문 → 고객 순)과 재고 조건부 갱신을 실제 PostgreSQL의 두 트랜잭션으로 확인한다.
 # 방법: 첫 호출을 on_success 훅 안에서(변경을 flush해 행 잠금을 쥔 채) 멈춰 두고, 둘째 호출을 시작해 1초 둔 뒤

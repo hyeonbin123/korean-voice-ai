@@ -66,6 +66,18 @@ ADMIN = {"X-Admin-Token": "test-token"}
 BIG = ("강정우", "01000006189", "O-10097", 108_200)  # 승인 기준 이상인, 취소할 수 있는 주문
 SMALL = ("정예준", "01000009005", "O-90005", 89_100)
 
+# 서비스는 Host 헤더가 허용 목록(기본 127.0.0.1·localhost)에 없으면 400으로 거절한다(docs/service.md
+# "정한 것과 이유"). TestClient의 기본 Host인 `testserver`는 목록 밖이라 모든 요청이 400이 되므로, 시험
+# 클라이언트는 서비스가 실제로 듣는 주소로 부른다. 목록에 `testserver`를 더하는 대신 클라이언트를 맞추는
+# 것이라, 시험은 서비스의 기본 설정 그대로를 지난다.
+LOCAL_URL = "http://127.0.0.1:8062"
+
+
+# 앱을 LOCAL_URL로 부르는 TestClient. 나머지 인자는 TestClient에 그대로 간다. 이 파일과 test_review_t7.py,
+# test_postgres.py의 클라이언트는 모두 이 길로 만든다.
+def local_client(app, **kwargs) -> TestClient:
+    return TestClient(app, base_url=LOCAL_URL, **kwargs)
+
 
 # 본인 확인 → 단순 변심 취소, 두 도구 호출로 된 대본 앞부분.
 def verify_and_cancel(who: tuple) -> list:
@@ -98,7 +110,7 @@ def engine(seeded_template, tmp_path):
 # 관리자 토큰과 대본 제공자를 넣은 앱의 테스트 클라이언트. 다른 설정은 키워드로 덮어쓴다.
 def make_client(engine, script, **overrides) -> TestClient:
     settings = Settings(admin_token="test-token", **overrides)
-    return TestClient(create_app(settings, provider=ScriptedProvider(script), engine=engine))
+    return local_client(create_app(settings, provider=ScriptedProvider(script), engine=engine))
 
 
 # SSE 응답 본문을 (이벤트 이름, 데이터) 목록으로 푼다. 응답은 200이고 text/event-stream이어야 한다.
@@ -216,7 +228,7 @@ def test_the_think_setting_reaches_the_ollama_request(engine, monkeypatch, overr
         lambda *args, **kwargs: real(*args, transport=httpx.MockTransport(server), **kwargs),
     )
     settings = Settings(admin_token="test-token", **overrides)
-    with TestClient(create_app(settings, engine=engine)) as client:
+    with local_client(create_app(settings, engine=engine)) as client:
         assert client.get("/healthz").json()["think"] == ("off" if think is False else "omit")
         session_id = client.post("/api/sessions").json()["session_id"]
         assert dict(say(client, session_id, "안녕하세요"))["reply"]["text"] == "무엇을 도와드릴까요?"
@@ -301,7 +313,7 @@ def test_the_keep_alive_setting_reaches_every_ollama_request(engine, monkeypatch
         lambda *args, **kwargs: real(*args, transport=httpx.MockTransport(server), **kwargs),
     )
     env = {"SUPPORT_AGENT_PRELOAD": "1"} | ({} if value is None else {"SUPPORT_AGENT_KEEP_ALIVE": value})
-    with TestClient(create_app(Settings.from_env(env), engine=engine)) as client:
+    with local_client(create_app(Settings.from_env(env), engine=engine)) as client:
         client.app.state.preload_thread.join(5)
         session_id = client.post("/api/sessions").json()["session_id"]
         assert dict(say(client, session_id, "안녕하세요"))["reply"]["text"] == "무엇을 도와드릴까요?"
@@ -372,7 +384,7 @@ def test_preload_runs_once_in_the_background_when_the_service_makes_the_provider
     assert app_module.log.name == "uvicorn.error"
     ollama = OllamaStandIn(hold=True)
     monkeypatch.setattr(app_module, "OllamaProvider", ollama)
-    with TestClient(create_app(Settings(preload=True, keep_alive="24h"), engine=engine)) as client:
+    with local_client(create_app(Settings(preload=True, keep_alive="24h"), engine=engine)) as client:
         assert ollama.started.wait(5)
         assert client.get("/healthz").status_code == 200  # 예열이 끝나기 전
         assert server_log == []
@@ -391,14 +403,14 @@ def test_preload_runs_once_in_the_background_when_the_service_makes_the_provider
 def test_no_preload_when_it_is_off_or_the_provider_is_not_the_services_own(engine, monkeypatch, tmp_path):
     ollama = OllamaStandIn()
     monkeypatch.setattr(app_module, "OllamaProvider", ollama)
-    with TestClient(create_app(Settings(), engine=engine)) as client:
+    with local_client(create_app(Settings(), engine=engine)) as client:
         assert client.app.state.preload_thread is None
     given = create_app(Settings(preload=True), provider=ScriptedProvider([]), engine=engine)
-    with TestClient(given) as client:
+    with local_client(given) as client:
         assert client.app.state.preload_thread is None
     monkeypatch.setenv("SUPPORT_AGENT_DATABASE_URL", f"sqlite:///{(tmp_path / 'offline.db').as_posix()}")
     monkeypatch.setenv("SUPPORT_AGENT_PRELOAD", "1")
-    with TestClient(create_offline_app()) as client:
+    with local_client(create_offline_app()) as client:
         assert client.app.state.preload_thread is None
     assert (len(ollama.made), ollama.preloads) == (1, 0)  # 첫 앱만 제공자를 만들었고, 아무도 올리지 않았다
 
@@ -415,7 +427,7 @@ def test_no_preload_when_it_is_off_or_the_provider_is_not_the_services_own(engin
 def test_a_failed_preload_is_logged_and_the_service_still_answers(engine, monkeypatch, server_log, error):
     ollama = OllamaStandIn(fail=error)
     monkeypatch.setattr(app_module, "OllamaProvider", ollama)
-    with TestClient(create_app(Settings(preload=True), engine=engine)) as client:
+    with local_client(create_app(Settings(preload=True), engine=engine)) as client:
         client.app.state.preload_thread.join(5)
         assert client.get("/healthz").status_code == 200
     assert ollama.preloads == 1
@@ -526,7 +538,8 @@ def test_a_failing_model_gives_a_fallback_reply_and_keeps_the_session_usable(eng
             return super().chat(*args, **kwargs)
 
     settings = Settings(admin_token="test-token")
-    with TestClient(create_app(settings, provider=Broken(["다시 말씀해 주세요."]), engine=engine)) as client:
+    app = create_app(settings, provider=Broken(["다시 말씀해 주세요."]), engine=engine)
+    with local_client(app) as client:
         session_id = client.post("/api/sessions").json()["session_id"]
         events = say(client, session_id, "안녕하세요")
         assert [n for n, _ in events][-3:] == ["error", "reply", "end"]
@@ -564,7 +577,7 @@ def test_a_lone_surrogate_in_the_body_is_a_client_error(engine):
     front_end = VoiceFrontEnd(FakeSpeaker(), FakeListener())
     app = create_app(settings, provider=ScriptedProvider(["네."]), engine=engine, voice=front_end)
     as_json = {"Content-Type": "application/json"}
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with local_client(app, raise_server_exceptions=False) as client:
         session_id = client.post("/api/sessions").json()["session_id"]
         body = b'{"text": "\\ud800 marker"}'
         answers = {
@@ -816,7 +829,7 @@ def test_the_admin_api_needs_its_token(engine):
         assert client.get("/api/admin/approvals").status_code == 401
         assert client.get("/api/admin/approvals", headers={"X-Admin-Token": "wrong"}).status_code == 401
         assert client.get("/api/admin/approvals", headers=ADMIN).json() == []
-    with TestClient(create_app(Settings(), provider=ScriptedProvider([]), engine=engine)) as client:
+    with local_client(create_app(Settings(), provider=ScriptedProvider([]), engine=engine)) as client:
         assert client.get("/api/admin/approvals", headers=ADMIN).status_code == 503
 
 
@@ -937,7 +950,7 @@ def test_a_held_turn_keeps_what_the_model_looked_up_and_asks(engine):
         ]
     )
     settings = Settings(admin_token="test-token")
-    with TestClient(create_app(settings, provider=provider, engine=engine)) as client:
+    with local_client(create_app(settings, provider=provider, engine=engine)) as client:
         session_id, events = ask_for_big_cancel(client)
         replies = [d["text"] for n, d in events if n == "reply"]
         assert dict(say(client, session_id, "언제 처리되나요?"))["reply"]["text"] == later
@@ -1259,7 +1272,7 @@ def held_then(ending: str):
 def test_a_held_write_is_announced_however_the_turn_ends(engine, ending):
     provider, overrides, lead, status = held_then(ending)
     settings = Settings(admin_token="test-token", **overrides)
-    with TestClient(create_app(settings, provider=provider, engine=engine)) as client:
+    with local_client(create_app(settings, provider=provider, engine=engine)) as client:
         session_id, events = ask_for_big_cancel(client)
         transcript = client.get(f"/api/sessions/{session_id}").json()
         approvals = client.get("/api/admin/approvals", headers=ADMIN).json()
@@ -1332,7 +1345,8 @@ class FakeListener:
 def voice_client(engine, script, **overrides) -> TestClient:
     settings = Settings(admin_token="test-token", **overrides)
     front_end = VoiceFrontEnd(FakeSpeaker(), FakeListener())
-    return TestClient(create_app(settings, provider=ScriptedProvider(script), engine=engine, voice=front_end))
+    app = create_app(settings, provider=ScriptedProvider(script), engine=engine, voice=front_end)
+    return local_client(app)
 
 
 # 음성 메시지는 heard 이벤트로 인식 결과를 먼저 보낸 뒤 글로 보낸 메시지와 같은 길을 간다. 음성을 켜면
@@ -1457,7 +1471,7 @@ def test_the_api_description_is_served_only_on_request(engine):
 # 이름·전화로 본인 확인 → 취소 → 남의 주문 조회는 도구가 거절. 보안 스캔과 화면 작업을 GPU 없이 하는 바탕이다.
 def test_the_offline_stand_in_drives_the_real_web_layer(engine):
     settings = Settings(admin_token="test-token")
-    with TestClient(create_app(settings, provider=OfflineProvider(), engine=engine)) as client:
+    with local_client(create_app(settings, provider=OfflineProvider(), engine=engine)) as client:
         session_id = client.post("/api/sessions").json()["session_id"]
         assert "성함" in dict(say(client, session_id, "안녕하세요"))["reply"]["text"]
         events = say(client, session_id, "정예준이고 010-0000-9005입니다.")
@@ -1474,7 +1488,7 @@ def test_the_offline_stand_in_drives_the_real_web_layer(engine):
 def test_the_offline_app_answers_the_voice_endpoints_without_speech_models(tmp_path, monkeypatch):
     monkeypatch.setenv("SUPPORT_AGENT_DATABASE_URL", f"sqlite:///{(tmp_path / 'offline.db').as_posix()}")
     monkeypatch.setenv("SUPPORT_AGENT_VOICE", "1")
-    with TestClient(create_offline_app()) as client:
+    with local_client(create_offline_app()) as client:
         assert client.get("/healthz").json()["voice"] is True
         session_id = client.post("/api/sessions").json()["session_id"]
         url = f"/api/sessions/{session_id}"
@@ -1497,7 +1511,7 @@ def test_the_service_repairs_what_was_heard_before_the_agent_reads_it(engine):
     settings = Settings(admin_token="test-token")
     front_end = VoiceFrontEnd(FakeSpeaker(), FakeListener(), normalizer=repair_heard)
     app = create_app(settings, provider=ScriptedProvider(script), engine=engine, voice=front_end)
-    with TestClient(app) as client:
+    with local_client(app) as client:
         session_id = client.post("/api/sessions").json()["session_id"]
         recording = "정예준이고 공일공 공공공공 구공공오입니다".encode()
         events = events_of(client.post(f"/api/sessions/{session_id}/voice", content=recording))

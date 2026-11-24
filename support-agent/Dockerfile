@@ -4,7 +4,11 @@
 # 기본 빌더. 옛 빌더 DOCKER_BUILDKIT=0으로는 빌드되지 않는다).
 FROM python:3.11-slim
 
-COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /usr/local/bin/uv
+# uv 이미지의 판. uv 0.13.4 미만은 번들한 루트 인증서 묶음이 공개 권고(PYSEC-2026-4321, 0.13.4에서 고쳐짐)에 든다.
+# 이 이미지의 uv는 빌드 때 패키지를 내려받으므로 그 영향 안에 있어 0.13.6으로 둔다. 이 파일의 다른 고정(위 FROM)처럼
+# 태그만 적는다. 빌드에서 uv를 부르는 곳은 아래 두 `uv sync --frozen`뿐이다: uv.lock에 적힌 패키지만 설치하고 잠금
+# 밖의 것을 받는 `uvx`나 `uv pip install`은 없다(tests/test_deploy_config.py가 확인한다).
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
 # UV_LINK_MODE=copy: 캐시 마운트는 이미지와 다른 파일 시스템이라 uv가 캐시에서 하드 링크를 걸 수 없어 복사한다.
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 PYTHONUNBUFFERED=1 PYTHONUTF8=1
 

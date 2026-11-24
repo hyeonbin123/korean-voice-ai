@@ -5,6 +5,9 @@
 # 않는지(2026-11-05부터), Docker 이미지가 uv 내려받기 캐시를 이미지 레이어에 남기지 않고 uvicorn 접근 로그를
 # 끄는지, compose의 앱 컨테이너가 권한을 줄여 뜨는지, 문서에 적힌 실제 서비스 실행 명령도 접근 로그를 끄는지,
 # 문서의 설정 목록이 서비스 설정(Settings)의 필드를 빠짐없이 적는지.
+# 2026-11-24부터는 이미지의 uv가 인증서 묶음 권고를 고친 판 이상인지, 배포 설정(HEALTHCHECK, 보안 스캔 설정)이
+# 서비스를 부르는 주소가 Host 허용 목록 안에 있는지, compose와 .env.example이 그 목록에 이름을 더하는 설정을
+# 넘기는지도 본다.
 # [왜 중요한가] 고객 쪽 API는 세션 id를 경로에 넣고(/api/sessions/{id}/…) 그 id가 고객의 유일한 열쇠다. 접근
 # 로그에 경로가 남으면 로그를 읽을 수 있는 누구나 그 상담을 이어 갈 수 있다(docs/service.md "세션 id가 곧
 # 열쇠다"). 태그로 부른 액션은 누가 태그를 다른 커밋으로 옮기면 그 코드가 CI에서 돈다. 이런 설정은 한 줄을
@@ -157,6 +160,25 @@ def test_the_image_keeps_the_uv_cache_out_of_its_layers_and_logs_no_request_path
     assert "--no-access-log" in args
 
 
+# 이미지에 넣는 uv(Dockerfile의 `COPY --from=ghcr.io/astral-sh/uv:…`)는 0.13.4 이상이다. uv 0.13.4 미만은
+# 번들한 루트 인증서 묶음이 공개 권고(PYSEC-2026-4321)에 든다(0.13.4에서 고쳐졌다). 이 이미지의 uv는 빌드 때
+# 패키지를 내려받으므로 그 영향 안에 있다. 태그는 `0.13.6`처럼 패치 번호까지 적는다: `0.8`처럼 덜 적은
+# 태그는 이미지를 받을 때마다 가리키는 판이 달라질 수 있어 하한을 지킬 수 없다. 빌드에서 uv를 부르는 줄은
+# 모두 `uv sync --frozen`이다: 잠금(uv.lock)을 다시 풀지 않고 그 파일의 패키지만 설치한다(`uvx`나 `uv pip
+# install`처럼 잠금 밖의 것을 받는 단계가 없다).
+def test_the_image_uses_a_uv_release_that_has_the_certificate_bundle_fix():
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    image = re.search(r"^COPY --from=ghcr\.io/astral-sh/uv:(\d+)\.(\d+)\.(\d+)(?:@\S+)?\s", text, re.M)
+    assert image, "uv 이미지 태그를 major.minor.patch로 적지 않았다"
+    assert tuple(int(part) for part in image.groups()) >= (0, 13, 4), image.group(0)
+    uv_runs = [
+        line
+        for line in _dockerfile_instructions(text)
+        if line.startswith("RUN ") and re.search(r"\buvx?\b", line)
+    ]
+    assert uv_runs and all("uv sync --frozen" in run for run in uv_runs), uv_runs
+
+
 # compose의 앱 컨테이너: 모든 Linux capability를 빼고(비루트 uid 10001이 8000번에서 듣는 데 필요한 것이 없다),
 # setuid 실행 파일로 권한을 얻지 못하게 하고, 루트 파일 시스템은 읽기 전용(쓸 곳은 tmpfs /tmp뿐), 메모리는
 # 2 GB까지. DB 컨테이너는 postgres 이미지의 시작 스크립트가 권한을 바꾸므로 그대로 둔다.
@@ -169,6 +191,35 @@ def test_compose_runs_the_app_with_fewer_privileges():
     assert app.get("read_only") is True
     assert "/tmp" in app.get("tmpfs", [])
     assert app.get("deploy", {}).get("resources", {}).get("limits", {}).get("memory") == "2g"
+
+
+# 서비스는 Host 헤더가 허용 목록(기본 127.0.0.1·localhost)에 없으면 400으로 거절한다(docs/service.md "정한
+# 것과 이유"). 서비스를 부르는 배포 설정의 주소가 그 목록 안에 있어야 이 방어가 배포를 막지 않는다: 컨테이너
+# 안 HEALTHCHECK(실패하면 컨테이너가 재시작된다), 보안 스캔 도구(HawkScan 설정, ZAP 실행 도우미·계획)의 기본
+# 대상. 그리고 compose가 여는 포트는 모두 127.0.0.1에만 묶여 있다(허용 목록의 전제).
+def test_the_addresses_the_deployment_files_call_are_in_the_default_host_list():
+    allowed = set(Settings().host_allow_list())
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    health = set(re.findall(r"urlopen\('http://([^/:']+)", dockerfile))
+    assert health and health <= allowed, health
+    for name in ("stackhawk.yml", "zap/run_zap.sh", "zap/automation.yaml"):
+        hosts = set(re.findall(r"http://([A-Za-z0-9.-]+)", (ROOT / name).read_text(encoding="utf-8")))
+        assert hosts and hosts <= allowed, (name, hosts)
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    ports = [port for service in compose["services"].values() for port in service.get("ports", [])]
+    assert ports and all(str(port).startswith("127.0.0.1:") for port in ports), ports
+
+
+# 서비스의 Host 허용 목록에 이름을 더하는 설정(`ALLOWED_HOSTS`)이 Docker로 띄운 서비스에도 닿는다: compose가
+# `.env`의 값을 앱 환경 변수로 넘기고(비어 있으면 빈 문자열 = 설정 안 함이라 기본 목록 그대로),
+# `.env.example`에 그 항목이 있다. compose는 파일에 적힌 변수만 `.env`에서 가져가므로 이 줄이 없으면
+# `.env`에 값을 적어도 앱은 모른다.
+def test_compose_and_the_env_example_pass_the_host_setting_through():
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    assert compose["services"]["app"]["environment"]["SUPPORT_AGENT_ALLOWED_HOSTS"] == "${ALLOWED_HOSTS:-}"
+    example = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    assert "ALLOWED_HOSTS=" in example
+    assert Settings.from_env({f"{PREFIX}ALLOWED_HOSTS": ""}).host_allow_list() == Settings().host_allow_list()
 
 
 # 문서(README.md, docs/*.md)에 적힌, 실제 고객을 받는 서비스(service.app:create_app)를 띄우는 uvicorn 명령은

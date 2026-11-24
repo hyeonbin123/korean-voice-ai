@@ -1,7 +1,8 @@
 """공용 fixture: seed 생성기에 기대지 않는, 손으로 만든 아주 작은 데이터베이스."""
 
 # [파일 역할] 여러 테스트가 함께 쓰는 pytest fixture와 고정 시각을 둔다. 손으로 만든 아주 작은 쇼핑몰 DB(고객
-# 1명, 주소 1개, 상품 1개, 주문 2개)를 tiny_engine으로 제공한다.
+# 1명, 주소 1개, 상품 1개, 주문 2개)를 tiny_engine으로, 마이그레이션만 한 쇼핑몰이 빈 서비스 DB를
+# blank_service_engine으로 제공한다.
 # [왜 필요한가] seed 생성기(seed.py)와 무관한 DB라, 생성 데이터가 바뀌어도 도구·에이전트 루프·판정 테스트가
 # 흔들리지 않는다. 어떤 행이 있는지 한눈에 보이므로 테스트의 기대값을 이 파일만 보고 확인할 수 있다.
 # [연결] pytest가 tests/ 아래 테스트에 자동으로 fixture를 준다. test_agent.py, test_claims.py,
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from support_agent import db
 from support_agent.clock import KST
+from support_agent.service.bootstrap import prepare_database
 
 # 테스트의 '지금'. 도구와 규정은 실제 시계가 아니라 이 고정 시각(ctx.now)만 보므로, 반품 기한 같은 규정이 언제
 # 돌려도 같게 판정된다. 스모크 과제의 now, 서비스의 고정 시계와 같은 2026-09-14 10:00 KST다.
@@ -125,5 +127,26 @@ def tiny_engine():
     with Session(engine) as session:
         add_tiny_rows(session)
         session.commit()
+    yield engine
+    engine.dispose()
+
+
+# 마이그레이션만 끝낸 서비스 DB(SQLite 파일)의 템플릿. 쇼핑몰 테이블은 비어 있다(생성 데이터를 복사하지
+# 않는다). 모듈마다 한 번 만들고 시험마다 복사해 쓴다.
+@pytest.fixture(scope="module")
+def blank_service_template(tmp_path_factory):
+    path = tmp_path_factory.mktemp("blank-service") / "template.db"
+    prepare_database(f"sqlite:///{path.as_posix()}", load_seed=False).dispose()
+    return path
+
+
+# 위 템플릿을 복사한 서비스 DB 엔진. 세션·감사 로그·승인 테이블만 있으면 되는 시험(요청의 Host 검사, 경로의
+# 세션 번호 처리처럼 쇼핑몰 데이터를 읽지 않는 것)에 쓴다. tests/test_service.py의 engine fixture는 생성
+# 데이터까지 복사한 템플릿을 쓰므로, 쇼핑몰 데이터가 필요한 시험은 그쪽을 쓴다.
+@pytest.fixture
+def blank_service_engine(blank_service_template, tmp_path):
+    path = tmp_path / "service.db"
+    path.write_bytes(blank_service_template.read_bytes())
+    engine = prepare_database(f"sqlite:///{path.as_posix()}", load_seed=False)
     yield engine
     engine.dispose()

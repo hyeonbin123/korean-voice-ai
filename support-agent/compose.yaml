@@ -41,6 +41,10 @@ services:
       # 늦다(docs/service.md "실행")
       SUPPORT_AGENT_KEEP_ALIVE: ${KEEP_ALIVE:-60m}
       SUPPORT_AGENT_PRELOAD: ${PRELOAD:-0}
+      # 서비스가 받는 Host 헤더의 허용 목록에 더할 이름(쉼표로 구분, service/settings.py의 allowed_hosts). 기본은
+      # 127.0.0.1과 localhost뿐이고 그 밖의 이름으로 오는 요청은 400이다(DNS 리바인딩 방어, docs/service.md "정한 것과
+      # 이유"). 비워 두면 기본 그대로다. 다른 이름(앞단 프록시의 이름 등)으로 접속해야 할 때만 .env에 적는다
+      SUPPORT_AGENT_ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

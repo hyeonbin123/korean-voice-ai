@@ -42,6 +42,55 @@ _THINK = {"on": True, "off": False, "omit": None}
 _KEEP_ALIVE_SECONDS = re.compile(r"[-+]?[0-9]+")
 _KEEP_ALIVE_DURATION = re.compile(r"[-+]?(0|(([0-9]+(\.[0-9]*)?|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)")
 
+# Host 헤더 허용 목록의 기본값: 이 PC의 루프백 이름. 브라우저는 주소창의 호스트를 Host 헤더에 그대로 싣고,
+# 서비스는 포트를 뗀 호스트 부분만 이 목록과 정확히 비교해 목록 밖이면 400을 돌려준다(app.py의
+# TrustedHostMiddleware). 왜 필요한가: 포트를 127.0.0.1에만 여는 것은 브라우저를 거치는 경로를 막지 못한다.
+# 공격자 페이지의 이름을 공격자의 DNS가 127.0.0.1로 다시 풀면(DNS 리바인딩) 그 페이지의 fetch가 같은 출처
+# 요청으로 이 포트에 닿고, 그 요청은 `Host: 공격자의 이름`으로 도착하므로 Host를 목록으로 걸러 그 경로를
+# 닫는다(docs/service.md "정한 것과 이유"). `[::1]`(IPv6 루프백 주소 표기)은 넣지 않는다: 잠금의 Starlette
+# 1.6.0은 Host에서 첫 `:` 앞만 읽어 `[::1]`이 어떤 목록 항목과도 같을 수 없다(이 저장소의 stt-scratch가
+# 쓰는 Starlette 1.7.0은 괄호를 보존해 읽는다). 맞지 않는 항목을 넣어 두면 읽는 사람이 되는 줄 안다.
+# `localhost`는 IPv6 루프백으로도 풀리므로 그 이름으로 접속하면 된다.
+DEFAULT_ALLOWED_HOSTS = ("127.0.0.1", "localhost")
+# ALLOWED_HOSTS 한 항목의 모양: 영문 소문자·숫자·하이픈·밑줄을 점으로 이은 이름(토막마다 63자 이하, 처음과
+# 끝은 영숫자). 밑줄은 DNS 규격이 금하지만 Docker 서비스 이름에 쓰일 수 있어 받는다(이 목록은 그 글자가
+# Host에 그대로 실려 올 때만 맞추므로 받아도 맞추는 범위가 넓어지지 않는다). 포트(`:`), 주소(`/`), 사용자
+# 정보(`@`), 괄호(IPv6 주소), 와일드카드(`*`), 공백은 이 모양에 없다.
+_HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?)*")
+# IPv4 주소: 점으로 이은 네 수(0~255, 앞에 0을 붙이지 않는다). 마지막 토막이 숫자뿐인 항목은 이 모양이어야
+# 한다.
+_OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+_IPV4 = re.compile(rf"(?:{_OCTET}\.){{3}}{_OCTET}")
+
+
+# ALLOWED_HOSTS의 한 항목을 검사해 Host 헤더에 실리는 꼴(소문자)로 돌려준다. 잘못된 항목은
+# ValueError(메시지는 영어다. pydantic이 ValidationError로 감싸 서비스가 시작할 때 보여 준다). 받지 않는
+# 것과 이유:
+# - 빈 항목: 쉼표 오타(`a.example,`)다. 조용히 넘기면 방어를 켰다고 믿고 쓴다
+# - 와일드카드(`*`, `*.example.com`): `*` 하나는 Host 검사를 통째로 끈다(Starlette가 그렇게 읽는다). 하위
+#   도메인 패턴도 범위를 하염없이 넓힐 수 있어(`*.com`) 받지 않고, 필요한 이름을 하나씩 적게 한다. 이 저장소의
+#   stt-scratch는 명령행 옵션이라 `*`(시작 경고와 함께)와 `*.example.com` 패턴을 받지만, 이 서비스는 값을
+#   환경 변수와 `.env`로 주고 시작 경고를 읽는 사람이 없을 수 있어 검사를 끄거나 넓히는 값은 받지 않는다
+# - 포트·http://·경로·사용자 정보·IPv6 주소: 서비스는 Host에서 포트를 뗀 이름만 비교하므로 그런 항목은 어떤
+#   요청과도 같을 수 없다. 조용히 아무것도 통과시키지 못하는 항목이 되는 대신 시작할 때 거절한다
+# - 마지막 토막이 숫자뿐인데 IPv4 주소가 아닌 이름(`192.168.0`, `127.000.000.001`): 오타다
+def _allowed_host(entry: str) -> str:
+    host = entry.strip().lower()
+    if not host:
+        raise ValueError("ALLOWED_HOSTS has an empty entry (a stray comma?)")
+    if "*" in host:
+        raise ValueError(
+            f"{entry!r}: wildcards are not accepted ('*' would switch the Host check off); list each name"
+        )
+    if len(host) > 253 or not _HOST_NAME.fullmatch(host):
+        raise ValueError(
+            f"{entry!r} is not a host name or an IPv4 address: write only the name, without a port, scheme, "
+            "path, user info, brackets or an IPv6 address"
+        )
+    if host.rsplit(".", 1)[-1].isdigit() and not _IPV4.fullmatch(host):  # 숫자로 끝나면 IPv4 주소여야 한다
+        raise ValueError(f"{entry!r} looks like an IPv4 address but is not one")
+    return host
+
 
 # 서비스 설정 한 묶음. 필드 기본값이 곧 시연용 기본 구성이다.
 # - database_url: 기본은 SQLite 파일(outputs/service.db). Compose는 PostgreSQL 주소를 넣는다
@@ -130,6 +179,13 @@ class Settings(BaseModel):
     # 돌려보낸다(app.py speak). 기본 2 = 하나는 합성 중, 하나는 그 뒤에 줄 서기(화면은 조각을 한 번에 하나씩만
     # 청한다). 0이면 모든 요청을 거절하게 되므로 받지 않는다(ge=1).
     max_concurrent_speech: int = Field(default=2, ge=1)
+    # Host 허용 목록에 더할 이름(쉼표로 구분한 호스트 이름이나 IPv4 주소). 기본은 비어 있어 목록은
+    # DEFAULT_ALLOWED_HOSTS 그대로다. 서비스를 127.0.0.1·localhost가 아닌 이름으로 불러야 할 때(앞단 프록시의
+    # 이름 등) 더한다. 환경 변수에서는 쉼표로 나눈 한 문자열이고(SUPPORT_AGENT_ALLOWED_HOSTS=a.example,b),
+    # 코드에서는 문자열이나 목록으로 준다. 값은 앞뒤 공백을 떼고 소문자로 맞추며 같은 이름은 한 번만 남긴다.
+    # 이름이나 IPv4 주소가 아닌 값(`*`와 하위 도메인 패턴, 포트, http://, 경로, IPv6 주소, 빈 항목)은 서비스가
+    # 시작할 때 거절한다(_allowed_host). 목록이 실제로 쓰이는 곳은 app.py의 Host 검사다(host_allow_list).
+    allowed_hosts: tuple[str, ...] = ()
 
     # THINK를 비워 두면 모델에 맞춰 채운다: 기본 모델(qwen3.5:4b)은 잰 그대로 "off", 다른 모델은 "omit"(보내지
     # 않음).
@@ -158,6 +214,23 @@ class Settings(BaseModel):
             "keep_alive must be whole seconds (3600, -1) or a duration with a unit (60m, 24h, 1h30m, -1m, 0)"
         )
 
+    # ALLOWED_HOSTS는 환경 변수에서 쉼표로 나눈 한 문자열로 온다. 문자열이면 쉼표로 나누고(공백뿐인 문자열은
+    # 항목이 없는 것), 이미 목록이면 그대로 둔다. mode="before"라서 tuple[str, ...] 검증 전에 문자열을
+    # 목록으로 바꾼다.
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def _split_allowed_hosts(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.split(",") if value.strip() else []
+        return value
+
+    # 항목마다 이름이나 IPv4 주소인지 시작할 때 본다(위 _allowed_host). 같은 이름을 두 번 적어도 한 번만
+    # 남기고 적은 순서는 지킨다.
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _allowed_hosts_are_plain_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(_allowed_host(entry) for entry in value))
+
     # OllamaProvider에 넘길 think 값(True/False/None). app.py의 create_app이 제공자를 만들 때 쓴다.
     def agent_think(self) -> bool | None:
         """OllamaProvider가 `think`로 보낼 값. None이면 아무것도 보내지 않는다."""
@@ -169,6 +242,13 @@ class Settings(BaseModel):
     def agent_keep_alive(self) -> str | int:
         """OllamaProvider가 `keep_alive`로 보낼 값."""
         return int(self.keep_alive) if _KEEP_ALIVE_SECONDS.fullmatch(self.keep_alive) else self.keep_alive
+
+    # 서비스가 Host 헤더로 받는 이름 전부: 기본 루프백 이름 뒤에 ALLOWED_HOSTS로 더한 것(중복 없이, 적은
+    # 순서대로). app.py의 create_app이 이 목록을 Host 검사 미들웨어에 넘긴다. 입력 없음, 출력은 소문자
+    # 이름의 튜플이다.
+    def host_allow_list(self) -> tuple[str, ...]:
+        """Host 헤더로 받는 이름. 이 밖의 Host가 실린 요청은 400이다."""
+        return tuple(dict.fromkeys((*DEFAULT_ALLOWED_HOSTS, *self.allowed_hosts)))
 
     # 도구와 규정이 보는 "쇼핑몰의 지금". 기본은 고정 시각(DEMO_NOW)이고, NOW=real일 때만 실제 UTC 시각이다.
     # 세션·감사 로그·승인 기록의 시각은 이것이 아니라 항상 실제 시각을 쓴다(core.py의 wall_clock,
