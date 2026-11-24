@@ -16,6 +16,11 @@ API 계약의 "서버 음성 없음" 경로도 테스트할 수 있다.
 
 import io
 import wave
+from fractions import Fraction
+
+# av(PyAV): 음성 검사의 프레임·패킷 수 상한 시험에 쓰는, 아주 작은 패킷이 많은 파일을 만든다(아래
+# one_sample_packets).
+import av
 
 # 실제 서비스와 같은 결과 형식(Transcript, SynthesizedAudio)과 예외 계층(ModelError, NoSpeechError,
 # UndecodableAudioError)을 써서 API가 가짜와 진짜를 똑같이 다루게 한다.
@@ -42,6 +47,30 @@ def silent_wav(duration_ms: int, sample_rate: int = SAMPLE_RATE) -> bytes:
         out.setsampwidth(2)
         out.setframerate(sample_rate)
         out.writeframes(b"\x00\x00" * (sample_rate * duration_ms // 1000))
+    return buffer.getvalue()
+
+
+# 표본 하나(16비트, 2바이트)짜리 PCM 패킷을 count개 담은 NUT 파일(48 kHz 모노). 패킷 하나가 프레임 하나로
+# 풀리므로, 소리는 30초보다 훨씬 짧은데 프레임만 아주 많은 업로드를 흉내 낸다(음성 검사의 프레임 수 상한
+# 시험). others를 주면 두 번째 음성 스트림에 같은 꼴의 패킷을 그만큼 더 담는다. 검사가 푸는 것은 첫 음성
+# 스트림이므로, 풀지 않는 스트림의 패킷도 세는지 보는 시험에 쓴다.
+# WAV는 쓸 수 없다: FFmpeg의 WAV 읽기는 파일을 정해진 크기(16 kHz 16비트면 1,024표본)로 잘라 패킷을 만들어,
+# 쓸 때 나눈 크기가 남지 않는다. NUT은 쓴 패킷 경계를 그대로 지킨다. 인코더를 거치지 않고 패킷을 직접 담는다.
+# 큰 고정 파일을 저장소에 넣지 않으려고 시험마다 이 함수로 만든다.
+def one_sample_packets(count: int, others: int = 0) -> bytes:
+    """표본 하나짜리 패킷 count개(첫 음성 스트림)와 others개(두 번째 음성 스트림, 0이면 없음)를 담은 NUT."""
+    buffer = io.BytesIO()
+    with av.open(buffer, "w", format="nut") as container:
+        plan = [(container.add_stream("pcm_s16le", rate=48_000, layout="mono"), count)]
+        if others:
+            plan.append((container.add_stream("pcm_s16le", rate=48_000, layout="mono"), others))
+        for stream, number in plan:
+            for index in range(number):
+                packet = av.Packet(b"\x00\x00")
+                packet.stream = stream
+                packet.pts = packet.dts = index
+                packet.time_base = Fraction(1, 48_000)
+                container.mux(packet)
     return buffer.getvalue()
 
 

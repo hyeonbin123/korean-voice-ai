@@ -66,6 +66,16 @@ router = APIRouter(prefix="/translate", tags=["translate"])
 # 한 마디 소리의 최대 바이트: 30초 × 16000표본/초 × 2바이트(16kHz 16비트) = 960,000바이트. HTTP API의 30초
 # 제한과 같다.
 MAX_UTTERANCE_BYTES = 30 * 16_000 * 2
+# 글 메시지(JSON)를 json.loads에 넘기기 전에 보는 길이 상한(받은 문자열의 글자 수). uvicorn은 압축
+# (permessage-deflate)을 푼 메시지를 통째로 넘기므로 선로에서 작은 메시지도 풀면 클 수 있고, 그런 글을 이벤트
+# 루프에서 json.loads로 풀면 그동안 서버 전체가 멈췄다(16MiB 첫 메시지 하나에 약 2초, docs/security.md
+# 2026-11-24 덧붙임). 값은 실제 메시지에서 정했다: 첫 메시지는 가장 긴 것(두 사람 대화의 재연결: access 토큰
+# 269자와 16자리 previous_id)이 364자(화면의 JSON.stringify)·373자(측정 도구의 json.dumps)라 그 열 배 남짓인
+# 4,096자, 제어 메시지는 가장 긴 것(16자리 id의 previous)이 58자라 그 열일곱 배쯤인 1,024자다. 넘으면 계약 밖
+# 메시지로 보고 4422로 닫는다. 메시지 하나의 바이트 상한은 uvicorn의 --ws-max-size(backend/Dockerfile)가 따로
+# 정한다.
+MAX_START_CHARS = 4_096
+MAX_CONTROL_CHARS = 1_024
 # 브라우저는 말이 시작되고 64ms 뒤에 마디를 시작하면서 그 앞의 192ms 소리도 함께 보낸다. 그래서 마디가
 # 시작될 때 이미 이만큼(0.256초)의 소리가 와 있다.
 PREROLL_S = 0.256
@@ -311,8 +321,11 @@ class LiveConnection:
 
         type과 정수 id가 없거나 모르는 종류면 계약 위반이다. bool은 int의 하위 타입이라 isinstance 대신
         type(...) is int로 확인해 true/false를 id로 받지 않는다. previous 메시지는 두 사람 대화에서만
-        허용한다.
+        허용한다. MAX_CONTROL_CHARS보다 긴 글은 풀지 않고 계약 위반으로 본다(이벤트 루프에서 큰 JSON을 풀지
+        않으려고).
         """
+        if len(text or "") > MAX_CONTROL_CHARS:
+            return False
         try:
             message = json.loads(text or "")
             kind, number = message["type"], message["id"]
@@ -627,9 +640,12 @@ async def live(
 ) -> None:
     await websocket.accept()
     # 브라우저는 웹소켓에 헤더를 붙일 수 없고, 주소에 넣은 토큰은 로그에 남는다. 그래서 토큰은 첫 메시지로
-    # 받는다.
+    # 받는다. 인증 전이라 누구나 보낼 수 있으므로, 풀기 전에 길이부터 본다(MAX_START_CHARS, 넘으면 4422).
     try:
-        start = json.loads(await asyncio.wait_for(websocket.receive_text(), options.start_timeout_s))
+        text = await asyncio.wait_for(websocket.receive_text(), options.start_timeout_s)
+        if len(text) > MAX_START_CHARS:
+            raise ValueError("start message too long")
+        start = json.loads(text)
         if not isinstance(start, dict) or start["type"] != "start" or not isinstance(start["token"], str):
             raise ValueError("not a start message")
         mode, pair, previous, previous_id = parse_mode(start)

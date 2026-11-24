@@ -110,20 +110,23 @@ it('ships the microphone worklet as a same-origin file the CSP allows', () => {
 })
 
 // 확인: 웹소켓 업그레이드(HTTP/1.1, Upgrade·Connection 헤더, 1시간 읽기 제한)는 /api/translate/live 한
-// 경로에만 있고, 일반 /api/ 경로는 업그레이드 헤더 없이 300초 제한으로 넘기는지. 두 경로 모두 요청할 때마다
-// api 서비스 이름을 다시 찾는 변수 방식 proxy_pass와 전달 헤더 4개를 유지하는지, 업로드 한도 11m, 그리고 개발
-// 서버 프록시가 웹소켓(ws: true)을 넘기는지.
+// 경로에만 있고, 일반 /api/ 경로와 음성 업로드 두 경로(/api/translate/speech·dialog)는 업그레이드 헤더 없이
+// 300초 제한으로 넘기는지. 네 경로 모두 요청할 때마다 api 서비스 이름을 다시 찾는 변수 방식 proxy_pass와 전달
+// 헤더 4개를 유지하는지, 그리고 개발 서버 프록시가 웹소켓(ws: true)을 넘기는지.
 // 왜: 동시통역과 로그인한 대화 모드는 웹소켓 연결 하나를 길게 쓰므로 업그레이드와 긴 읽기 제한이
 // 필요하다(c005648). 변수 방식은 api 컨테이너만 다시 만들었을 때 nginx가 옛 주소로 보내 502가 나던 문제를
-// 고친 것이다(fb50252). 11m은 API의 10MB 파일 한도에 multipart 머리글 여유를 더한 값이다(8641f0c).
+// 고친 것이다(fb50252). 업로드 두 경로는 본문 한도만 다르게 주려고 따로 둔 location이라(아래 시험) 나머지
+// 프록시 설정은 /api/와 같아야 한다.
 it('upgrades only the live endpoint and preserves the ordinary API forwarding contract', () => {
   const live = config.match(/location\s*=\s*\/api\/translate\/live\s*\{([^}]+)\}/)?.[1] ?? ''
   const http = config.match(/location\s+\/api\/\s*\{([^}]+)\}/)?.[1] ?? ''
+  const speech = config.match(/location\s*=\s*\/api\/translate\/speech\s*\{([^}]+)\}/)?.[1] ?? ''
+  const dialog = config.match(/location\s*=\s*\/api\/translate\/dialog\s*\{([^}]+)\}/)?.[1] ?? ''
   expect(live).toMatch(/proxy_http_version\s+1\.1;/)
   expect(live).toMatch(/proxy_set_header\s+Upgrade\s+\$http_upgrade;/)
   expect(live).toMatch(/proxy_set_header\s+Connection\s+"upgrade";/)
   expect(live).toMatch(/proxy_read_timeout\s+3600s;/)
-  for (const block of [live, http]) {
+  for (const block of [live, http, speech, dialog]) {
     expect(block).toMatch(/set\s+\$api_upstream\s+api:8000;/)
     expect(block).toMatch(/proxy_pass\s+http:\/\/\$api_upstream\$request_uri;/)
     for (const [header, value] of [['Host', '$host'], ['X-Real-IP', '$remote_addr'],
@@ -131,8 +134,27 @@ it('upgrades only the live endpoint and preserves the ordinary API forwarding co
       expect(block).toContain(`proxy_set_header ${header} ${value};`)
     }
   }
-  expect(http).toContain('proxy_read_timeout 300s;')
-  expect(http).not.toContain('Upgrade')
-  expect(config).toContain('client_max_body_size 11m;')
+  for (const block of [http, speech, dialog]) {
+    expect(block).toContain('proxy_read_timeout 300s;')
+    expect(block).not.toContain('Upgrade')
+  }
   expect(viteSource).toMatch(/'\/api':\s*\{\s*target:\s*'http:\/\/localhost:8000',\s*ws:\s*true\s*\}/)
+})
+
+// 확인: 요청 본문 한도가 server 단계에서 64k이고, 11m는 음성 업로드 두 경로(정확히 그 주소만 맞는 location)
+// 에만 있으며 다른 location에는 한도 줄이 없는지.
+// 왜: 11m를 server 단계에 두면 로그인 없이 부르는 JSON 경로(가입·토큰 갱신)에도 11MB 본문이 API까지 가서, API가
+// 그 본문을 풀고 검증 오류로 되돌려 주는 동안 서버 전체가 수 초 멈췄다(docs/security.md 2026-11-24 덧붙임).
+// JSON·폼 본문은 가장 커도 수 KB라 64k면 넉넉하고 API도 같은 한도를 센다(backend/app/main.py). 11m는 API의 10MB
+// 파일 한도에 multipart 머리글 여유를 더한 값이다(8641f0c).
+it('allows large request bodies only on the two audio upload paths', () => {
+  const limits = (text: string) => [...text.matchAll(/\bclient_max_body_size\s+([^;\s]+)\s*;/g)].map((match) => match[1])
+  const server = config.replace(/\blocation\s[^{]*\{[^}]*\}/g, '')
+  expect(limits(server)).toEqual(['64k'])
+  const locations = [...config.matchAll(/\blocation\s+([^{]*?)\s*\{([^}]*)\}/g)]
+    .map(([, target, body]) => ({ target: target.replace(/\s+/g, ' '), limits: limits(body) }))
+  expect(locations.filter((location) => location.limits.length)).toEqual([
+    { target: '= /api/translate/speech', limits: ['11m'] },
+    { target: '= /api/translate/dialog', limits: ['11m'] },
+  ])
 })

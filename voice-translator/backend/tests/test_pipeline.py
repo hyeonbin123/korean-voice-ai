@@ -7,14 +7,17 @@
 # 정합성(기록 없는 음성 파일, 파일 없는 기록이 남지 않음)이다.
 
 import asyncio
+import io
 import json
 import threading
 import time
 from pathlib import Path
 from uuid import uuid4
 
-# httpx: 실제 OllamaCorrector의 HTTP 응답을 MockTransport로 바꿀 때 쓴다. sqlalchemy의 select·func: 저장된
-# 행과 개수를 DB에서 직접 확인한다.
+# av(PyAV): 음성 검사 상한 시험에서 파일을 끝까지 풀어 보거나(시간 비교) Opus 녹음을 만든다. httpx: 실제
+# OllamaCorrector의 HTTP 응답을 MockTransport로 바꿀 때 쓴다. sqlalchemy의 select·func: 저장된 행과 개수를
+# DB에서 직접 확인한다.
+import av
 import httpx
 import pytest
 from sqlalchemy import func, select
@@ -25,8 +28,15 @@ from app.services import pipeline
 from app.services.audio_store import AudioStore
 from app.services.correction import OllamaCorrector
 from app.services.inference import run_model, run_synthesis
-from app.services.interfaces import SynthesizedAudio
-from tests.fakes import FakeCorrector, FakeSpeechToText, FakeTextToSpeech, FakeTranslator, silent_wav
+from app.services.interfaces import SynthesizedAudio, UndecodableAudioError
+from tests.fakes import (
+    FakeCorrector,
+    FakeSpeechToText,
+    FakeTextToSpeech,
+    FakeTranslator,
+    one_sample_packets,
+    silent_wav,
+)
 
 
 # 세 모델 호출(인식·번역·합성)이 모두 이벤트 루프 스레드가 아닌 곳에서, 이 순서로 불리는지 확인한다. 그리고
@@ -629,3 +639,70 @@ async def test_prepare_with_a_trace_records_each_stage_and_returns_the_same_resu
     ends = [trace[name][2] for name in trace]
     starts = [trace[name][1] for name in trace]
     assert all(previous <= start for previous, start in zip(ends, starts[1:], strict=False))
+
+
+# 음성 검사(validate_audio)가 한 업로드에서 푸는 양의 상한. 길이 30초만 묶으면, 표본 하나짜리 프레임을 아주
+# 많이 담은 짧은 파일이 프레임마다 드는 디코딩 비용만으로 모델 스레드를 수십 초 붙잡는다(docs/security.md
+# 2026-11-24 덧붙임). 프레임이 상한(MAX_AUDIO_FRAMES)까지면 받고, 하나라도 넘으면 '디코딩할 수 없는
+# 음성'으로 거절한다.
+def test_validate_audio_takes_up_to_the_frame_limit_and_rejects_one_more():
+    assert pipeline.validate_audio(one_sample_packets(pipeline.MAX_AUDIO_FRAMES)) is None
+    with pytest.raises(UndecodableAudioError):
+        pipeline.validate_audio(one_sample_packets(pipeline.MAX_AUDIO_FRAMES + 1))
+
+
+# 검사가 풀지 않는 다른 스트림의 패킷도 같은 상한으로 센다. PyAV는 고른 스트림이 아닌 패킷도 파일에서 하나씩
+# 읽어 버리고 인식 전 faster-whisper의 디코딩도 같으므로, 첫 음성 스트림이 짧고 정상이어도 다른 스트림에
+# 작은 패킷을 채운 파일은 프레임만 셀 때와 같은 일을 한다. 모든 스트림의 패킷이 합쳐 상한까지면 받고, 넘으면
+# 거절한다.
+def test_validate_audio_counts_the_packets_of_streams_it_does_not_decode():
+    limit = pipeline.MAX_AUDIO_FRAMES
+    assert pipeline.validate_audio(one_sample_packets(100, others=limit - 100)) is None
+    with pytest.raises(UndecodableAudioError):
+        pipeline.validate_audio(one_sample_packets(100, others=limit - 99))
+
+
+# 상한을 넘는 파일은 끝까지 풀지 않고 상한에서 멈춘다: 상한의 여덟 배 프레임을 담은 파일을 거절하는 시간이
+# 같은 파일을 끝까지 푸는 시간의 절반보다 짧다(멈춘 곳이 상한이면 검사의 파이썬 비용을 더해도 약 5분의 1).
+# 절대 시간이 아니라 같은 컴퓨터에서 잰 두 시간을 견주어, 느린 컴퓨터에서도 결과가 같게 했다. 맨 처음 끝까지
+# 한 번 풀어(프레임 수 확인) FFmpeg의 첫 호출 비용을 잰 시간 밖에 둔다.
+def test_validate_audio_stops_at_the_limit_instead_of_decoding_everything():
+    data = one_sample_packets(8 * pipeline.MAX_AUDIO_FRAMES)
+
+    def decode_everything() -> int:
+        with av.open(io.BytesIO(data)) as container:
+            return sum(1 for _ in container.decode(audio=0))
+
+    def reject() -> None:
+        with pytest.raises(UndecodableAudioError):
+            pipeline.validate_audio(data)
+
+    # 두 번씩 재어 짧은 쪽을 쓴다: 다른 프로그램이 잠깐 CPU를 가져가 한쪽만 느려지는 흔들림을 줄인다.
+    def fastest(call) -> float:
+        times = []
+        for _ in range(2):
+            started = time.perf_counter()
+            call()
+            times.append(time.perf_counter() - started)
+        return min(times)
+
+    assert decode_everything() == 8 * pipeline.MAX_AUDIO_FRAMES
+    assert fastest(reject) < fastest(decode_everything) / 2
+
+
+# 정상 입력 가운데 프레임이 가장 촘촘한 설정(Opus 2.5ms 프레임)도 30초까지 받는다. 30초면 12,000프레임으로
+# 상한 아래다. 브라우저 녹음(webm Opus, 20ms 프레임)은 30초에 1,501프레임이고 서버 측정 입력(16 kHz WAV)은
+# 469프레임이다(docs/security.md 2026-11-24 덧붙임).
+def test_validate_audio_takes_30_seconds_of_the_densest_normal_opus():
+    output = io.BytesIO()
+    with av.open(io.BytesIO(silent_wav(30_000))) as source, av.open(output, "w", format="webm") as dest:
+        stream = dest.add_stream("libopus", rate=48_000, options={"frame_duration": "2.5"})
+        for frame in source.decode(audio=0):
+            for packet in stream.encode(frame):
+                dest.mux(packet)
+        for packet in stream.encode(None):
+            dest.mux(packet)
+    with av.open(io.BytesIO(output.getvalue())) as container:
+        frames = sum(1 for _ in container.decode(audio=0))
+    assert 12_000 <= frames < pipeline.MAX_AUDIO_FRAMES
+    assert pipeline.validate_audio(output.getvalue()) is None

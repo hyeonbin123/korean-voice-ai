@@ -101,10 +101,10 @@ docker compose up -d db
 cd backend
 uv sync --group gpu --group tts
 uv run alembic upgrade head
-LOAD_MODELS=true uv run uvicorn app.main:app
+LOAD_MODELS=true uv run uvicorn app.main:app --ws-max-size 1048576
 ```
 
-API는 `.env`를 자동으로 읽지 않는다. 기본값이 위 compose DB와 같아서 그대로 실행하면 되고, 바꿀 값은 환경 변수로 넘긴다 ([docs/api.md](docs/api.md)의 "실행 설정과 DB"). `LOAD_MODELS`를 빼면 모델 없이 떠서 번역 요청은 503을 돌려준다. 이때 화면만 보려면 프론트엔드를 `VITE_TRANSLATION_MOCK=true`로 실행한다.
+`--ws-max-size 1048576`은 웹소켓 메시지 하나의 크기 상한(압축을 푼 뒤 1MiB)으로, 배포 이미지(`backend/Dockerfile`)와 같은 값이다([docs/api.md](docs/api.md)의 동시통역 절). API는 `.env`를 자동으로 읽지 않는다. 기본값이 위 compose DB와 같아서 그대로 실행하면 되고, 바꿀 값은 환경 변수로 넘긴다 ([docs/api.md](docs/api.md)의 "실행 설정과 DB"). `LOAD_MODELS`를 빼면 모델 없이 떠서 번역 요청은 503을 돌려준다. 이때 화면만 보려면 프론트엔드를 `VITE_TRANSLATION_MOCK=true`로 실행한다.
 
 ```bash
 # 3. 프론트엔드: http://localhost:5173 (/api 요청은 개발 서버가 백엔드로 넘김)

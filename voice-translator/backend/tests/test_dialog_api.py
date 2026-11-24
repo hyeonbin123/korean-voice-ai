@@ -19,8 +19,8 @@ from app.dependencies import get_audio_store, get_models
 from app.main import app
 from app.services.audio_store import AudioStore
 from app.services.interfaces import ModelError
-from app.services.pipeline import PipelineModels
-from tests.fakes import FakeSpeechToText, FakeTextToSpeech, FakeTranslator, silent_wav
+from app.services.pipeline import MAX_AUDIO_FRAMES, PipelineModels
+from tests.fakes import FakeSpeechToText, FakeTextToSpeech, FakeTranslator, one_sample_packets, silent_wav
 
 
 # 가짜 모델 묶음을 앱에 끼우고, 테스트가 판별 결과를 바꿀 수 있도록 가짜 음성 인식기를 돌려준다.
@@ -99,6 +99,15 @@ async def test_failures_answer_as_the_speech_api_does(client, auth_headers, stt,
         failed = await turn(client, auth_headers)
     assert (failed.status_code, failed.json()["detail"]) == (503, "Translation service is unavailable")
     assert "secret" not in caplog.text
+
+
+# 표본 하나짜리 프레임으로 채운 업로드는 언어 판별 전에 음성 검사의 프레임 수 상한에서 422 "Audio could not be
+# decoded"로 거절된다. 두 사람 대화는 검사·판별·인식에서 같은 파일을 여러 번 풀므로 검사가 먼저 끊는 것이
+# 중요하다. 판별이 불리면 가짜 인식기의 오류로 503이 된다.
+async def test_a_turn_with_too_many_frames_is_rejected_before_detection(client, auth_headers, stt):
+    stt.error = ModelError("detection must not run")
+    response = await turn(client, auth_headers, content=one_sample_packets(MAX_AUDIO_FRAMES + 1))
+    assert (response.status_code, response.json()["detail"]) == (422, "Audio could not be decoded")
 
 
 # previous_lang은 ko·en만 허용한다. 다른 값(ja)은 폼 검증에서 422로 막히는지 확인한다.

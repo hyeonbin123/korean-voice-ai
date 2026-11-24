@@ -89,4 +89,8 @@ ENV LOAD_MODELS=true \
 EXPOSE 8000
 USER app
 # 마이그레이션 뒤 서버를 띄운다. 작업자 하나: 프로세스마다 모델을 한 번씩 올린다(GPU 메모리 약 4.5GB).
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# --ws-max-size 1048576: 웹소켓 메시지 하나를 압축을 푼 뒤 1MiB까지만 받는다(넘으면 uvicorn이 1009로 닫음).
+# uvicorn 기본값 16MiB에서는 압축된 약 16KB가 16MiB 글로 풀려 들어왔다(docs/security.md 2026-11-24 덧붙임). 이
+# 서버가 쓰는 가장 큰 메시지는 한 마디 소리 전체(30초, 960,000바이트)이고 화면은 32ms 조각(1,024바이트)으로
+# 보낸다. README의 개발 서버 명령도 같은 값이다(tests/test_live_api.py가 확인).
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 1048576"]

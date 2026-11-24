@@ -31,8 +31,8 @@ from app.schemas.translate import TextRequest
 from app.services import stt, translation, tts
 from app.services.audio_store import AudioStore
 from app.services.interfaces import ModelError, NoSpeechError, UndecodableAudioError
-from app.services.pipeline import MAX_AUDIO_BYTES, PipelineModels
-from tests.fakes import FakeSpeechToText, FakeTextToSpeech, FakeTranslator, silent_wav
+from app.services.pipeline import MAX_AUDIO_BYTES, MAX_AUDIO_FRAMES, PipelineModels
+from tests.fakes import FakeSpeechToText, FakeTextToSpeech, FakeTranslator, one_sample_packets, silent_wav
 
 
 # 가짜 인식·번역·합성 모델과 임시 폴더 음성 저장소를 앱에 끼우고, 테스트가 실패를 정할 수 있도록 둘을
@@ -187,6 +187,9 @@ async def test_unicode_500_after_trim(client, auth_headers, services):
 async def test_invalid_speech_languages(client, auth_headers, services, db_session, changes):
     response = await speech_request(client, auth_headers, **changes)
     assert response.status_code == 422 and isinstance(response.json()["detail"], list)
+    # 라우터가 직접 만든 검증 오류도 앱의 422 처리기를 거쳐 위치·문구·종류만 돌려준다(보낸 값은 되돌려 주지
+    # 않음).
+    assert all(set(item) == {"loc", "msg", "type"} for item in response.json()["detail"])
     await assert_no_history(client, auth_headers, db_session)
 
 
@@ -217,6 +220,19 @@ async def test_invalid_audio_before_stt(client, auth_headers, services, db_sessi
     models.stt.error = ModelError("STT must not execute")
     response = await speech_request(client, auth_headers, content)
     assert response.status_code == 422 and response.json() == {"detail": detail}
+    await assert_no_history(client, auth_headers, db_session)
+
+
+# 표본 하나짜리 프레임으로 채운 업로드는 소리가 30초보다 훨씬 짧아도 음성 검사의 프레임 수 상한에서 422
+# "Audio could not be decoded"로 거절된다. 검사가 인식보다 먼저라, 같은 파일을 다시 푸는 인식
+# 단계(faster-whisper)에는 닿지 않는다: 인식이 불리면 가짜 인식기의 오류로 503이 된다.
+async def test_an_upload_with_too_many_frames_is_rejected_before_stt(
+    client, auth_headers, services, db_session
+):
+    models, _ = services
+    models.stt.error = ModelError("STT must not execute")
+    response = await speech_request(client, auth_headers, one_sample_packets(MAX_AUDIO_FRAMES + 1))
+    assert response.status_code == 422 and response.json() == {"detail": "Audio could not be decoded"}
     await assert_no_history(client, auth_headers, db_session)
 
 

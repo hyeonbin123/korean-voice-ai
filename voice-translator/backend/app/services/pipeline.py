@@ -52,6 +52,16 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 # 업로드 음성 파일 크기 한도 10MB(바이트). 넘으면 routers/translate.py가 413으로 답한다.
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+# 음성 검사(validate_audio)가 한 업로드에서 처리하는 양의 상한: 파일에서 읽는 패킷(모든 스트림)과 풀린 음성
+# 프레임을 각각 이 수까지만 받는다. 30초 길이 한도만으로는 처리 시간이 묶이지 않았다: 표본 하나짜리
+# 프레임으로 채운 파일은 10MB 안에 수백만 프레임이 들어가, 프레임마다 드는 디코딩 비용만으로 모델 스레드를
+# 수십 초 붙잡았다. 풀지 않는 다른 스트림에 작은 패킷을 채워도 같았다(PyAV가 그 패킷도 하나씩 읽어 버리고,
+# 뒤에서 같은 파일을 다시 푸는 faster-whisper도 같다). 값은 정상 입력의 30초당 프레임 수에서 정했다: 16 kHz
+# WAV 469(측정 입력 FLEURS 1,649개와 서비스 측정 업로드 120개 모두 480 이하), 브라우저 녹음 webm·ogg
+# Opus(20ms 프레임) 1,501, mp4 AAC 1,407, 가장 촘촘한 정상 설정인 Opus 2.5ms 프레임 12,000. 그 위에 25%
+# 여유를 둔 15,000이다. 이만큼 풀어도 검사와 인식 전 디코딩을 합쳐 1초 미만이다(docs/security.md 2026-11-24
+# 덧붙임).
+MAX_AUDIO_FRAMES = 15_000
 
 
 # 음성이 30초를 넘음. ModelError가 아니라 따로 둬, 라우터가 422 "Audio is longer than 30 seconds"로 구분해
@@ -102,17 +112,35 @@ def validate_audio(audio: bytes) -> None:
     프레임을 풀며 표본 수 ÷ 표본 추출률을 더한다. Fraction(정확한 분수)으로 더해 부동소수점 오차 없이 30초
     경계를 판단한다. 30초를 넘는 순간 멈춰 아주 긴 파일로 CPU를 오래 쓰지 않게 한다. 음성 스트림이 없거나,
     풀린 표본이 0이거나, FFmpeg 오류가 나면 UndecodableAudioError(→ 422 "Audio could not be decoded").
-    모델 스레드에서 돈다(호출하는 쪽이 run_model로 부름).
+    파일에서 읽은 패킷(모든 스트림)이나 풀린 프레임이 MAX_AUDIO_FRAMES를 넘어도 같은 오류로 멈춘다: 길이만
+    묶으면 아주 작은 프레임·패킷을 채운 짧은 파일이 그 수에 비례해 모델 스레드를 붙잡기
+    때문이다(MAX_AUDIO_FRAMES 위 주석). 모델 스레드에서 돈다(호출하는 쪽이 run_model로 부름).
     """
     try:
         with av.open(io.BytesIO(audio)) as container:
             if not container.streams.audio:
                 raise UndecodableAudioError("No audio stream")
+            # 푸는 것은 전처럼 첫 음성 스트림(container.decode(audio=0)이 고르던 것)이다. demux()로 모든
+            # 스트림(파일을 열 때 알려진 것)의 패킷을 받아 세고, 그 스트림의 패킷만 푼다.
+            # container.decode(audio=0)도 안에서 모든 패킷을 읽어 다른 스트림 것을 버리므로 푸는 프레임은
+            # 같고, 버려지던 패킷까지 셀 수 있게 됐다. PyAV는 끝에 스트림마다 빈 비우기 패킷을 하나씩 더
+            # 내주므로(남은 프레임을 꺼내는 신호) 패킷 상한에 스트림 수를 더한다.
+            stream = container.streams.audio[0]
+            packet_limit = MAX_AUDIO_FRAMES + len(container.streams)
             duration = Fraction(0)
-            for frame in container.decode(audio=0):
-                duration += Fraction(frame.samples, frame.sample_rate)
-                if duration > 30:
-                    raise AudioTooLongError
+            frames = 0
+            for packets, packet in enumerate(container.demux(), start=1):
+                if packets > packet_limit:
+                    raise UndecodableAudioError("Too many packets")
+                if packet.stream.index != stream.index:
+                    continue
+                for frame in packet.decode():
+                    frames += 1
+                    if frames > MAX_AUDIO_FRAMES:
+                        raise UndecodableAudioError("Too many frames")
+                    duration += Fraction(frame.samples, frame.sample_rate)
+                    if duration > 30:
+                        raise AudioTooLongError
             if not duration:
                 raise UndecodableAudioError("No decoded samples")
     except (av.error.FFmpegError, ValueError, ZeroDivisionError) as exc:

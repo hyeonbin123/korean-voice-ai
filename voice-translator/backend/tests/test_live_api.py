@@ -11,11 +11,14 @@
 # 보는 결과와 저장된 기록이 달라진다. 실제 서비스의 지연 수치(README)도 이 경로에서 나왔다.
 
 import asyncio
+import json
 import logging
+import re
 import threading
 import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -42,7 +45,14 @@ from app.db.session import ENGINE_OPTIONS
 from app.dependencies import get_audio_store, get_db, get_models, get_sessions
 from app.main import app
 from app.models import Translation
-from app.routers.live import LiveConnection, LiveOptions, get_live_options
+from app.routers.live import (
+    MAX_CONTROL_CHARS,
+    MAX_START_CHARS,
+    MAX_UTTERANCE_BYTES,
+    LiveConnection,
+    LiveOptions,
+    get_live_options,
+)
 from app.schemas.translate import LanguagePair
 from app.services.audio_store import AudioStore
 from app.services.interfaces import ModelError
@@ -336,6 +346,71 @@ async def test_a_bad_control_message_closes_the_connection(live, message):
         start(ws, live.token)
         ws.send_text(message)
         assert closed_with(ws) == 4422
+
+
+# 글 메시지(JSON)는 풀기 전에 길이부터 본다. 압축(permessage-deflate)을 푼 큰 글을 이벤트 루프에서
+# json.loads로 풀면 그동안 서버 전체가 멈추기 때문이다(docs/security.md 2026-11-24 덧붙임). 아래 두 시험은
+# 길이를 계약에 없는 pad 필드(서버가 읽지 않음)로 맞춰, 상한과 같은 길이는 받고 한 글자 넘으면 4422로 닫는지
+# 본다. 넘는 쪽도 길이 말고는 올바른 메시지라, 닫혔다면 길이 때문이다.
+def padded(message: dict, length: int) -> str:
+    """message에 pad 필드를 더해 json.dumps 결과가 정확히 length글자가 되게 한다."""
+    text = json.dumps({**message, "pad": ""})
+    return json.dumps({**message, "pad": "x" * (length - len(text))})
+
+
+# 다음으로 받는 것이 닫힘인지 보고 그 코드를 돌려준다. 닫히지 않고 메시지가 먼저 오면 바로
+# 실패한다(closed_with처럼 닫힐 때까지 메시지를 넘기며 기다리지 않으므로, 서버가 닫지 않는 경우에도 시험이
+# 멈추지 않는다).
+def next_close(ws) -> int:
+    with pytest.raises(WebSocketDisconnect) as closed:
+        ws.receive_json()
+    return closed.value.code
+
+
+# 첫 메시지(start)는 MAX_START_CHARS글자까지 받고(ready), 한 글자 넘으면 토큰을 보기 전에 4422로 닫는다.
+@pytest.mark.parametrize("extra", [0, 1])
+async def test_a_start_message_over_the_length_limit_closes_before_it_is_parsed(live, extra):
+    message = {"type": "start", "token": live.token, "source_lang": "ko", "target_lang": "en"}
+    with live.client.websocket_connect("/api/translate/live") as ws:
+        ws.send_text(padded(message, MAX_START_CHARS + extra))
+        if extra:
+            assert next_close(ws) == 4422
+        else:
+            assert ws.receive_json() == {"type": "ready"}
+
+
+# 인증 뒤의 제어 메시지는 MAX_CONTROL_CHARS글자까지 받는다: 그 길이의 utterance로 시작한 마디가 소리를 받아
+# 끝까지 처리되고(final), 한 글자 넘으면 그 메시지에서 4422로 닫혀 뒤의 소리에 자막이 오지 않는다.
+@pytest.mark.parametrize("extra", [0, 1])
+async def test_a_control_message_over_the_length_limit_closes_the_connection(live, extra):
+    with live.client.websocket_connect("/api/translate/live") as ws:
+        start(ws, live.token)
+        ws.send_text(padded({"type": "utterance", "id": 1}, MAX_CONTROL_CHARS + extra))
+        ws.send_bytes(SECOND)
+        if extra:
+            assert next_close(ws) == 4422
+            return
+        ws.send_json({"type": "pause", "id": 1})
+        ws.send_json({"type": "end", "id": 1})
+        assert until(ws, "final")[-1]["id"] == 1
+
+
+# 서버(uvicorn)가 받는 웹소켓 메시지 하나의 크기 상한(--ws-max-size, 압축을 푼 뒤 기준): 배포 이미지의 실행
+# 명령(backend/Dockerfile)과 README의 개발 서버 명령이 같은 값을 쓰는지, 그 값이 이 서버가 쓰는 가장 큰
+# 메시지인 한 마디 소리 전체(MAX_UTTERANCE_BYTES, 960,000바이트)보다 크고 1MiB를 넘지 않는지 본다. uvicorn
+# 기본값(16MiB)이면 선로의 약 16KB가 16MiB 글로 풀려 서버에 들어왔다(docs/security.md 2026-11-24 덧붙임).
+def test_the_server_commands_limit_each_websocket_message():
+    backend = Path(__file__).resolve().parents[1]
+    # 서버를 띄우는 명령 줄(주석 줄 제외)만 본다: Dockerfile의 CMD와 README의 개발 서버 명령, 둘이다.
+    commands = [
+        line
+        for path in (backend / "Dockerfile", backend.parent / "README.md")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "uvicorn app.main:app" in line and not line.lstrip().startswith("#")
+    ]
+    sizes = {int(size) for line in commands for size in re.findall(r"--ws-max-size (\d+)", line)}
+    assert len(commands) == 2 and all("--ws-max-size" in line for line in commands)
+    assert len(sizes) == 1 and MAX_UTTERANCE_BYTES < min(sizes) <= 1024 * 1024
 
 
 # 연결 중에 액세스 토큰이 만료되면 만료 뒤 첫 메시지에서 4401로 닫는다(docs/api.md). 화면은 토큰을 새로 받아

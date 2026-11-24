@@ -5,6 +5,9 @@
 # - e2e: 실제 브라우저(Chromium)로 접근성·키보드·좁은 화면 검사(npm run test:a11y)
 # - audit: 알려진 취약점이 있는 의존성 찾기(pip-audit, npm audit). 지금은 보고만 한다(아래 설명)
 # 명령은 README 테스트 절과 같다. GPU·모델이 필요한 측정은 CI에서 돌리지 않는다(LOAD_MODELS=false).
+# 공급망 설정(2026-11-24): 토큰은 읽기 전용(permissions), checkout은 토큰을 .git/config에 남기지 않고(persist-credentials:
+# false), 액션은 다른 커밋으로 옮겨질 수 있는 태그 대신 커밋 SHA로 부른다(줄 끝 주석이 그 SHA의 릴리스 태그). 올릴 때는 새
+# 태그의 커밋을 `gh api repos/<소유자>/<저장소>/commits/<태그> --jq .sha`로 확인해 SHA와 주석을 함께 바꾼다.
 name: voice-translator
 
 on:
@@ -33,6 +36,9 @@ on:
 concurrency:
   group: voice-translator-${{ github.ref }}
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -60,10 +66,12 @@ jobs:
       UV_PYTHON: "3.11"
       DATABASE_URL: postgresql+asyncpg://vtuser:vtpass@127.0.0.1:55442/voicetranslator
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # setup-uv는 떠다니는 주 판 태그(v10 같은)를 내지 않아 정확한 릴리스로 고정한다.
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
           working-directory: voice-translator
@@ -112,7 +120,7 @@ jobs:
       # uv.lock과 같은 판으로 얹어 이 파일만 돌린다. g2pkk는 import할 때 NLTK cmudict가 없으면 내려받으므로(약
       # 1MB, ~/nltk_data) 받은 것을 캐시해 실행마다 다시 받지 않는다. -rs로 건너뜀이 0인지 로그에서 본다.
       - name: Cache the NLTK cmudict that g2pkk downloads
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/nltk_data
           key: nltk-cmudict-${{ runner.os }}-nltk-3.10.3
@@ -140,9 +148,11 @@ jobs:
       run:
         working-directory: voice-translator/frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -173,9 +183,11 @@ jobs:
       # Microsoft Edge는 Linux 러너에 없고, 실행마다 설치하면 캐시할 수 없어 느리다.
       PLAYWRIGHT_CHANNEL: ""
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -192,7 +204,7 @@ jobs:
 
       - name: Cache the Playwright browsers
         id: browsers
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
@@ -211,7 +223,7 @@ jobs:
       # 실패하면 스크린샷·trace(playwright.config.ts의 outputDir)를 올려 원인을 볼 수 있게 한다.
       - name: Keep the failure screenshots and traces
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-results
           path: voice-translator/work/round11-browser
@@ -257,8 +269,24 @@ jobs:
   #   cmudict 사전 읽기뿐이고, 요청의 글은 nltk 함수에 가지 않는다(서버 이미지에서 호출을 세어 확인). 로그에는 대부분
   #   CVE 번호로 나오지만 GHSA ID로 적는다: PyPI 쪽 권고 자료에는 GHSA-gpwc-27cw-rh9r의 CVE 별칭이 없어 CVE 번호로
   #   적으면 그 한 건이 남고, pip-audit은 제외 ID를 권고의 ID와 별칭 모두에 맞추므로 GHSA ID는 두 데이터베이스에서 다
-  #   맞는다. nltk를 3.10.4 이상으로 올리면 nltk의 열 개(위 둘과 이 여덟)를 목록에서 뺀다 — pip-audit은 맞는 권고가
-  #   없는 제외 ID를 알리지 않으므로 남겨 두면 모르고 지나간다
+  #   맞는다
+  # - 2026-11-24에 nltk 3.10.3의 새 권고 스물셋을 더 제외했다(2026-11-16·19(UTC) 공개, 모두 고친 판 3.10.4, 권고별
+  #   판단은 docs/security.md의 '2026-11-24 덧붙임: nltk 3.10.3의 새 권고 23건'): GHSA-59f9-gqg8-mqpj(maxent 매개변수
+  #   저장·읽기의 경로), GHSA-xmfg-f9cm-w86q(chat80 sql_query의 심볼릭 링크), GHSA-7mxv-7h3q-9324(dot2img의 dot 실행),
+  #   GHSA-32p6-cwhc-8r78(호출자가 준 정규식의 컴파일 시간), GHSA-3h95-x772-4765(CCG 어휘 파서의 재귀),
+  #   GHSA-53pg-5qp8-mhvr(WordNet 상위어 걷기의 재귀), GHSA-63wh-5r5m-wxr7(Tree.fromlist의 재귀),
+  #   GHSA-8846-p9w9-5frf(WordNet Synset.tree의 재귀), GHSA-9ffx-rrgx-mhgx(Weka ARFF 머리 주입),
+  #   GHSA-c59x-vh6j-3w8v(AllowlistUnpickler의 numpy 파일 함수), GHSA-cc5r-64rf-75hg(prover9·mace4의 상대 경로 실행),
+  #   GHSA-cj8f-5fp3-6m88·GHSA-j8g8-j4j7-8j54(XMLCorpusView의 제곱 시간), GHSA-f2h2-f4fc-p978(Toolbox 설정 도우미의
+  #   재귀), GHSA-g58v-j9g9-5gfg(말뭉치 리더의 중간 폴더 심볼릭 링크), GHSA-pcm8-fqjx-rvx8(내려받기 색인의 순환),
+  #   GHSA-q4c8-9gwf-255x(SeekableUnicodeStreamReader.readline의 제곱 시간), GHSA-rh8m-wqhc-qmrf·GHSA-xfcv-m889-fmqg
+  #   (DependencyGraph 걷기의 재귀), GHSA-w3pv-xfw4-ghr7(의미 논리 형 파서의 재귀), GHSA-w674-vqhw-g3pg
+  #   (StreamBackedCorpusView 생성자의 os.stat), GHSA-wr3g-j6qj-xpgh(내려받은 zip을 풀 때의 하드링크),
+  #   GHSA-x8q7-6c7m-52gw(java()의 cmd 첫 항목). 서버가 실행하는 nltk는 2026-11-15에 센 것과 같다(서버 이미지에서
+  #   호출을 다시 세어 확인): 시작 때의 불러오기(nltk 소스에 든 고정 CCG 어휘 문자열 둘과 고정 정규식)와 이미지에 넣은
+  #   cmudict 사전 읽기뿐이고, 요청의 글은 nltk 함수에 가지 않으며, 서버는 실행 중에 nltk 자료를 내려받지 않는다.
+  #   이제 nltk의 제외 ID는 서른셋이다(위 둘과 여덟, 이 스물셋). nltk를 3.10.4 이상으로 올리면 서른셋을 모두 목록에서
+  #   뺀다 — pip-audit은 맞는 권고가 없는 제외 ID를 알리지 않으므로 남겨 두면 모르고 지나간다
   # - 목록 하나나 데이터베이스 하나가 실패해도 나머지를 끝까지 대조해 로그에 남긴 뒤 한 번에 실패시킨다(아래
   #   status). shell: bash는 pipefail을 켜서 내보내기나 grep이 실패하면 빈 목록으로 지나가지 않고 바로 멈춘다.
   #   소켓 제한 시간은 60초다(--timeout): 기본 15초에서는 2026-11-07의 한 실행이 pypi.org 응답을 기다리다 끊겨 권고가
@@ -269,9 +297,11 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           working-directory: voice-translator
           cache-dependency-glob: backend/uv.lock
@@ -313,13 +343,25 @@ jobs:
                 --ignore-vuln GHSA-ffr9-mgrr-wcvr --ignore-vuln GHSA-fg9w-wfp5-j933 \
                 --ignore-vuln GHSA-gpwc-27cw-rh9r --ignore-vuln GHSA-qg35-44qx-7vrr \
                 --ignore-vuln GHSA-r53h-rw34-8h97 --ignore-vuln GHSA-v8f3-6phw-6mh9 \
+                --ignore-vuln GHSA-32p6-cwhc-8r78 --ignore-vuln GHSA-3h95-x772-4765 \
+                --ignore-vuln GHSA-53pg-5qp8-mhvr --ignore-vuln GHSA-59f9-gqg8-mqpj \
+                --ignore-vuln GHSA-63wh-5r5m-wxr7 --ignore-vuln GHSA-7mxv-7h3q-9324 \
+                --ignore-vuln GHSA-8846-p9w9-5frf --ignore-vuln GHSA-9ffx-rrgx-mhgx \
+                --ignore-vuln GHSA-c59x-vh6j-3w8v --ignore-vuln GHSA-cc5r-64rf-75hg \
+                --ignore-vuln GHSA-cj8f-5fp3-6m88 --ignore-vuln GHSA-f2h2-f4fc-p978 \
+                --ignore-vuln GHSA-g58v-j9g9-5gfg --ignore-vuln GHSA-j8g8-j4j7-8j54 \
+                --ignore-vuln GHSA-pcm8-fqjx-rvx8 --ignore-vuln GHSA-q4c8-9gwf-255x \
+                --ignore-vuln GHSA-rh8m-wqhc-qmrf --ignore-vuln GHSA-w3pv-xfw4-ghr7 \
+                --ignore-vuln GHSA-w674-vqhw-g3pg --ignore-vuln GHSA-wr3g-j6qj-xpgh \
+                --ignore-vuln GHSA-x8q7-6c7m-52gw --ignore-vuln GHSA-xfcv-m889-fmqg \
+                --ignore-vuln GHSA-xmfg-f9cm-w86q \
                 --ignore-vuln PYSEC-2026-3447 --ignore-vuln GHSA-xmj3-9gf7-h52w \
                 --ignore-vuln PYSEC-2025-194 || status=1
             done
           done
           exit "$status"
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: ${{ !cancelled() }}
         with:
           node-version: 24
