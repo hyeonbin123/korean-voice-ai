@@ -30,6 +30,8 @@
        못한다).
     6. 위 1번을 검사하는 함수(rule_violations) 자체가 규칙 위반을 실제로 잡는다. 아무것도 못 잡는 껍데기가 되면 1번이
        늘 통과하기 때문이다.
+    7. 루트 워크플로 둘의 setup-uv 단계는 정확한 uv 판(x.y.z) 하나를 적고, 그 판은 0.13.4 이상이다. 0.13.4 미만은 번들한
+       루트 인증서 묶음에 폐기된 중간 CA와 이어진 루트가 들어 있는 판이다(공개 권고 PYSEC-2026-4321).
 
 읽는 것
     워크플로 파일의 글(`uses:` 줄은 글 그대로 한 줄씩, 비밀값 문맥은 글 전체에서 정규식으로, 나머지는 PyYAML가 해석한
@@ -222,6 +224,33 @@ def test_root_workflows_pin_actions_and_keep_the_token_read_only(name):
     text, _ = load_workflow(name)
     problems = rule_violations(name, text)
     assert problems == [], "\n".join(problems)
+
+
+# setup-uv 단계가 설치하는 uv는 0.13.4 이상이어야 한다. uv 0.13.4 미만은 기본으로 쓰는 루트 인증서 묶음(webpki-root-certs)에,
+# 개인 키가 유출되어 발급 기관이 폐기한 중간 CA 인증서 여덟 개와 이어진 루트가 들어 있다. 그 키를 가진 쪽은 uv가 받아들이는
+# 인증서를 아무 호스트 이름으로나 만들 수 있다(공개 권고 PYSEC-2026-4321 / GHSA-hq85-5cpj-mr62. 0.13.4가 그 루트를 묶음에서
+# 뺐다). CI의 uv는 패키지를 내려받는 쪽이라 그 영향 안에 있다. `version`을 아예 적지 않으면 setup-uv가 최신 판을 받아 판이
+# 실행마다 달라지므로, 정확한 판 하나가 적혀 있어야 한다. 구성 요소 워크플로(call-summary.yml 등)의 판은 그 구성 요소의 시험이
+# 지킨다(call-summary는 tests/test_container.py).
+MIN_UV_VERSION = (0, 13, 4)
+
+
+@pytest.mark.parametrize("name", ROOT_WORKFLOWS)
+def test_root_workflows_install_a_uv_release_without_the_revoked_root(name):
+    _, workflow = load_workflow(name)
+    versions = [
+        (step.get("with") or {}).get("version")
+        for step in steps_of(workflow)
+        if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
+    ]
+    assert versions, f"{name}: astral-sh/setup-uv 단계가 없다(이 검사가 아무것도 보지 못했다)"
+    for version in versions:
+        assert isinstance(version, str) and re.fullmatch(r"\d+\.\d+\.\d+", version, re.ASCII), (
+            f"{name}: setup-uv의 version이 정확한 판(x.y.z) 하나가 아니다: {version!r}"
+        )
+        assert tuple(int(part) for part in version.split(".")) >= MIN_UV_VERSION, (
+            f"{name}: setup-uv가 uv {version}을 설치한다(폐기된 루트를 믿는 0.13.4 미만)"
+        )
 
 
 # repo-checks.yml에서 `run`이 있는 단계가 돌려야 하는 명령 전부, 워크플로에 나온 차례 그대로. 첫째가 tools/tests의 시험이고

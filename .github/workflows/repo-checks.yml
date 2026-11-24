@@ -46,11 +46,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # uv 판은 0.13.1로 고정한다(e2e 워크플로와 같은 줄). 캐시는 쓰지 않는다: 이 작업은 잠금 파일을 쓰지 않고(pytest와 PyYAML의
-      # 판은 아래 명령줄에 적었다) 설치하는 것이 그 둘뿐이라 캐시로 아낄 것이 거의 없다.
+      # uv 판은 0.13.6으로 고정한다(e2e 워크플로와 같은 줄). 2026-11-24에 0.13.1에서 올렸다: uv 0.13.4 미만은 번들한 루트
+      # 인증서 묶음에 폐기된 중간 CA와 이어진 루트가 들어 있다(공개 권고 PYSEC-2026-4321. tools/tests/test_workflows.py가
+      # 하한을 지킨다). 캐시는 쓰지 않는다: 이 작업은 잠금 파일을 쓰지 않고(pytest와 PyYAML의 판은 아래 명령줄에 적었다)
+      # 설치하는 것이 그 둘뿐이라 캐시로 아낄 것이 거의 없다.
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          version: "0.13.1"
+          version: "0.13.6"
           enable-cache: false
       # 루트 검사 도구와 루트 문서·워크플로를 읽는 시험을 모두 돈다. 루트에는 파이썬 프로젝트(pyproject.toml, uv.lock)가 없으므로
       # --no-project로 임시 환경을 만들고, 시험 도구의 판(pytest 9.1.1, PyYAML 6.0.3)은 support-agent 잠금 파일과 같게 명령줄에

@@ -36,12 +36,12 @@
 
 | 끝점 | 요청 | 응답 | 근거 |
 |---|---|---|---|
-| support-agent `GET /healthz` | — | 200 | [`app.py`](../support-agent/src/support_agent/service/app.py#L257) |
-| support-agent `POST /api/sessions` | 본문 없음 | 201 `{"session_id", "status", "messages", "pending_approvals"}` | [`app.py`](../support-agent/src/support_agent/service/app.py#L271), [`core.py`](../support-agent/src/support_agent/service/core.py) |
-| support-agent `POST /api/sessions/{id}/messages` | `{"text": 고객 발화}`. 서버 한도(기본 1,000자)를 넘으면 422 | 200 `text/event-stream`. 이벤트마다 `event: <이름>` 줄, `data: <JSON>` 줄, 빈 줄. 차례는 `status` → 도구마다 `tool`과 `tool_result`(사람 승인이 필요한 환불이면 `approval`도) → `error`(있을 때) → `reply` → `end`. 없는 세션 404, 닫힌 세션 409, 동시에 도는 턴이 한도에 닿으면 503 | [`app.py`](../support-agent/src/support_agent/service/app.py#L367), [`core.py`](../support-agent/src/support_agent/service/core.py) |
-| support-agent `GET /api/admin/sessions/{id}` | 헤더 `X-Admin-Token` | 200 `{"transcript": {"session_id", "status", "messages", "pending_approvals"}, "audit": [{"id", "at", "kind", "payload"}]}`. 관리자 토큰이 설정되지 않았으면 503, 틀리면 401 | [`app.py`](../support-agent/src/support_agent/service/app.py#L507), [`core.py`](../support-agent/src/support_agent/service/core.py) |
-| call-summary `GET /health` | — | 200 | [`service.py`](../call-summary/src/call_summary/service.py#L779) |
-| call-summary `POST /summarize` | `{"domain", "turns": [{"speaker": "상담원" 또는 "고객", "text"}]}`. 업종은 shop·telecom·parcel·card, 발화 1~200개, 발화당 2,000자, 이어 붙인 전사 4,000자까지 | 200 `{"request_id", "record", "needs_confirmation", "model", "attempts", "latency_s"}`. 모르는 업종 422, 너무 길면 413, 기록을 거절하면 502, 붐비면 503 | [`service.py`](../call-summary/src/call_summary/service.py#L878) |
+| support-agent `GET /healthz` | — | 200 | [`app.py`](../support-agent/src/support_agent/service/app.py#L280) |
+| support-agent `POST /api/sessions` | 본문 없음 | 201 `{"session_id", "status", "messages", "pending_approvals"}` | [`app.py`](../support-agent/src/support_agent/service/app.py#L294), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| support-agent `POST /api/sessions/{id}/messages` | `{"text": 고객 발화}`. 서버 한도(기본 1,000자)를 넘으면 422 | 200 `text/event-stream`. 이벤트마다 `event: <이름>` 줄, `data: <JSON>` 줄, 빈 줄. 차례는 `status` → 도구마다 `tool`과 `tool_result`(사람 승인이 필요한 환불이면 `approval`도) → `error`(있을 때) → `reply` → `end`. 없는 세션 404, 닫힌 세션 409, 동시에 도는 턴이 한도에 닿으면 503 | [`app.py`](../support-agent/src/support_agent/service/app.py#L390), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| support-agent `GET /api/admin/sessions/{id}` | 헤더 `X-Admin-Token` | 200 `{"transcript": {"session_id", "status", "messages", "pending_approvals"}, "audit": [{"id", "at", "kind", "payload"}]}`. 관리자 토큰이 설정되지 않았으면 503, 틀리면 401 | [`app.py`](../support-agent/src/support_agent/service/app.py#L530), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| call-summary `GET /health` | — | 200 | [`service.py`](../call-summary/src/call_summary/service.py#L813) |
+| call-summary `POST /summarize` | `{"domain", "turns": [{"speaker": "상담원" 또는 "고객", "text"}]}`. 업종은 shop·telecom·parcel·card, 발화 1~200개, 발화당 2,000자, 이어 붙인 전사 4,000자까지 | 200 `{"request_id", "record", "needs_confirmation", "model", "attempts", "latency_s"}`. 모르는 업종 422, 너무 길면 413, 기록을 거절하면 502, 붐비면 503 | [`service.py`](../call-summary/src/call_summary/service.py#L912) |
 
 이 폴더는 두 구성 요소의 코드를 가져오지(import) 않고 위 계약대로 HTTP로만 부른다. 클라이언트는 [`src/call_e2e/clients.py`](src/call_e2e/clients.py), 흐름과 검사는 [`src/call_e2e/flow.py`](src/call_e2e/flow.py), 리포트는 [`src/call_e2e/report.py`](src/call_e2e/report.py)에 있다.
 

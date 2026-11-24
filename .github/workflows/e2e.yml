@@ -32,11 +32,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # uv 판은 0.13.1로 고정한다. e2e와 call-summary의 잠금 파일을 쓴 판이고, call-summary 워크플로와 같은 줄이다.
+      # uv 판은 0.13.6으로 고정한다. call-summary 워크플로(와 그 Docker 이미지)와 같은 줄이다. e2e와 call-summary의 잠금
+      # 파일을 쓴 판은 0.13.1이지만 `uv sync --frozen`은 잠금을 다시 쓰지 않으므로 그보다 높아도 잠금은 바뀌지 않는다.
+      # 2026-11-24에 올렸다: uv 0.13.4 미만은 번들한 루트 인증서 묶음에 폐기된 중간 CA와 이어진 루트가 들어 있다(공개 권고
+      # PYSEC-2026-4321. tools/tests/test_workflows.py가 하한을 지킨다).
       # 캐시 키는 세 잠금 파일로 만들고 이름(e2e)을 붙여, 같은 러너에서 캐시를 켠 다른 작업과 키가 겹치지 않게 한다.
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          version: "0.13.1"
+          version: "0.13.6"
           enable-cache: true
           cache-suffix: e2e
           cache-dependency-glob: |
