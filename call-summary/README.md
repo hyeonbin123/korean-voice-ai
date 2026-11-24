@@ -1,6 +1,6 @@
-# call-summary
+# 상담 후처리 · 소형 LLM 학습과 서빙 (call-summary)
 
-> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '상담 후처리' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+> [korean-voice-ai](../README.md)의 구성 요소다. 통화 흐름에서의 자리: 음성 인식([whisper-ko-ft](../whisper-ko-ft/README.md), [stt-scratch](../stt-scratch/README.md)) → 실시간 음성 계층([voice-translator](../voice-translator/README.md)) → 상담 에이전트([support-agent](../support-agent/README.md)) → **상담 후처리**(이 폴더). 화살표는 통화 순서일 뿐이고, 코드로 이어진 곳은 [docs/architecture.md](../docs/architecture.md)에 있다.
 
 고객센터 상담 대화 전사를 상담 후처리 기록(요약, 문의 유형, 처리 결과, 후속 조치, 핵심 값)의 JSON으로 바꾸는 소형 LLM을 LoRA/QLoRA로 학습하고, 로컬에서 서빙한다. 학습 전후와 큰 모델 대비 성능을 미리 정한 규칙으로 측정한다.
 
@@ -176,4 +176,4 @@ docker run --rm -p 127.0.0.1:8072:8072 --add-host host.docker.internal:host-gate
 
 ## 이 폴더의 글 읽는 법
 
-이 폴더는 [korean-voice-ai](../README.md) 저장소의 구성 요소 `call-summary/`다. 이 폴더의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/call-summary.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+이 폴더(`call-summary/`)의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/call-summary.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다.
