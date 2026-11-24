@@ -1,15 +1,18 @@
 # 저장소 루트 검사: 구성 요소 하나에 속하지 않는 루트 쪽 검사를 한곳에서 돌린다. 구성 요소마다 있는 워크플로가 자기 폴더를
-# 검사하고, 이 워크플로는 그 바깥(루트의 검사 도구·첫 화면·docs/)을 검사한다. 단계는 넷이다.
-#   1. tools/tests의 시험: 루트 검사 도구 셋의 시험, 루트 문서(README.md, docs/)가 저장소의 파일과 git 이력에 맞는지 보는
+# 검사하고, 이 워크플로는 그 바깥(루트의 검사 도구·첫 화면·docs/)을 검사한다. 단계는 여섯이다.
+#   1. tools/tests의 시험: 루트 검사 도구 다섯의 시험, 루트 문서(README.md, docs/)가 저장소의 파일과 git 이력에 맞는지 보는
 #      시험, 루트 워크플로 둘(이 파일과 e2e.yml)의 규칙과 첫 화면의 워크플로 배지를 읽는 시험.
 #   2. tools/check_root_numbers.py: 첫 화면과 docs/에 옮겨 적은 수치가 구성 요소 README에 기록된 글자와 같은지.
 #   3. tools/check_links.py: 루트 문서의 상대 링크와 제목·줄 앵커가 끊기지 않았는지.
 #   4. tools/check_cross_deps.py: 구성 요소가 다른 구성 요소의 파일을 경로로 쓰는 곳의 선언이 지금도 맞는지.
+#   5. tools/check_evidence.py: 문서와 코드가 근거로 적은 커밋 해시, 기록 파일의 커밋 값, 등록한 '규칙 → 결과' 짝이 이
+#      저장소의 이력과 맞는지(2026-11-25에 더했다. 처음 두 주는 문제를 보고만 한다).
+#   6. tools/check_lock_drift.py: 잠금 파일(uv.lock, package-lock.json)이 등록한 갱신으로만 바뀌었는지.
 # - 경로 필터를 두지 않는다. 구성 요소 워크플로는 자기 폴더(와 자기 워크플로 파일)가 바뀔 때만 돌지만, 루트 수치의 출처는 구성
 #   요소 README이고 링크와 의존 선언도 구성 요소 안의 파일을 가리켜서 어느 폴더가 바뀌어도 이 검사가 깨질 수 있다. 그래서 main
 #   push와 모든 pull request에서 돌고, Actions 화면에서 수동으로도 돌릴 수 있다(workflow_dispatch).
 # - 주기 실행(schedule)은 넣지 않는다: 저장소에 정기 실행을 만드는 지속 설정이다.
-# - 구성 요소의 환경과 서비스는 설치하지도 띄우지도 않는다. 시험 환경에는 pytest와 PyYAML만 들어가고, 세 검사 도구는 내려받을
+# - 구성 요소의 환경과 서비스는 설치하지도 띄우지도 않는다. 시험 환경에는 pytest와 PyYAML만 들어가고, 다섯 검사 도구는 내려받을
 #   의존성이 없는 스크립트다. GPU·모델·Docker도 쓰지 않는다.
 name: repo-checks
 on:
@@ -27,7 +30,7 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    # 설치와 네 단계를 넉넉히 덮는 상한. 넘으면 GitHub가 작업을 끊는다.
+    # 설치와 여섯 단계를 넉넉히 덮는 상한. 넘으면 GitHub가 작업을 끊는다.
     timeout-minutes: 10
     env:
       # 루트 도구는 파이썬 3.11 이상을 요구한다(각 스크립트 머리의 requires-python, 표준 라이브러리 tomllib). e2e 워크플로와
@@ -71,3 +74,14 @@ jobs:
       # 적고 있는지 본다. 고정한 사본의 원본 커밋을 이력에서 풀기 때문에 위 체크아웃의 전체 이력이 필요하다.
       - name: Cross-component dependencies
         run: uv run --no-project tools/check_cross_deps.py
+      # 문서와 코드가 근거로 적은 커밋 해시가 이 저장소의 이력에서 풀리고 HEAD의 조상인지, 기록 파일의 커밋 값과 등록한
+      # '규칙 → 결과' 짝(tools/evidence.toml)이 이력과 맞는지 본다. 이력에서 푸는 검사라 위 체크아웃의 전체 이력이 필요하다.
+      # 처음 두 주는 보고만 한다. 그 뒤 이 인자를 뗀다. --report-only는 문제를 출력하되 종료 코드 0으로 끝낸다. 검사를
+      # 끝내지 못한 경우(등록 파일이나 이력을 읽지 못함)의 종료 코드 2는 이 인자로도 바뀌지 않아 그때는 이 단계가 실패한다.
+      - name: Commit hashes cited as evidence (report only)
+        run: uv run --no-project tools/check_evidence.py --report-only
+      # 추적되는 잠금 파일(uv.lock, package-lock.json)이 tools/locks.toml에 등록한 갱신으로만 바뀌었는지 본다. 잠금의 내용과
+      # 이력을 git 객체에서 읽으므로 이 단계도 전체 이력이 필요하다. 등록하지 않은 변경이 있으면 종료 코드 1이라 이 단계가
+      # 실패한다.
+      - name: Lock files change only through registered updates
+        run: uv run --no-project tools/check_lock_drift.py
