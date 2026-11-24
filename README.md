@@ -21,6 +21,12 @@ flowchart LR
     whisper -->|"보고서"| stt
     whisper -->|"모델"| summary
     agent -->|"음성 환경"| summary
+    %% GitHub가 그림 오른쪽 아래에 늘 띄우는 확대·이동 버튼이 마지막 상자를 가리지 않게, 보이지 않는 빈 칸 둘을 오른쪽에 둔다.
+    padA[" "]
+    padB[" "]
+    summary ~~~ padA ~~~ padB
+    classDef blank fill:none,stroke:none
+    class padA,padB blank
 ```
 
 실선은 코드로 이어진 곳(내주는 쪽 → 쓰는 쪽), 점선은 통화 순서다(코드로 잇지 않음). 단계마다 따로 띄우며, 네 단계를 처음부터 끝까지 잇는 서버는 없다. 실시간 음성 계층은 말하는 동안 음성 인식 → 번역 → 합성을 잇는 voice-translator가 맡아 말 끝 판정과 지연을 잰다. 그 밖의 관계는 [구조와 연결](docs/architecture.md#코드로-잇지-않은-관계)에 있다.
