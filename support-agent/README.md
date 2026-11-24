@@ -1,6 +1,6 @@
-# support-agent
+# 상담 에이전트 · LLM 에이전트와 평가 환경 (support-agent)
 
-> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '상담 에이전트' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+> [korean-voice-ai](../README.md)의 구성 요소다. 통화 흐름에서의 자리: 음성 인식([whisper-ko-ft](../whisper-ko-ft/README.md), [stt-scratch](../stt-scratch/README.md)) → 실시간 음성 계층([voice-translator](../voice-translator/README.md)) → **상담 에이전트**(이 폴더) → 상담 후처리([call-summary](../call-summary/README.md)). 화살표는 통화 순서일 뿐이고, 코드로 이어진 곳은 [docs/architecture.md](../docs/architecture.md)에 있다.
 
 한국어 고객센터 업무를 **도구 호출**로 처리하는 LLM 상담 에이전트와, 그 에이전트가 얼마나 믿을 만한지를 **미리 정한 규칙으로 재는 평가 환경**이다. 가상의 온라인 쇼핑몰 고객센터를 다룬다. 에이전트는 고객과 대화하면서 주문 조회, 취소, 반품·교환 접수, 배송지 변경, 보상 쿠폰 발급, 상담원 이관 같은 도구를 호출하고, 한국어 규정 문서를 지켜야 한다.
 
@@ -286,4 +286,4 @@ reports/              공식 측정의 에피소드 기록 (대화, 도구 호�
 
 ## 이 폴더의 글 읽는 법
 
-이 폴더는 [korean-voice-ai](../README.md) 저장소의 구성 요소 `support-agent/`다. 이 폴더의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/support-agent.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+이 폴더(`support-agent/`)의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/support-agent.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다.
