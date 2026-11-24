@@ -87,6 +87,19 @@ def test_uv_version_is_the_same_in_the_image_and_ci_and_meets_the_project_floor(
     assert _version(image.group(1)) >= _version(floor.group(1))
 
 
+# 이미지에 넣는 uv(와 위 시험이 이와 같게 묶는 CI의 uv)는 0.13.4 이상이어야 한다. uv 0.13.4 미만은 기본으로
+# 쓰는 루트 인증서 묶음(webpki-root-certs)에, 개인 키가 유출되어 발급 기관이 폐기한 중간 CA 인증서 여덟 개와
+# 이어진 루트가 들어 있다. 그 키를 가진 쪽은 uv가 받아들이는 인증서를 아무 호스트 이름으로나 만들 수
+# 있다(공개 권고 PYSEC-2026-4321 / GHSA-hq85-5cpj-mr62. 0.13.4가 그 루트를 묶음에서 뺐다). 이 이미지의 uv는
+# 빌드 때 패키지를 내려받으므로 그 영향 안에 있고, CI의 uv도 같은 이유로 같은 판이다. pyproject.toml의 하한은
+# uv.lock을 쓴 판(0.13.1) 그대로 두고, 실제로 쓰는 판의 하한은 이 시험이 따로 지킨다.
+def test_uv_version_is_not_older_than_the_release_that_dropped_the_revoked_root():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    image = re.search(r"^COPY --from=ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@", dockerfile, re.M)
+    assert image
+    assert _version(image.group(1)) >= (0, 13, 4), image.group(1)
+
+
 # 빌드 단계에서 uv가 받은 패키지 캐시를 이미지 레이어에 남기지 않는다: `uv sync`를 부르는 RUN마다 빌드
 # 사용자(root)의 uv 기본 캐시 위치 /root/.cache/uv에 BuildKit 캐시 마운트를 건다. 전에는 그 캐시가 이미지에
 # 그대로 남았다. `uv sync` RUN이 하나도 없어도 실패한다.
