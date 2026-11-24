@@ -1,8 +1,8 @@
-# whisper-ko-ft
+# 음성 인식 · Whisper 파인튜닝 (whisper-ko-ft)
 
-> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '음성 인식' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+> [korean-voice-ai](../README.md)의 구성 요소다. 통화 흐름에서의 자리: **음성 인식**(이 폴더, [stt-scratch](../stt-scratch/README.md)) → 실시간 음성 계층([voice-translator](../voice-translator/README.md)) → 상담 에이전트([support-agent](../support-agent/README.md)) → 상담 후처리([call-summary](../call-summary/README.md)). 화살표는 통화 순서일 뿐이고, 코드로 이어진 곳은 [docs/architecture.md](../docs/architecture.md)에 있다.
 
-공개 한국어 음성 데이터(Zeroth-Korean, 51.6시간)로 Whisper를 파인튜닝하고, **미리 정한 규칙으로 전후를 측정**하는 프로젝트. 같은 도메인에서 얼마나 좋아지는지뿐 아니라 다른 도메인(FLEURS)과 영어에서 무엇을 잃는지, 전화 음질(8kHz)에서는 어떻게 되는지를 함께 잰다. (2026-10-24 추가 확인: 같은 도메인의 Zeroth 수치는 처음 듣는 화자가 학습에서 본 문장을 읽는 조건이다. 아래 한계의 'Zeroth의 문장 겹침')
+공개 한국어 음성 데이터(Zeroth-Korean, 51.6시간)로 Whisper를 파인튜닝하고, **미리 정한 규칙으로 전후를 측정**하는 구성 요소. 같은 도메인에서 얼마나 좋아지는지뿐 아니라 다른 도메인(FLEURS)과 영어에서 무엇을 잃는지, 전화 음질(8kHz)에서는 어떻게 되는지를 함께 잰다. (2026-10-24 추가 확인: 같은 도메인의 Zeroth 수치는 처음 듣는 화자가 학습에서 본 문장을 읽는 조건이다. 아래 한계의 'Zeroth의 문장 겹침')
 
 계획은 [docs/plan.md](docs/plan.md), 측정 규칙과 결과는 [docs/experiments.md](docs/experiments.md).
 
@@ -187,4 +187,4 @@ LoRA 후보와 전화 음질 조건의 명령은 [docs/experiments.md](docs/expe
 
 ## 이 폴더의 글 읽는 법
 
-이 폴더는 [korean-voice-ai](../README.md) 저장소의 구성 요소 `whisper-ko-ft/`다. 이 폴더의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/whisper-ko-ft.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+이 폴더(`whisper-ko-ft/`)의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/whisper-ko-ft.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다.
