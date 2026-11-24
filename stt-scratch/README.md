@@ -1,8 +1,8 @@
-# stt-scratch
+# 음성 인식 · 처음부터 만든 스트리밍 모델 (stt-scratch)
 
-> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '음성 인식' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+> [korean-voice-ai](../README.md)의 구성 요소다. 통화 흐름에서의 자리: **음성 인식**([whisper-ko-ft](../whisper-ko-ft/README.md), 이 폴더) → 실시간 음성 계층([voice-translator](../voice-translator/README.md)) → 상담 에이전트([support-agent](../support-agent/README.md)) → 상담 후처리([call-summary](../call-summary/README.md)). 화살표는 통화 순서일 뿐이고, 코드로 이어진 곳은 [docs/architecture.md](../docs/architecture.md)에 있다.
 
-한국어 음성 인식(STT) 모델을 처음 설계부터 만들어 공개 데이터로 학습하고, 스트리밍 자막 서비스까지 묶는 프로젝트다. 사전학습 가중치는 쓰지 않는다.
+한국어 음성 인식(STT) 모델을 처음 설계부터 만들어 공개 데이터로 학습하고, 스트리밍 자막 서비스까지 묶는 구성 요소다. 사전학습 가중치는 쓰지 않는다.
 
 - 모델: 청크 인과 Conformer-CTC 약 21M 파라미터(순수 PyTorch). 인과 Conv2d 서브샘플링, RoPE 어텐션 + QK-norm + 청크 마스크, BACON식 분할 depthwise conv, 동적 청크 학습, 캐시 스트리밍 추론. 최종 모델은 6층 중간 CTC(InterCTC) 헤드와 TrimTail 이어 학습을 쓴다(2단계 자기조건 CTC → 3단계 판정으로 교체, 4단계 TrimTail 채택). 구조 선택의 근거와 기각한 대안은 `docs/survey/README.md`
 - 데이터: Zeroth-Korean(CC BY 4.0) + FLEURS 한국어(CC BY 4.0) + Common Voice 22 한국어(CC0). 라이선스·분할·정규화는 `docs/data.md`, 데이터 귀속(저작자 표시·라이선스 링크·변경 표시)은 그 문서의 "귀속" 절. `manifests/`와 `reports/`의 전사문·가설은 각 데이터셋의 라이선스를 따른다(전사문은 `docs/experiments.md`의 텍스트 정규화를 거친 것)
@@ -148,4 +148,4 @@ web/               브라우저 자막 페이지
 
 ## 이 폴더의 글 읽는 법
 
-이 폴더는 [korean-voice-ai](../README.md) 저장소의 구성 요소 `stt-scratch/`다. 이 폴더의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/stt-scratch.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+이 폴더(`stt-scratch/`)의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/stt-scratch.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다.
