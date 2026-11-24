@@ -306,12 +306,13 @@ value = "66.2"
 # README.md (첫 화면)
 # ---------------------------------------------------------------------------------------------
 
-# 파일 전체에 건다(section을 주지 않는다): 구성 요소 표 밖의 절에 선언 없는 퍼센트 수가 끼어들어도 잡으려는 것이다.
+# 파일 전체에 건다(section을 주지 않는다): 단계별 결과 표 밖의 절에 선언 없는 퍼센트 수가 끼어들어도 잡으려는 것이다.
 [[coverage]]
 where = "README.md"
 
-# 구성 요소 표의 대표 수치. 표의 줄은 통화 흐름 순서(whisper-ko-ft, stt-scratch, voice-translator, support-agent,
-# call-summary)이고, 조건 글은 그 수가 든 표의 같은 줄에 있다. 표에서 대표 수치와 같은 칸에 함께 적은 짝 수치는 굵게
+# '단계별 결과' 절 표의 대표 수치. 표의 줄은 통화 흐름 순서(음성 인식의 whisper-ko-ft와 stt-scratch, 실시간 음성
+# 계층의 voice-translator, 상담 에이전트의 support-agent, 상담 후처리의 call-summary)이고, 조건 글은 그 수가 든 표의
+# 같은 줄에 있다. 표에서 대표 수치와 같은 칸에 함께 적은 짝 수치는 굵게
 # 적는다(훑어볼 때 수가 조건 글에 묻히지 않게. 좋아진 수와 나빠진 수를 똑같이 굵게 한다). 그래서 그 선언의 context에는
 # 굵게 표시 `**`가 수 앞에 들어 있다. 테스트 수와 '40과제 × 4회' 같은 조건의 크기는 굵게 적지 않는다.
 
@@ -325,7 +326,7 @@ where = "README.md"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "large-v3-turbo **4.48"
 condition = "학습에서 본 문장"
 source = "whisper-ko-ft/README.md"
@@ -335,7 +336,7 @@ value = "4.48"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "LoRA 파인튜닝 **1.96"
 condition = "학습에서 본 문장"
 source = "whisper-ko-ft/README.md"
@@ -345,7 +346,7 @@ value = "1.96"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "다른 도메인 FLEURS 한국어 test는 **5.21"
 condition = "도메인 전용"
 source = "whisper-ko-ft/README.md"
@@ -355,7 +356,7 @@ value = "5.21"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "다른 도메인 FLEURS 한국어 test는 **5.21%** → **6.94"
 condition = "도메인 전용"
 source = "whisper-ko-ft/README.md"
@@ -369,7 +370,7 @@ value = "6.94"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "Zeroth 공식 test **3.67"
 condition = "문장 암기"
 source = "stt-scratch/README.md"
@@ -379,7 +380,7 @@ value = "3.67"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "처음 보는 문장만 **15.55"
 condition = "처음 보는 문장"
 source = "stt-scratch/README.md"
@@ -392,7 +393,7 @@ value = "15.55"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "인식 CER **4.57"
 condition = "FLEURS"
 source = "voice-translator/README.md"
@@ -402,7 +403,7 @@ value = "4.57"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "한국어 원문 **1.86"
 condition = "말을 멈춘 뒤"
 source = "voice-translator/README.md"
@@ -412,7 +413,7 @@ value = "1.86"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "한국어 원문 **1.86초 → 1.24"
 condition = "말을 멈춘 뒤"
 source = "voice-translator/README.md"
@@ -426,7 +427,7 @@ value = "1.24"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "qwen2.5 7B **18.1"
 condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
@@ -436,7 +437,7 @@ value = "18.1"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "`qwen3.5:4b` **55.6"
 condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
@@ -446,7 +447,7 @@ value = "55.6"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "쓰기 호출도 **6"
 condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
@@ -456,7 +457,7 @@ value = "6"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "쓰기 호출도 **6 → 13"
 condition = "시험용 40과제 × 4회"
 source = "support-agent/README.md"
@@ -471,7 +472,7 @@ value = "13"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "같은 생성기) **95.7"
 condition = "같은 생성기"
 source = "call-summary/README.md"
@@ -481,7 +482,7 @@ value = "95.7"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "다른 모델이 쓴 대화) **90.0"
 condition = "다른 모델이 쓴 대화"
 source = "call-summary/README.md"
@@ -491,7 +492,7 @@ value = "90.0"
 
 [[number]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "학습에 없던 업종) **55.0"
 condition = "학습에 없던 업종"
 source = "call-summary/README.md"
@@ -499,14 +500,15 @@ source_section = "결과 요약 (3단계)"
 source_context = "| **Qwen3-4B QLoRA (1,500건 학습)** | **95.7** [93.3, 97.7] | **90.0** [81.7, 96.7] | **55.0"
 value = "55.0"
 
-# 구성 요소 표의 테스트 수. 구성 요소 기록 파일에 없는 수라 [[snapshot]]으로 적는다. 모두 main 커밋 51b6d62에서 돈
+# '단계별 결과' 절 표의 테스트 수. 구성 요소 기록 파일에 없는 수라 [[snapshot]]으로 적는다. 모두 main 커밋 51b6d62에서 돈
 # GitHub Actions push 실행(2026-11-10)의 작업 로그에 찍힌 pytest·Vitest·Playwright 요약 줄의 통과·건너뜀 수다.
 # voice-translator 백엔드는 주 시험 단계(uv run pytest -q)의 수만 옮기고, 측정 도구용 추가 시험 단계의 수는 옮기지 않는다.
 # 표의 테스트 칸은 줄을 <br>로 나눠 적는다(그 열을 좁혀 대표 수치 열을 넓히려고). 그래서 context에도 <br>이 들어 있다.
+# 칸의 첫 줄은 그 구성 요소 워크플로의 배지이고, 수는 그 아래 줄부터다(context는 배지 줄을 넣지 않고 수의 줄만 잡는다).
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 779"
 value = "779"
 as_of = "2026-11-10"
@@ -514,7 +516,7 @@ evidence = "GitHub Actions run 42798650367, whisper-ko-ft.yml의 test 작업(mai
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 779<br>건너뜀 2"
 value = "2"
 as_of = "2026-11-10"
@@ -522,7 +524,7 @@ evidence = "GitHub Actions run 42798650367, whisper-ko-ft.yml의 test 작업(mai
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 284"
 value = "284"
 as_of = "2026-11-10"
@@ -530,7 +532,7 @@ evidence = "GitHub Actions run 42798650185, stt-scratch.yml의 test 작업(main 
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 284<br>건너뜀 12"
 value = "12"
 as_of = "2026-11-10"
@@ -538,7 +540,7 @@ evidence = "GitHub Actions run 42798650185, stt-scratch.yml의 test 작업(main 
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 742"
 value = "742"
 as_of = "2026-11-10"
@@ -546,7 +548,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 backend 작�
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 742<br>건너뜀 71"
 value = "71"
 as_of = "2026-11-10"
@@ -554,7 +556,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 backend 작�
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "Vitest 184"
 value = "184"
 as_of = "2026-11-10"
@@ -562,7 +564,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 frontend 작
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "Playwright 8"
 value = "8"
 as_of = "2026-11-10"
@@ -570,7 +572,7 @@ evidence = "GitHub Actions run 42798650193, voice-translator.yml의 e2e 작업(P
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 2,160"
 value = "2160"
 as_of = "2026-11-10"
@@ -578,7 +580,7 @@ evidence = "GitHub Actions run 42798650311, support-agent.yml의 test 작업(mai
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 2,160<br>건너뜀 36"
 value = "36"
 as_of = "2026-11-10"
@@ -586,7 +588,7 @@ evidence = "GitHub Actions run 42798650311, support-agent.yml의 test 작업(mai
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 495"
 value = "495"
 as_of = "2026-11-10"
@@ -594,7 +596,7 @@ evidence = "GitHub Actions run 42798650364, call-summary.yml의 test 작업(main
 
 [[snapshot]]
 where = "README.md"
-section = "구성 요소"
+section = "단계별 결과"
 context = "통과 495<br>건너뜀 8"
 value = "8"
 as_of = "2026-11-10"
