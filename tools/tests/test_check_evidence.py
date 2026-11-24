@@ -3,12 +3,14 @@
 이 도구는 추적 파일(HEAD의 내용)에 적힌 커밋 해시 참조가 이 저장소의 git 이력과 맞는지 본다. 7~40자
 16진수 낱말을 뽑아 이력으로 풀어 보고, 풀리는데 HEAD의 조상이 아니거나 둘 이상에 맞으면(모호) 알리고,
 문서(.md)가 커밋 참조라고 밝혀 적은 낱말이 풀리지 않으면 알린다. 다른 저장소의 해시는 등록 파일
-(tools/evidence.toml)의 [[external]]로 면제하고, 낡거나 잘못된 등록도 알린다. 한 시험은 한 가지만
-어긋나게 해서, 어느 규칙이 어떤 문제를 냈는지 시험이 정확히 가리킬 수 있게 한다. 아래 일곱 구역을 이 파일의
-구역 순서대로 고정한다.
+(tools/evidence.toml)의 [[external]]로 면제하고, 낡거나 잘못된 등록도 알린다. 같은 등록 파일의 [[record]]가
+가리키는 기록 파일(JSON)에 적힌 커밋 값과, [[pair]]에 등록한 '규칙 → 결과' 짝의 순서도 본다. 한 시험은 한
+가지만 어긋나게 해서, 어느 규칙이 어떤 문제를 냈는지 시험이 정확히 가리킬 수 있게 한다. 아래 아홉 구역을 이
+파일의 구역 순서대로 고정한다.
     1. 낱말 뽑기: 7~40자 소문자 16진수를 ASCII 경계로(뒤에 한글 조사가 붙어도) 줄 번호와 함께 뽑고, 문서가
-       커밋 참조로 적었는지(백틱 한 쌍, `커밋`·`commit` 바로 뒤)도 함께 돌려준다. a~f 글자가 하나도 없는
-       숫자뿐인 것은 그렇게 적은 자리에 있을 때만 낱말이다(날짜나 숫자 꼬리를 해시로 읽지 않으려는 것이다).
+       커밋 참조로 적었는지(백틱 한 쌍, `커밋`·`commit` 바로 뒤)도 함께 돌려준다. 백틱 쌍은 줄마다 맞추고, 한 줄에
+       감싼 낱말이 수천 개여도 느려지지 않는다. a~f 글자가 하나도 없는 숫자뿐인 것은 그렇게 적은 자리에 있을
+       때만 낱말이다(날짜나 숫자 꼬리를 해시로 읽지 않으려는 것이다).
     2. 이력으로 풀기: 앞부분이 같은 커밋을 찾고, 둘 이상이면 모호다.
     3. 규칙 3·4: 풀리는 낱말은 HEAD의 조상이어야 하고, 문서가 커밋 참조로 적은 낱말은 풀려야 한다.
     4. 규칙 5와 등록 파일: 등록은 그 파일의 그 낱말만 면제하고, 낡거나 잘못된 등록과 꼴이 틀린 항목은 알린다.
@@ -16,9 +18,16 @@
        서브모듈은 건너뛰고, UTF-8이 아닌 글도 멈추지 않는다. 어느 ref에서도 닿지 않는 커밋은 세지 않는다.
     6. 시작할 수 없음: 얕은 복제, git 실패, 저장소가 아님, 커밋 없음은 종료 2다(읽지 못했는데 통과하지 않는다).
     7. 명령줄: 종료 코드 0·1·2, 출력 꼴과 정렬, --report-only, 파이프로 나가는 UTF-8 출력, 도움말, 읽기 명령만 부름.
+    8. 기록 파일의 커밋 값([[record]]): glob에 맞는 HEAD의 파일(.jsonl은 줄마다)에서 모든 깊이의 키를 찾아 센다.
+       값이 커밋 꼴이고, 이 저장소의 커밋 하나로 풀리고, HEAD의 조상이어야 한다. 같은 객체에 git_tree가 있으면 그
+       커밋의 구성 요소 폴더 트리와 같아야 한다. 맞는 파일이 없으면 낡은 등록이고, 등록한 키가 맞는 파일 어디에도 없으면
+       그 키의 문제(오타이거나 낡은 등록)이며, 읽을 수 없는 파일은 종료 2다.
+    9. 등록한 짝([[pair]]): 두 커밋이 풀리고 조상이며, 서로 다르고, 규칙이 결과의 조상이고, 커밋 시각이 거꾸로
+       가지 않고(같은 초는 된다), where 문서에 두 해시의 앞 7자가 글자로 있어야 한다.
 
 시험용 저장소는 임시 폴더에 빈 git 저장소를 만들고 커밋을 쌓아 꾸민다. 고정물 world는 main에 커밋 셋(first →
-second → third)을 쌓고, 그 사이에 갈라진 side 브랜치에만 있는 커밋 하나(main에 합치지 않는다)를 둔다. third의
+second → third)을 쌓고, 그 사이에 갈라진 side 브랜치에만 있는 커밋 하나(main에 합치지 않는다)를 둔다. second는
+구성 요소 폴더 comp를 처음 만든다(기록 파일 시험이 그 폴더의 트리를 쓴다. first에는 comp가 없다). third의
 문서와 코드는 앞선 두 커밋의 앞 7자를 적고 있어서 처음 상태에서는 문제가 없다. 이 저장소를 만드는 데 git을
 스무 번쯤 부르므로, 원본을 모듈에서 한 번만 만들고(world_template) 시험마다 그 폴더를 복사해 쓴다. 저장소가
 필요 없는 시험(낱말 뽑기, 풀이, 등록 파일의 꼴)은 world를 쓰지 않는다. 앞 7자가 모두 숫자인 해시는 참조 표시
@@ -28,10 +37,12 @@ second → third)을 쌓고, 그 사이에 갈라진 side 브랜치에만 있는
 대상은 HEAD에서 읽는다). 이 저장소 자신을 대상으로 하는 시험은 이 파일에 없다.
 """
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -77,13 +88,30 @@ def git(repo: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def commit_files(repo: Path, files: dict[str, str | bytes], message: str) -> str:
-    """files를 쓰고 그 파일만 스테이징해 커밋한 뒤, 새 커밋의 40자 해시를 돌려준다."""
+def commit_files(
+    repo: Path, files: dict[str, str | bytes], message: str, *, date: str | None = None
+) -> str:
+    """files를 쓰고 그 파일만 스테이징해 커밋한 뒤, 새 커밋의 40자 해시를 돌려준다.
+
+    date를 주면(예: 2026-01-02T03:04:05+0000) 작성 시각과 커밋 시각을 그 값으로 정한다. 커밋 시각이 같은 초이거나
+    거꾸로 간 커밋을 만들 때 쓴다.
+    """
     for rel, content in files.items():
         write(repo, rel, content)
     git(repo, "add", "--", *files)
-    git(repo, "commit", "--quiet", "-m", message)
+    if date is None:
+        git(repo, "commit", "--quiet", "-m", message)
+    else:
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", message], cwd=repo, check=True, capture_output=True, env=env
+        )
     return git(repo, "rev-parse", "HEAD")
+
+
+def commit_seconds(repo: Path, commit: str) -> int:
+    """commit의 커밋 시각(초). 사용자 설정(서명 확인 줄)이 끼지 않게 --no-show-signature를 붙인다."""
+    return int(git(repo, "show", "-s", "--no-show-signature", "--format=%ct", commit))
 
 
 def short(commit: str, length: int = 7) -> str:
@@ -107,6 +135,24 @@ def assert_not_a_commit_prefix(repo: Path, word: str) -> None:
 def external_entry(word: str, where: str, what: str = "다른 저장소의 커밋") -> str:
     """등록 파일의 [[external]] 항목 하나(뒤에 빈 줄)."""
     return f'[[external]]\nhash = "{word}"\nwhere = "{where}"\nwhat = "{what}"\n\n'
+
+
+def record_rule(
+    glob: str, keys: list[str], component: str = "comp", what: str = "기록 파일의 커밋 값"
+) -> str:
+    """등록 파일의 [[record]] 항목 하나(뒤에 빈 줄)."""
+    names = ", ".join(f'"{key}"' for key in keys)
+    return f'[[record]]\nglob = "{glob}"\nkeys = [{names}]\ncomponent = "{component}"\nwhat = "{what}"\n\n'
+
+
+def pair_rule(
+    pair_id: str, rule: str, result: str, where: str, what: str = "규칙 커밋 뒤에 잰 결과"
+) -> str:
+    """등록 파일의 [[pair]] 항목 하나(뒤에 빈 줄)."""
+    return (
+        f'[[pair]]\nid = "{pair_id}"\nrule = "{rule}"\nresult = "{result}"\n'
+        f'where = "{where}"\nwhat = "{what}"\n\n'
+    )
 
 
 @dataclass
@@ -155,7 +201,10 @@ def world_template(tmp_path_factory) -> World:
     repo = tmp_path_factory.mktemp("world-template")
     init_repo(repo)
     first = commit_files(repo, {"src/app.py": "VALUE = 1\n"}, "Add the app module")
-    second = commit_files(repo, {"src/app.py": "VALUE = 2\n"}, "Change the value")
+    # second는 구성 요소 폴더 comp를 처음 만든다. first에는 comp가 없다(기록 파일의 git_tree 시험이 쓴다).
+    second = commit_files(
+        repo, {"src/app.py": "VALUE = 2\n", "comp/code.py": "VALUE = 2\n"}, "Change the value"
+    )
     # side 브랜치는 second에서 갈라져 커밋 하나를 갖고, main에 합치지 않는다. 그래서 이 커밋은 이 저장소의
     # 커밋이면서 HEAD의 조상이 아니다.
     git(repo, "switch", "--quiet", "--create", "side")
@@ -189,6 +238,18 @@ def problems_of(world: World, registry_text: str = "") -> list[Problem]:
     """등록 파일을 registry_text로 쓰고 읽어, 고정물의 HEAD를 검사한 문제들."""
     registry = load_registry(world.set_registry(registry_text), display="tools/evidence.toml")
     return check_references(world.repo, registry)
+
+
+def records_of(world: World, registry_text: str) -> list[Problem]:
+    """등록 파일을 registry_text로 쓰고 읽어, 고정물의 HEAD에 [[record]] 검사를 한 문제들."""
+    registry = load_registry(world.set_registry(registry_text), display="tools/evidence.toml")
+    return check_evidence.check_records(world.repo, registry)
+
+
+def pairs_of(world: World, registry_text: str) -> list[Problem]:
+    """등록 파일을 registry_text로 쓰고 읽어, 고정물의 HEAD에 [[pair]] 검사를 한 문제들."""
+    registry = load_registry(world.set_registry(registry_text), display="tools/evidence.toml")
+    return check_evidence.check_pairs(world.repo, registry)
 
 
 def parse_registry(folder: Path, text: str) -> Registry:
@@ -288,6 +349,37 @@ def test_find_tokens_takes_a_digit_only_word_only_where_it_is_claimed(text, clai
     # 꼬리일 수 있어 버린다. 낱말로 뽑힌 것의 셋째 값은 늘 참이다.
     found = find_tokens(text.replace("1234abc", "1234567"))
     assert found == ([(1, "1234567", True)] if claimed else [])
+
+
+def test_backtick_pairs_are_judged_line_by_line():
+    # 백틱 쌍은 줄마다 따로 맞춘다. 앞 줄의 쌍이 다음 줄의 판정으로 새어 들어오면 안 된다: 아래 첫째 줄과 둘째 줄은 낱말이
+    # 줄 안의 같은 자리에 있고 양옆이 모두 백틱이지만, 첫째 줄에서만 백틱 쌍의 안쪽이다.
+    text = (
+        "``1234abc``\n"  # 백틱 둘로 감싼 쌍
+        "``1234abc`\n"  # 닫는 백틱 줄이 짧아 쌍이 아니다
+        "`x` `1234abc`\n"  # 앞의 쌍과 이 낱말의 쌍이 따로다
+        "`1234abc` `x`1234abc`y`\n"  # 첫 낱말은 쌍 안이고 둘째 낱말은 이웃한 두 쌍 사이다
+    )
+    assert find_tokens(text) == [
+        (1, "1234abc", True),
+        (2, "1234abc", False),
+        (3, "1234abc", True),
+        (4, "1234abc", True),
+        (4, "1234abc", False),
+    ]
+
+
+def test_many_backticked_words_on_one_line_stay_fast():
+    # 한 줄에 백틱으로 감싼 낱말이 수천 개여도 느려지지 않는다. 감싼 낱말마다 그 줄 전체의 백틱 쌍을 다시 찾으면 줄 길이에
+    # 낱말 수를 곱한 만큼 걸린다(8000개가 든 줄 하나, 약 8만 자에 이 PC에서 25초쯤). 줄마다 한 번만 찾으면 0.02초쯤이다.
+    # 상한은 느린 PC에서도 헛실패하지 않게 넉넉히(고친 코드의 백 배쯤) 잡았고, 고치기 전 코드는 그 상한을 크게 넘는다.
+    words = [f"a{number:06x}" for number in range(8000)]
+    text = " ".join(f"`{word}`" for word in words) + "\n"
+    started = time.perf_counter()
+    found = find_tokens(text)
+    elapsed = time.perf_counter() - started
+    assert found == [(1, word, True) for word in words]
+    assert elapsed < 2.0, f"{len(words)}개가 든 한 줄을 뽑는 데 {elapsed:.1f}초 걸렸다"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -490,8 +582,8 @@ def test_summary_counts_the_occurrences_that_rules_three_and_four_touched(world,
     world.set_registry(external_entry(FAKE, "docs/c.md"))
     assert main(["--repo", str(world.repo)]) == 1
     lines = capsys.readouterr().out.splitlines()
-    # 처음 상태의 3개 + 이 문서의 5개(등록 통과 1, 등록 없는 문제 1, 풀림 둘, 조상 아님 1). 기록 값·짝은 이
-    # 도구가 아직 세지 않는다.
+    # 처음 상태의 3개 + 이 문서의 5개(등록 통과 1, 등록 없는 문제 1, 풀림 둘, 조상 아님 1). 이 등록 파일에는
+    # [[record]]와 [[pair]]가 없어 기록 값과 짝은 0이다.
     assert lines[-1] == "참조 8개, 기록 값 0개, 짝 0개, 문제 2개"
     assert len(lines) == 3  # 문제 둘과 끝 줄
 
@@ -655,10 +747,15 @@ def test_tables_that_are_not_arrays_of_tables_are_problems(tmp_path):
         registry = parse_registry(tmp_path, f'{key} = "x"\n')
         assert places(list(registry.problems)) == [(key, "tools/evidence.toml", 0)]
         assert f"[[{key}]] 표의 배열이어야 한다" in str(registry.problems[0])
-    # record와 pair는 받는 꼭대기 표다(모르는 표가 아니다). 항목 안의 키는 여기서 보지 않는다.
-    registry = parse_registry(tmp_path, "[[record]]\n[[pair]]\n[[pair]]\n")
+    # record와 pair는 받는 꼭대기 표다(모르는 표가 아니다). 꼴이 맞는 항목은 그대로 읽힌다.
+    text = (
+        record_rule("comp/reports/*/manifest.json", ["git_commit"])
+        + pair_rule("first-pair", "1234abc", "2345bcd", "docs/a.md")
+        + pair_rule("second-pair", "1234abc", "3456cde", "docs/a.md")
+    )
+    registry = parse_registry(tmp_path, text)
     assert registry.problems == ()
-    assert (len(registry.records), len(registry.pairs)) == (1, 2)
+    assert (len(registry.records), len(registry.pairs), registry.pair_total) == (1, 2, 2)
 
 
 def test_registry_problems_keep_their_order_in_the_file(world):
@@ -935,10 +1032,16 @@ def test_help_is_korean_and_lists_the_rules_and_exit_codes(capsys):
         "[[external]]",
         "낡은 등록",
         "잘못 등록",
+        "[[record]]",
+        "git_tree",
+        "어디에도 한 번도 안 나오면",  # 등록한 키가 맞는 파일 어디에도 없으면 그 키의 문제라는 말
+        "[[pair]]",
         "종료 코드",
         "git fetch --unshallow",
     ):
         assert needle in text, needle
+    # 기록 값과 짝 검사가 생겼으니 '표의 배열인지만 본다'는 옛 말이 남아 있으면 안 된다.
+    assert "배열인지만" not in text
 
 
 def test_only_read_commands_are_run(world, monkeypatch):
@@ -968,3 +1071,613 @@ def test_only_read_commands_are_run(world, monkeypatch):
 def test_empty_registry_object_checks_the_world_too(world):
     # 등록 파일 없이 Registry()를 바로 넘겨도 같은 결과다(함수로 부르는 쪽을 위한 기본값).
     assert check_references(world.repo, Registry()) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# 8. 기록 파일의 커밋 값([[record]])
+# ---------------------------------------------------------------------------------------------
+
+MANIFEST = "comp/reports/run1/manifest.json"
+MANIFEST_GLOB = "comp/reports/*/manifest.json"
+
+
+def write_manifest(world: World, **fields) -> str:
+    """MANIFEST를 fields의 JSON으로 쓰고 커밋한다. 새 커밋의 해시를 돌려준다."""
+    return commit_files(world.repo, {MANIFEST: json.dumps(fields)}, "Write the manifest")
+
+
+def test_record_commit_must_be_an_ancestor(world):
+    # 여러 경우를 한 번에 커밋하고 한 번에 검사한다(경우마다 폴더 하나, 이름이 폴더 이름이다).
+    assert_not_a_commit_prefix(world.repo, FAKE)
+    second = world.second
+    # 이름 → (값, 문제 줄에 적힐 값 모양, 문제 이유에 있어야 할 말). 문제가 아닌 것은 None이다.
+    cases = {
+        "full": (second, None, None),
+        "short": (second[:7], None, None),  # 줄임 해시도 풀린다
+        "side": (world.side, world.side, "조상이 아니다"),
+        "unknown": ("unknown", "unknown", "16진수"),
+        "dirty": (second + "+dirty", second + "+dirty", "16진수"),
+        "empty": ("", '""', "16진수"),
+        "fake": (FAKE, FAKE, "풀리지 않는다"),
+        "null": (None, "null", "글이 아니다"),  # 값이 글이 아니면 그 자리에 JSON 꼴을 적는다
+        "number": (12345678, "12345678", "글이 아니다"),
+        "list": (["x"], '["x"]', "글이 아니다"),
+    }
+    files = {
+        f"comp/reports/{name}/manifest.json": json.dumps({"git_commit": value, "official": True})
+        for name, (value, _, _) in cases.items()
+    }
+    commit_files(world.repo, files, "Write the manifests")
+    problems = records_of(world, record_rule(MANIFEST_GLOB, ["git_commit"]))
+
+    expected = {name: case for name, case in cases.items() if case[1] is not None}
+    assert places(problems) == sorted(
+        ("record", f"comp/reports/{name}/manifest.json", 0) for name in expected
+    )
+    for problem in problems:
+        name = problem.path.split("/")[2]
+        _, shown, reason = expected[name]
+        assert str(problem).startswith(f"record {problem.path}: git_commit: {shown}: "), name
+        assert reason in str(problem), name
+
+
+def test_record_keys_are_found_at_any_depth_and_in_jsonl(world, capsys):
+    # 값 셋: json 하나(깊이 셋, 줄임 해시, 맨 앞에 BOM)와 jsonl 둘(줄 끝 CR, 공백뿐인 줄). 등록한 키가 아닌 것은 세지 않는다.
+    nested = {"a": {"b": [{"commit": world.second[:7], "other_commit": "unknown"}]}}
+    rows = [{"meta": {"asr": {"commit": world.second}}}, {"commit": world.second, "n": 1}]
+    commit_files(
+        world.repo,
+        {
+            "comp/reports/a/data.json": b"\xef\xbb\xbf" + json.dumps(nested).encode("utf-8"),
+            "comp/reports/b/rows.jsonl": (
+                json.dumps(rows[0]) + "\r\n \r\n" + json.dumps(rows[1]) + "\r\n"
+            ).encode("utf-8"),
+        },
+        "Write record files",
+    )
+    world.set_registry(record_rule("comp/reports/*/*", ["commit"]))
+    assert main(["--repo", str(world.repo)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-1].split(", ")[1:] == ["기록 값 3개", "짝 0개", "문제 0개"]
+
+
+def test_record_problem_line_has_the_line_number_for_jsonl(world):
+    rows = [{"commit": world.second}, {"x": 1}, {"commit": "unknown"}]
+    commit_files(
+        world.repo,
+        {"comp/reports/b/rows.jsonl": "".join(json.dumps(row) + "\n" for row in rows)},
+        "Write a record file",
+    )
+    problems = records_of(world, record_rule("comp/reports/*/*.jsonl", ["commit"]))
+    assert places(problems) == [("record", "comp/reports/b/rows.jsonl", 3)]
+    assert str(problems[0]).startswith("record comp/reports/b/rows.jsonl:3: commit: unknown: ")
+
+
+def test_record_key_missing_from_some_files_is_not_a_problem(world):
+    # 파일 단위로는 너그럽다: glob에 걸린 파일 가운데 그 키가 없는 파일이 섞여 있는 것은 문제가 아니고 값으로 세지도
+    # 않는다. 키가 든 파일이 하나라도 있으면 된다.
+    commit_files(
+        world.repo,
+        {
+            "comp/reports/a/manifest.json": json.dumps({"git_commit": world.second}),
+            "comp/reports/b/manifest.json": json.dumps({"official": True}),
+        },
+        "Write record files",
+    )
+    registry = load_registry(
+        world.set_registry(record_rule(MANIFEST_GLOB, ["git_commit"])), display="tools/evidence.toml"
+    )
+    report = check_evidence.scan_records(world.repo, registry)
+    assert report.problems == ()
+    assert report.values == 1
+
+
+def test_record_key_found_in_no_file_is_a_problem(world, capsys):
+    # 규칙 단위로는 엄격하다: 등록한 키가 glob에 맞는 파일 전체에서 한 번도 안 나오면 키 이름의 오타이거나 낡은 등록이다.
+    # 이것을 알리지 않으면 그 항목은 아무것도 검사하지 않은 채 종료 0으로 끝난다.
+    commit_files(
+        world.repo,
+        {
+            "comp/reports/a/manifest.json": json.dumps({"git_commit": world.second}),
+            "comp/reports/b/manifest.json": json.dumps({"git_commit": world.first, "official": True}),
+        },
+        "Write record files",
+    )
+    # 키 둘 가운데 하나만 오타이면 그 키만 문제이고, 맞는 키의 값은 그대로 센다.
+    registry = load_registry(
+        world.set_registry(record_rule(MANIFEST_GLOB, ["git_commit", "git_comit"])),
+        display="tools/evidence.toml",
+    )
+    report = check_evidence.scan_records(world.repo, registry)
+    assert report.values == 2
+    assert [str(problem) for problem in report.problems] == [
+        "record tools/evidence.toml: [[record]] 1번째: keys - git_comit: "
+        "glob에 맞는 파일 2개 어디에도 이 키가 없다(오타이거나 낡은 등록이다)"
+    ]
+    # 키가 모두 오타이면 키마다 하나씩 알리고(같은 키를 두 번 적어도 한 번만), 검사는 종료 1이다. 센 값은 없다.
+    world.set_registry(record_rule(MANIFEST_GLOB, ["git_comit", "commit_git", "git_comit"]))
+    assert main(["--repo", str(world.repo)]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 3
+    assert "keys - commit_git: " in lines[0] and "keys - git_comit: " in lines[1]
+    assert lines[-1].split(", ")[1:] == ["기록 값 0개", "짝 0개", "문제 2개"]
+
+
+def test_record_tree_must_match_the_component_tree(world):
+    registry = record_rule(MANIFEST_GLOB, ["git_commit"])
+    tree = git(world.repo, "rev-parse", f"{world.second}:comp")
+    write_manifest(world, git_commit=world.second, git_tree=tree)
+    assert records_of(world, registry) == []
+
+    other = "0" * 40
+    write_manifest(world, git_commit=world.second, git_tree=other)
+    problems = records_of(world, registry)
+    assert places(problems) == [("record", MANIFEST, 0)]
+    assert str(problems[0]).startswith(f"record {MANIFEST}: git_tree: {other}: ")
+    assert tree in str(problems[0]) and "comp" in str(problems[0])
+
+
+@pytest.mark.parametrize(
+    ("tree", "shown"),
+    [pytest.param(None, "null", id="null"), pytest.param(12345678, "12345678", id="숫자")],
+)
+def test_record_tree_that_is_not_a_string_is_a_problem(world, tree, shown):
+    write_manifest(world, git_commit=world.second, git_tree=tree)
+    problems = records_of(world, record_rule(MANIFEST_GLOB, ["git_commit"]))
+    assert places(problems) == [("record", MANIFEST, 0)]
+    assert str(problems[0]).startswith(f"record {MANIFEST}: git_tree: {shown}: ")
+    assert "글이 아니다" in str(problems[0])
+
+
+def test_record_tree_of_a_commit_without_the_folder_is_a_problem(world):
+    # first에는 comp 폴더가 없다(합치기 전 커밋과 같다). 그 커밋의 comp 트리를 적었다고 할 수는 없다.
+    assert git(world.repo, "cat-file", "-t", f"{world.second}:comp") == "tree"
+    write_manifest(world, git_commit=world.first, git_tree="0" * 40)
+    problems = records_of(world, record_rule(MANIFEST_GLOB, ["git_commit"]))
+    assert places(problems) == [("record", MANIFEST, 0)]
+    assert "그 커밋에 이 폴더가 없다" in str(problems[0])
+
+
+def test_record_tree_is_not_compared_when_the_commit_is_already_a_problem(world):
+    write_manifest(world, git_commit=world.side, git_tree="0" * 40)
+    problems = records_of(world, record_rule(MANIFEST_GLOB, ["git_commit"]))
+    assert places(problems) == [("record", MANIFEST, 0)]  # 문제를 두 번 내지 않는다
+    assert "git_commit" in str(problems[0]) and "조상이 아니다" in str(problems[0])
+
+
+def test_record_tree_is_compared_for_each_registered_key_of_the_same_object(world):
+    tree = git(world.repo, "rev-parse", f"{world.second}:comp")
+    write_manifest(
+        world, git_commit=world.second, source_commit=world.first, git_tree=tree, other={"git_commit": "x"}
+    )
+    registry = load_registry(
+        world.set_registry(record_rule(MANIFEST_GLOB, ["git_commit", "source_commit"])),
+        display="tools/evidence.toml",
+    )
+    report = check_evidence.scan_records(world.repo, registry)
+    # 값은 셋이다: 맨 위 객체의 git_commit·source_commit, 안쪽 객체(other)의 git_commit. 맨 위 객체의 git_commit은
+    # 트리가 맞고, source_commit(first)에는 comp 폴더가 없어 문제다. 안쪽 객체는 git_tree를 함께 가지지 않아 트리를
+    # 견주지 않지만, 값 x가 커밋 꼴이 아니라 문제다.
+    assert report.values == 3
+    texts = [str(problem) for problem in report.problems]
+    assert len(texts) == 2
+    assert any(": git_commit: x: " in text and "16진수" in text for text in texts)
+    assert any(
+        ": git_tree: " in text and "source_commit" in text and "그 커밋에 이 폴더가 없다" in text for text in texts
+    )
+
+
+def test_record_component_must_be_a_top_level_folder(world):
+    write_manifest(world, git_commit=world.second, git_tree="0" * 40)
+    problems = records_of(world, record_rule(MANIFEST_GLOB, ["git_commit"], component="nothing"))
+    # 폴더 이름이 틀린 것은 그 항목의 문제 하나다. 값마다 트리를 견주며 같은 말을 되풀이하지 않는다.
+    assert places(problems) == [("record", "tools/evidence.toml", 0)]
+    assert "[[record]] 1번째: component" in str(problems[0])
+
+
+def test_record_glob_without_files_is_a_problem(world):
+    # 맞는 파일이 없으면 낡은 등록이라는 문제 하나뿐이다. 키가 어디에도 없다는 문제를 키마다 겹쳐 내지 않는다.
+    problems = records_of(world, record_rule("comp/nothing/*.json", ["git_commit", "git_comit"]))
+    assert places(problems) == [("record", "tools/evidence.toml", 0)]
+    assert "[[record]] 1번째: glob" in str(problems[0]) and "낡은 등록" in str(problems[0])
+
+
+def test_record_glob_star_does_not_cross_folders(world):
+    matches = check_evidence.glob_matches
+    assert matches(MANIFEST_GLOB, "comp/reports/a/manifest.json")
+    assert not matches(MANIFEST_GLOB, "comp/reports/a/b/manifest.json")  # *는 폴더 하나다
+    assert not matches(MANIFEST_GLOB, "comp/reports/manifest.json")
+    assert not matches(MANIFEST_GLOB, "comp/reports/a/manifest.jsonl")
+    assert matches("comp/reports/*.json", "comp/reports/x.json")
+    assert not matches("comp/reports/*.json", "comp/reports/a/x.json")
+    assert matches("comp/reports/dev-*-itn.jsonl", "comp/reports/dev-asr-v3-l-itn.jsonl")
+    assert not matches("comp/reports/*.JSON", "comp/reports/x.json")  # 대소문자를 가린다
+    # 한 폴더 더 깊은 파일은 읽지도 않는다. 깨진 JSON이어도 검사가 멈추지 않는다.
+    commit_files(
+        world.repo,
+        {MANIFEST: json.dumps({"git_commit": world.second}), "comp/reports/a/b/manifest.json": "{broken"},
+        "Write a nested record file",
+    )
+    assert records_of(world, record_rule(MANIFEST_GLOB, ["git_commit"])) == []
+
+
+@pytest.mark.parametrize(
+    ("rel", "content", "where"),
+    [
+        pytest.param(
+            "comp/reports/a/broken.json",
+            b'{"git_commit": ',
+            "comp/reports/a/broken.json",
+            id="깨진 JSON",
+        ),
+        pytest.param(
+            "comp/reports/a/rows.jsonl",
+            b'{"git_commit": "x"}\n{"git_commit": \n',
+            "comp/reports/a/rows.jsonl:2",
+            id="jsonl의 깨진 줄",
+        ),
+        pytest.param(
+            "comp/reports/a/latin1.json",
+            b'{"git_commit": "\xe9"}',
+            "comp/reports/a/latin1.json",
+            id="UTF-8이 아님",
+        ),
+    ],
+)
+def test_unreadable_record_file_stops_the_check(world, capsys, rel, content, where):
+    # 읽지 못한 기록을 건너뛴 채 통과하면 안 된다. 문제로 세지 않고 종료 2로 멈추며, 어느 파일(jsonl이면 몇째 줄)인지 알린다.
+    commit_files(world.repo, {rel: content}, "Write an unreadable record file")
+    world.set_registry(record_rule("comp/reports/*/*", ["git_commit"]))
+    for extra in ([], ["--report-only"]):
+        assert main(["--repo", str(world.repo), *extra]) == 2
+        captured = capsys.readouterr()
+        assert where in captured.err
+        assert captured.out == ""
+
+
+def test_record_git_calls_do_not_grow_with_the_number_of_values(world, monkeypatch):
+    # 값·파일·(커밋, 폴더) 쌍이 늘어도 git 호출 수는 늘지 않는다. 기록 파일마다 글이 다르고(블롭이 서로 다르다) 적힌 커밋도
+    # 여럿이라(서로 다른 쌍이 여럿이다), 고유 파일마다 따로 읽거나 쌍마다 따로 묻는 퇴행도 호출 수를 늘려서 걸린다.
+    # 파일이 모두 같은 글이면 블롭도 쌍도 하나뿐이라 그런 퇴행이 숨는다.
+    commits = [world.second]
+    for number in range(3):  # second 말고도 comp 폴더가 있고 트리가 서로 다른 커밋을 셋 더 만든다
+        change = {f"comp/extra{number}.txt": f"{number}\n"}
+        commits.append(commit_files(world.repo, change, f"Change comp {number}"))
+    trees = {commit: git(world.repo, "rev-parse", f"{commit}:comp") for commit in commits}
+    assert len(set(trees.values())) == len(commits)  # 전제: 쌍마다 트리가 다르다
+    registry = record_rule(MANIFEST_GLOB, ["git_commit"])
+
+    def git_calls() -> int:
+        calls: list[list[str]] = []
+        real_run = subprocess.run
+
+        def spy(command, *args, **kwargs):
+            calls.append(list(command))
+            return real_run(command, *args, **kwargs)
+
+        monkeypatch.setattr(check_evidence.subprocess, "run", spy)
+        try:
+            assert records_of(world, registry) == []
+        finally:
+            monkeypatch.undo()
+        return len(calls)
+
+    def write_manifests(count: int, usable: list[str]) -> None:
+        # 파일마다 글이 다르다("n"이 다르다). 적힌 커밋은 usable을 돌아가며 쓰고, git_tree는 그 커밋의 것이다.
+        files = {}
+        for number in range(count):
+            commit = usable[number % len(usable)]
+            manifest = {"git_commit": commit, "git_tree": trees[commit], "n": number}
+            files[f"comp/reports/run{number}/manifest.json"] = json.dumps(manifest)
+        assert len(set(files.values())) == count  # 전제: 블롭이 파일마다 다르다
+        commit_files(world.repo, files, f"Write {count} manifests")
+
+    write_manifests(3, commits[:1])  # 값 3개, 블롭 3개, 쌍 1개
+    few = git_calls()
+    write_manifests(12, commits)  # 값 12개, 블롭 12개, 쌍 4개
+    assert git_calls() == few  # 값마다·블롭마다·쌍마다 git을 따로 부르지 않는다(묶어서 한 번씩만 묻는다)
+
+
+# ---------------------------------------------------------------------------------------------
+# 9. 등록한 짝([[pair]])
+# ---------------------------------------------------------------------------------------------
+
+PAIR_DOC = "docs/pairs.md"
+
+
+def write_pair_doc(world: World, *commits: str) -> None:
+    """PAIR_DOC에 commits의 앞 7자를 한 줄씩 적어 커밋한다(where 문서의 글자 찾기를 통과시키는 글)."""
+    text = "# 짝 기록\n\n" + "".join(f"- 커밋 {commit[:7]}에서 정했다.\n" for commit in commits)
+    commit_files(world.repo, {PAIR_DOC: text}, "Write the pair document")
+
+
+def test_pair_order_holds(world):
+    # 여러 짝을 한 번에 등록해 한 번에 검사한다(짝의 id가 경우 이름이다).
+    write_pair_doc(world, world.first, world.second, world.third, world.side)
+    assert_not_a_commit_prefix(world.repo, FAKE)
+    first, second, third, side = world.first, world.second, world.third, world.side
+    cases = {
+        "forward": (first, third),
+        "short-forward": (first[:7], third[:7]),  # 앞 7자로 적어도 같다
+        "adjacent": (second, third),
+        "reverse": (third, first),  # 결과가 규칙보다 앞선 커밋이다
+        "same": (third, third),
+        "side-rule": (side, third),  # side 커밋은 HEAD의 조상이 아니다. 어느 쪽인지 말에 적는다.
+        "side-result": (first, side),
+        "both-side": (side, side),  # 둘 다 걸리면 둘 다 알린다
+        "unknown-rule": (FAKE, third),
+    }
+    registry = "".join(pair_rule(name, rule, result, PAIR_DOC) for name, (rule, result) in cases.items())
+    problems = pairs_of(world, registry)
+
+    by_name: dict[str, list[str]] = {}
+    for problem in problems:
+        assert (problem.kind, problem.path, problem.line) == ("pair", PAIR_DOC, 0)
+        name = problem.message.split(": ", 1)[0]
+        assert str(problem).startswith(f"pair {PAIR_DOC}: {name}: ")
+        by_name.setdefault(name, []).append(str(problem))
+    assert set(by_name) == {"reverse", "same", "side-rule", "side-result", "both-side", "unknown-rule"}
+
+    assert len(by_name["reverse"]) == 1 and "규칙 커밋이 결과 커밋의 조상이 아니다" in by_name["reverse"][0]
+    assert len(by_name["same"]) == 1 and "서로 다른 커밋" in by_name["same"][0]
+    assert len(by_name["side-rule"]) == 1
+    assert "규칙 커밋" in by_name["side-rule"][0] and "HEAD의 조상이 아니다" in by_name["side-rule"][0]
+    assert len(by_name["side-result"]) == 1
+    assert "결과 커밋" in by_name["side-result"][0] and "HEAD의 조상이 아니다" in by_name["side-result"][0]
+    assert len(by_name["both-side"]) == 2
+    assert len(by_name["unknown-rule"]) == 1
+    assert "규칙 커밋" in by_name["unknown-rule"][0] and "풀리지 않는다" in by_name["unknown-rule"][0]
+
+
+def test_pair_must_be_written_in_its_document(world):
+    write_pair_doc(world, world.first)  # 결과(third)의 앞 7자가 문서에 없다
+    registry = pair_rule("written", world.first, world.third, PAIR_DOC)
+    problems = pairs_of(world, registry)
+    assert places(problems) == [("pair", PAIR_DOC, 0)]
+    assert "결과 커밋" in str(problems[0]) and world.third[:7] in str(problems[0])
+
+    write_pair_doc(world, world.third)  # 이번에는 규칙(first)이 없다
+    problems = pairs_of(world, registry)
+    assert places(problems) == [("pair", PAIR_DOC, 0)]
+    assert "규칙 커밋" in str(problems[0]) and world.first[:7] in str(problems[0])
+
+    commit_files(world.repo, {PAIR_DOC: "# 비었다\n"}, "Empty the pair document")
+    assert len(pairs_of(world, registry)) == 2  # 없는 쪽마다 문제다
+
+    # 문서가 HEAD의 트리에 없으면 그것도 문제다.
+    missing = pairs_of(world, pair_rule("written", world.first, world.third, "docs/없는문서.md"))
+    assert places(missing) == [("pair", "docs/없는문서.md", 0)]
+    assert "HEAD의 트리에 없다" in str(missing[0])
+
+
+def test_pair_with_equal_commit_seconds_passes(world):
+    date = "2026-01-02T03:04:05+0000"
+    rule = commit_files(world.repo, {"comp/a.txt": "1\n"}, "The rule", date=date)
+    result = commit_files(world.repo, {"comp/b.txt": "2\n"}, "The result", date=date)
+    assert commit_seconds(world.repo, rule) == commit_seconds(world.repo, result)  # 전제: 같은 초다
+    write_pair_doc(world, rule, result)
+    assert pairs_of(world, pair_rule("same-second", rule, result, PAIR_DOC)) == []  # <=라서 통과한다
+
+
+def test_pair_commit_time_must_not_go_backwards(world):
+    rule = commit_files(world.repo, {"comp/a.txt": "1\n"}, "The rule", date="2026-01-02T03:04:05+0000")
+    result = commit_files(world.repo, {"comp/b.txt": "2\n"}, "The result", date="2026-01-02T03:04:04+0000")
+    assert commit_seconds(world.repo, rule) == commit_seconds(world.repo, result) + 1  # 전제: 결과가 1초 이르다
+    write_pair_doc(world, rule, result)
+    problems = pairs_of(world, pair_rule("clock", rule, result, PAIR_DOC))
+    assert places(problems) == [("pair", PAIR_DOC, 0)]
+    assert "시각" in str(problems[0]) and "clock" in str(problems[0])
+
+
+def test_pair_ids_must_be_unique(tmp_path):
+    text = (
+        pair_rule("same", "1234abc", "2345bcd", "docs/a.md")
+        + pair_rule("other", "1234abc", "3456cde", "docs/a.md")
+        + pair_rule("same", "1234abc", "4567def", "docs/a.md")
+    )
+    registry = parse_registry(tmp_path, text)
+    assert places(list(registry.problems)) == [("pair", "tools/evidence.toml", 0)]
+    assert "[[pair]] 3번째" in str(registry.problems[0]) and "id" in str(registry.problems[0])
+    assert [pair.id for pair in registry.pairs] == ["same", "other"]  # 겹친 뒤의 것은 등록에서 빠진다
+    assert registry.pair_total == 3  # 끝 줄의 짝 수는 등록한 항목 수다(꼴 오류인 것도 센다)
+
+
+def test_pair_git_failure_stops_the_check(world, monkeypatch, capsys):
+    # merge-base --is-ancestor는 조상이 아니면 1이다. 그 밖의 종료 코드는 읽지 못한 것이라 종료 2다.
+    write_pair_doc(world, world.first, world.third)
+    world.set_registry(pair_rule("order", world.first, world.third, PAIR_DOC))
+    real_run = check_evidence._run
+
+    def failing(repo, *args, **kwargs):
+        if args and args[0] == "merge-base":
+            return subprocess.CompletedProcess(args, 128, stdout=b"", stderr=b"fatal: simulated failure\n")
+        return real_run(repo, *args, **kwargs)
+
+    monkeypatch.setattr(check_evidence, "_run", failing)
+    assert main(["--repo", str(world.repo), "--report-only"]) == 2
+    captured = capsys.readouterr()
+    assert "merge-base" in captured.err and "simulated failure" in captured.err
+    assert captured.out == ""
+
+
+@pytest.mark.parametrize("which", ["tree lookup", "commit times"])
+def test_a_failing_git_read_in_the_record_and_pair_checks_stops_the_check(world, monkeypatch, capsys, which):
+    # 기록 값의 트리 조회나 짝의 커밋 시각 읽기가 실패해도 빈 결과로 넘기지 않고 종료 2로 끝낸다. 두 읽기만 겨냥하려고,
+    # 트리 조회는 `cat-file --batch-check`로, 커밋 시각은 커밋 해시만 넣은 `cat-file --batch`로 알아본다(글을 읽는
+    # 첫 검사의 `cat-file --batch`는 파일 객체 해시를 넣으므로 지나간다).
+    tree = git(world.repo, "rev-parse", f"{world.second}:comp")
+    write_manifest(world, git_commit=world.second, git_tree=tree)
+    write_pair_doc(world, world.first, world.third)
+    world.set_registry(
+        record_rule(MANIFEST_GLOB, ["git_commit"]) + pair_rule("order", world.first, world.third, PAIR_DOC)
+    )
+    commits = {world.first, world.third}
+    real_run = check_evidence._run
+    targeted = []
+
+    def failing(repo, *args, **kwargs):
+        sent = kwargs.get("stdin")
+        names = sent.decode("ascii").split() if sent else []
+        if args and args[0] == "cat-file":
+            hit = "--batch-check" in args if which == "tree lookup" else bool(names) and set(names) <= commits
+            if hit:
+                targeted.append(args)
+                failure = b"fatal: simulated failure\n"
+                return subprocess.CompletedProcess(args, 128, stdout=b"", stderr=failure)
+        return real_run(repo, *args, **kwargs)
+
+    monkeypatch.setattr(check_evidence, "_run", failing)
+    assert main(["--repo", str(world.repo), "--report-only"]) == 2
+    captured = capsys.readouterr()
+    assert targeted  # 겨냥한 읽기가 실제로 불렸다
+    assert "simulated failure" in captured.err
+    assert captured.out == ""
+
+
+def test_commit_value_problem_reasons():
+    problem = check_evidence.commit_value_problem
+    first, second, other = "abcdef0" + "1" * 33, "abcdef0" + "2" * 33, "1234567" + "8" * 33
+    by_prefix = build_prefix_index([first, second, other])
+    ancestors = frozenset([first, other])
+    assert problem(first, by_prefix, ancestors) == (None, first)
+    assert problem("abcdef01", by_prefix, ancestors) == (None, first)  # 더 길게 적으면 하나로 좁혀진다
+    reason, commit = problem("abcdef0", by_prefix, ancestors)
+    assert commit is None and "모호" in reason
+    reason, commit = problem("abcdef02", by_prefix, ancestors)
+    assert commit is None and "조상이 아니다" in reason
+    reason, commit = problem("bbbbbbb", by_prefix, ancestors)
+    assert commit is None and "풀리지 않는다" in reason
+    for value in ("unknown", "", "ABCDEF0", "abcdef", "a" * 41, first + "+dirty"):
+        reason, commit = problem(value, by_prefix, ancestors)
+        assert commit is None and "16진수" in reason, value
+    for value in (None, 12345678, ["x"], {"a": 1}, True):
+        reason, commit = problem(value, by_prefix, ancestors)
+        assert commit is None and "글이 아니다" in reason, value
+
+
+def test_digit_only_commit_values_are_accepted(tmp_path):
+    # 등록 값과 기록 값은 숫자뿐이어도 꼴이 맞다(a~f 글자 조건은 글에서 낱말을 뽑을 때만 쓴다). 앞 7자가 숫자뿐인 진짜
+    # 커밋은 시험에서 만들 수 없으므로, 풀이는 가짜 커밋을 넣은 순수 함수로 본다.
+    registry = parse_registry(tmp_path, pair_rule("digits", "1234567", "7654321", "docs/a.md"))
+    assert registry.problems == ()
+    assert (registry.pairs[0].rule, registry.pairs[0].result) == ("1234567", "7654321")
+    ancestor, other = "1234567" + "8" * 33, "7654321" + "9" * 33
+    by_prefix = build_prefix_index([ancestor, other])
+    problem = check_evidence.commit_value_problem
+    assert problem("1234567", by_prefix, frozenset([ancestor])) == (None, ancestor)
+    reason, commit = problem("7654321", by_prefix, frozenset([ancestor]))
+    assert commit is None and "조상이 아니다" in reason
+
+
+def test_record_and_pair_checks_only_run_read_commands(world, monkeypatch):
+    tree = git(world.repo, "rev-parse", f"{world.second}:comp")
+    write_manifest(world, git_commit=world.second, git_tree=tree)
+    write_pair_doc(world, world.first, world.third)
+    world.set_registry(
+        record_rule(MANIFEST_GLOB, ["git_commit"]) + pair_rule("order", world.first, world.third, PAIR_DOC)
+    )
+    status_before = git(world.repo, "status", "--porcelain")
+    head_before = git(world.repo, "rev-parse", "HEAD")
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def spy(command, *args, **kwargs):
+        calls.append(list(command))
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(check_evidence.subprocess, "run", spy)
+    assert main(["--repo", str(world.repo)]) == 0
+    monkeypatch.undo()
+    allowed = {"rev-parse", "rev-list", "ls-tree", "cat-file", "merge-base"}
+    assert {command[4] for command in calls} >= {"merge-base", "cat-file"}  # 두 검사가 실제로 돌았다
+    for command in calls:
+        assert command[:4] == ["git", "--no-optional-locks", "-C", str(world.repo)], command
+        assert command[4] in allowed, command
+    assert git(world.repo, "status", "--porcelain") == status_before
+    assert git(world.repo, "rev-parse", "HEAD") == head_before
+
+
+def test_summary_counts_record_values_and_registered_pairs(world, capsys):
+    # 끝 줄의 기록 값은 찾은 값(문제인 값 포함), 짝은 등록한 [[pair]] 항목 수(꼴 오류인 항목 포함)다.
+    write_manifest(world, git_commit=world.second, other_commit="unknown", git_tree=None)
+    write_pair_doc(world, world.first, world.third)
+    world.set_registry(
+        record_rule(MANIFEST_GLOB, ["git_commit", "other_commit"])
+        + pair_rule("good", world.first, world.third, PAIR_DOC)
+        + pair_rule("reverse", world.third, world.first, PAIR_DOC)
+        + '[[pair]]\nid = "broken"\n'
+    )
+    assert main(["--repo", str(world.repo)]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    # 기록 값은 둘(git_commit은 커밋이 맞고, other_commit은 unknown이라 문제). git_tree가 null이라 맞는 커밋 쪽의
+    # 트리 비교도 문제 하나를 더 낸다: 기록 문제 둘. 짝은 셋을 등록했다: reverse는 순서가 틀려 문제 하나, broken은 빠진
+    # 키 넷(rule, result, where, what)이 문제 넷: 짝 문제 다섯. 합쳐 문제 일곱.
+    kinds = [line.split()[0] for line in lines[:-1]]
+    assert kinds.count("record") == 2
+    assert kinds.count("pair") == 5
+    assert lines[-1].split(", ")[1:] == ["기록 값 2개", "짝 3개", "문제 7개"]
+
+
+# 꼴 시험용 [[record]]·[[pair]] 항목의 맞는 바탕. 시험은 여기서 한 키만 고치거나 빼서 그 항목의 문제를 본다.
+RECORD_BASE = {"glob": '"c/*.json"', "keys": '["a"]', "component": '"c"', "what": '"x"'}
+PAIR_BASE = {"id": '"p"', "rule": '"1234abc"', "result": '"2345bcd"', "where": '"d.md"', "what": '"x"'}
+
+
+def entry_toml(base: dict[str, str], **changes: str | None) -> str:
+    """base에서 changes만 바꾼 항목 본문(TOML 줄들). 값은 TOML 값 글이고, None이면 그 키를 뺀다. 새 키는 끝에 붙는다."""
+    fields = {**base, **changes}
+    return "".join(f"{key} = {value}\n" for key, value in fields.items() if value is not None)
+
+
+@pytest.mark.parametrize(
+    ("changes", "key"),
+    [
+        pytest.param({"glob": None}, "glob", id="glob이 없다"),
+        pytest.param({"keys": None}, "keys", id="keys가 없다"),
+        pytest.param({"component": None}, "component", id="component가 없다"),
+        pytest.param({"what": None}, "what", id="what이 없다"),
+        pytest.param({"keys": "[]"}, "keys", id="빈 keys"),
+        pytest.param({"keys": '[""]'}, "keys", id="빈 키 이름"),
+        pytest.param({"keys": '"a"'}, "keys", id="목록이 아닌 keys"),
+        pytest.param({"keys": "[1]"}, "keys", id="글이 아닌 키 이름"),
+        pytest.param({"glob": '"c/**/x.json"'}, "glob", id="**"),
+        pytest.param({"glob": '"c\\\\x.json"'}, "glob", id="역슬래시"),
+        pytest.param({"glob": '"/c/x.json"'}, "glob", id="맨 앞의 /"),
+        pytest.param({"glob": '"c//x.json"'}, "glob", id="빈 조각"),
+        pytest.param({"glob": '"c/x/"'}, "glob", id="끝의 /"),
+        pytest.param({"component": '"c/d"'}, "component", id="폴더가 둘"),
+        pytest.param({"what": '""'}, "what", id="빈 what"),
+        pytest.param({"waht": '"오타"'}, "waht", id="모르는 키"),
+    ],
+)
+def test_malformed_record_entries_are_problems_of_that_entry(tmp_path, changes, key):
+    registry = parse_registry(tmp_path, "[[record]]\n" + entry_toml(RECORD_BASE, **changes))
+    problems = [problem for problem in registry.problems if problem.kind == "record"]
+    assert len(problems) >= 1
+    assert all("[[record]] 1번째" in str(problem) for problem in problems)
+    assert any(f"{key} -" in str(problem) for problem in problems)
+
+
+@pytest.mark.parametrize(
+    ("changes", "key"),
+    [
+        pytest.param({"id": None}, "id", id="id가 없다"),
+        pytest.param({"rule": None}, "rule", id="rule이 없다"),
+        pytest.param({"result": None}, "result", id="result가 없다"),
+        pytest.param({"where": None}, "where", id="where가 없다"),
+        pytest.param({"what": None}, "what", id="what이 없다"),
+        pytest.param({"id": '""'}, "id", id="빈 id"),
+        pytest.param({"rule": '"xyz1234"'}, "rule", id="16진수가 아닌 rule"),
+        pytest.param({"rule": '"1234ab"'}, "rule", id="6자 rule"),
+        pytest.param({"result": '"2345BCD"'}, "result", id="대문자 result"),
+        pytest.param({"rule": "1234567"}, "rule", id="글이 아닌 rule"),
+        pytest.param({"waht": '"오타"'}, "waht", id="모르는 키"),
+    ],
+)
+def test_malformed_pair_entries_are_problems_of_that_entry(tmp_path, changes, key):
+    registry = parse_registry(tmp_path, "[[pair]]\n" + entry_toml(PAIR_BASE, **changes))
+    problems = [problem for problem in registry.problems if problem.kind == "pair"]
+    assert len(problems) >= 1
+    assert all("[[pair]] 1번째" in str(problem) for problem in problems)
+    assert any(f"{key} -" in str(problem) for problem in problems)
+    assert registry.pair_total == 1  # 꼴이 틀린 항목도 등록한 항목이라 센다

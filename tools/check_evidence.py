@@ -10,6 +10,10 @@
     사람은 알 수 없다. 이 도구는 추적 파일에서 해시 꼴 낱말을 뽑아 이 저장소의 git 이력으로 풀어 보고,
     풀리는데 HEAD의 조상이 아니거나 둘 이상에 맞는 것, 문서가 커밋이라고 밝혀 적었는데 풀리지 않는 것을
     문제로 알린다.
+    기록 파일과 '규칙 → 결과' 짝도 같은 방식으로 본다. 측정 기록(JSON)은 그 측정을 낸 코드의 커밋 해시를
+    값으로 적고, 문서는 "규칙을 먼저 커밋한 뒤 그 규칙으로 쟀다"고 말한다. 기록의 커밋 값이 이 저장소의
+    이력에 없거나 규칙이 결과보다 뒤라면 그 근거는 이미 깨진 것인데, 사람 눈으로는 그 해시들을 일일이 맞춰
+    볼 수 없다.
 
 규칙 (같은 내용이 --help에도 있다)
     1. 대상은 HEAD의 추적 파일이다. 이름이 uv.lock·package-lock.json인 파일과 글이 아닌 파일(널 바이트가
@@ -26,6 +30,21 @@
        낱말이 등록돼 있으면 통과한다.
     5. [[external]]이 가리키는 낱말이 그 파일에 더는 없으면(낡은 등록), 또는 그 낱말이 이 저장소의 커밋으로
        풀리면(잘못 등록) 문제다.
+    6. ([[record]]에 등록한 기록 파일) glob에 맞는 HEAD의 파일(JSON. 이름이 .jsonl로 끝나면 줄마다 JSON 하나)에서
+       모든 깊이의 등록한 키(keys)를 찾고, 찾은 값마다 하나씩 센다. 값은 7~40자 소문자 16진수(숫자뿐이어도
+       된다)인 글이어야 하고, 이 저장소의 커밋 하나로 풀려야 하고, HEAD의 조상이어야 한다. 글이 아니거나(null
+       포함), 꼴이 다르거나(unknown, `<해시>+dirty`), 풀리지 않거나, 모호하거나, 조상이 아니면 문제다. 값과 같은
+       객체에 git_tree가 있으면 그 값은 `git rev-parse <그 커밋>:<component>`(그 커밋의 구성 요소 폴더 트리)와
+       같아야 한다. glob에 맞는 파일이 하나도 없으면 문제(낡은 등록)다. 맞는 파일이 있는데 등록한 키가 그 파일들
+       어디에도 한 번도 안 나오면 그 키마다 문제다(키 이름의 오타이거나 낡은 등록이다. 알리지 않으면 그 키는
+       아무것도 검사하지 않은 채 통과한다). 키가 없는 파일이 섞여 있는 것은 문제가 아니고 값으로 세지도 않는다.
+       읽을 수 없는 파일(깨진 JSON, UTF-8이 아님)은 문제로 세지 않고 검사를 멈춘다(종료 코드 2): 읽지 못한 기록을
+       건너뛴 채 통과하지 않게 하려는 것이다.
+    7. ([[pair]]에 등록한 '규칙 → 결과' 짝) 규칙 커밋과 결과 커밋이 둘 다 이 저장소의 커밋 하나로 풀리고 HEAD의
+       조상이어야 한다. 서로 다른 커밋이어야 하고, `git merge-base --is-ancestor <규칙> <결과>`가 0이어야 하고(1이면
+       문제, 그 밖의 종료 코드는 읽지 못한 것이라 종료 코드 2), 커밋 시각이 규칙 <= 결과여야 하고(같은 초는
+       된다), where 문서(HEAD의 내용)에 두 해시의 앞 7자가 글자로 있어야 한다. 앞 단계에서 걸리면 그 뒤 단계는
+       보지 않는다. 등록한 짝만 본다. 모든 측정을 망라하지 않는다.
 
 왜 낱말 전부를 '풀려야 한다'로 두지 않나
     추적 파일에는 커밋이 아닌 해시 꼴 낱말이 훨씬 많다(데이터 해시, 다이제스트의 앞부분, 다른 저장소의
@@ -34,6 +53,13 @@
     등록해야 하고, 아무도 읽지 않는 거대한 목록이 된다. 그래서 풀리는 낱말은 어디서나 올바른지 보고(규칙 3),
     풀려야 한다고 요구하는 것은 문서가 스스로 커밋이라고 밝힌 자리로 좁힌다(규칙 4). 그렇게 좁혀도 남는
     것(다른 저장소의 커밋을 적은 문서)만 등록한다.
+
+왜 기록 값은 등록한 키만 보고, 짝은 등록한 것만 보나
+    기록 파일에는 이 저장소의 커밋이 아닌 해시 꼴 값도 들어 있다(예: Hugging Face 쪽 revision). 그래서 파일마다
+    '이 키의 값은 이 저장소의 커밋이다'라고 등록한 키만 보고, 다른 저장소의 값이 든 키는 등록하지 않는다.
+    짝은 글에서 기계로 뽑을 수 없다(같은 줄이 규칙과 결과를 한 커밋으로 적기도 하고, 코드가 규칙보다 먼저인
+    줄도 있어서 그런 문장은 순서를 주장하지 않는다). 그래서 사람이 읽어 순서가 성립함을 확인한 짝만 등록하고
+    그 짝의 순서만 본다.
 
 왜 HEAD의 내용을 읽나
     작업 트리를 읽으면 Windows의 줄바꿈 변환 설정과 아직 커밋하지 않은 편집에 따라 결과가 달라진다.
@@ -57,24 +83,38 @@
         where      그 낱말이 적힌 파일(저장소 뿌리 기준 `/` 경로). HEAD의 트리에 있는 검사 대상 파일이어야
                    하고, 그 파일에서만 통한다.
         what       무엇의 해시인지 한 줄.
-    [[record]], [[pair]]
-                   이 도구는 두 표가 표의 배열인지만 본다. 항목 안의 키는 아직 정하지 않았다.
+    [[record]]     값이 이 저장소의 커밋인 키를 담은 기록 파일들 하나.
+        glob       저장소 뿌리 기준 `/` 경로 꼴. 조각(`/` 사이)마다 견주고 조각 수가 같아야 하며, `*`는 폴더 하나를
+                   넘지 않는다. `**`, 역슬래시, 맨 앞 `/`, 빈 조각은 꼴 오류다. 대상은 HEAD의 트리의 파일이다.
+        keys       커밋 값을 담은 키 이름의 목록(비어 있지 않은 글). 키마다 glob에 맞는 파일 어딘가에 적어도 한 번은
+                   나와야 한다(하나도 안 나오면 오타이거나 낡은 등록이라 그 항목의 문제다).
+        component  그 파일이 속한 구성 요소 폴더 이름(HEAD의 트리 맨 위에 있는 폴더). git_tree를 견줄 때 쓴다.
+        what       무엇의 기록인지 한 줄.
+    [[pair]]       '규칙 → 결과' 짝 하나.
+        id         짝의 이름(등록 안에서 겹치지 않는다).
+        rule, result
+                   규칙 커밋과 결과 커밋(7~40자 소문자 16진수. 숫자뿐이어도 된다).
+        where      이 짝을 적은 문서(HEAD의 트리에 있는 파일). 두 해시의 앞 7자가 글자로 있어야 한다.
+        what       무엇을 잰 짝인지 한 줄.
     그 밖의 꼭대기 표나 키는 받지 않는다(종료 코드 2). 항목의 모르는 키, 빠진 키, 빈 글, 꼴이 틀린 값은
     조용히 넘기지 않고 그 항목의 문제로 알린다(오타 때문에 면제가 조용히 빠지거나 느슨해지는 일을 막으려는
     것이다).
 
 출력과 종료 코드
     문제는 한 줄에 하나씩 `<종류> <파일>:<줄>: <낱말>: <이유>`로 쓴다(종류는 reference, external, record,
-    pair). 등록 항목 자체의 문제는 `external <등록 파일>: [[external]] <번호>번째: <키 또는 낱말> - <이유>`다.
+    pair). 기록 값의 문제는 `record <파일>: <키>: <값>: <이유>`(.jsonl은 `<파일>:<줄>`), 짝의 문제는
+    `pair <where>: <id>: <이유>`다. 등록 항목 자체의 문제는
+    `<종류> <등록 파일>: [[<종류>]] <번호>번째: <키 또는 낱말> - <이유>`다.
     문제는 파일 경로·줄 번호 순으로 정렬해 실행마다 같은 순서로 낸다. 끝 줄은
     `참조 N개, 기록 값 R개, 짝 P개, 문제 M개`이고, --report-only를 주면 그 뒤에 `보고만: …` 줄이 하나 더
     붙는다. N은 규칙 3·4가 실제로 걸린 낱말 출현 수다(이 저장소의 커밋으로 풀리거나 모호한 출현과, .md에서
     문서가 커밋 참조로 적었는데 풀리지 않은 출현. 후자는 등록돼 통과한 것과 문제인 것을 모두 센다).
-    기록 값 R과 짝 P는 이 도구가 아직 세지 않아 늘 0이다.
+    R은 [[record]]로 찾은 값의 수(문제인 값도 센다), P는 등록한 [[pair]] 항목 수(꼴 오류인 항목도 센다)다.
     0 = 문제 없음(--report-only면 문제가 있어도 0), 1 = 문제 있음, 2 = 검사를 시작하거나 끝낼 수 없음
     (등록 파일이 없거나 읽을 수 없음, TOML 문법 오류, 모르는 꼭대기 표, 저장소 폴더가 아니거나 git 저장소가
-    아님, git을 실행할 수 없음, git 읽기 명령의 실패, 얕은 복제라 이력이 모자람, HEAD가 없음). --report-only를
-    줘도 2는 2다(읽지 못했는데 통과하지 않게). 판정은 끝 줄 글자가 아니라 종료 코드로 한다.
+    아님, git을 실행할 수 없음, git 읽기 명령의 실패, 얕은 복제라 이력이 모자람, HEAD가 없음, 기록 파일을 읽을
+    수 없음, `git merge-base --is-ancestor`가 0이나 1이 아닌 코드를 냄). --report-only를 줘도 2는 2다(읽지
+    못했는데 통과하지 않게). 판정은 끝 줄 글자가 아니라 종료 코드로 한다.
 
 실행
     uv run --no-project tools/check_evidence.py [--repo <저장소>] [--registry <toml>] [--report-only]
@@ -86,11 +126,13 @@
 """
 
 import argparse
+import fnmatch
+import json
 import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -98,16 +140,20 @@ from pathlib import Path
 DEFAULT_REPO = Path(__file__).resolve().parents[1]
 DEFAULT_REGISTRY = "tools/evidence.toml"
 
-# 등록 파일이 받는 꼭대기 표와, [[external]] 항목이 받는 키. 여기에 없는 것은 오타일 가능성이 커서 조용히
-# 무시하지 않는다(꼭대기 표는 읽을 수 없는 파일로, 항목의 키는 그 항목의 문제로 알린다).
+# 등록 파일이 받는 꼭대기 표와, 표마다 항목이 받는 키. 여기에 없는 것은 오타일 가능성이 커서 조용히 무시하지
+# 않는다(꼭대기 표는 읽을 수 없는 파일로, 항목의 키는 그 항목의 문제로 알린다).
 TOP_KEYS = ("external", "record", "pair")
 EXTERNAL_KEYS = ("hash", "where", "what")
-# [[external]]의 hash가 받는 꼴: 낱말(아래 _WORD)과 같은 7~40자 소문자 16진수. 이 꼴이어도 그 파일에 적힌 낱말과
+RECORD_KEYS = ("glob", "keys", "component", "what")
+PAIR_KEYS = ("id", "rule", "result", "where", "what")
+# 등록 값(external의 hash, pair의 rule·result)과 기록 파일의 커밋 값이 받는 꼴: 7~40자 소문자 16진수. 숫자뿐이어도
+# 된다. 'a~f 글자가 하나 이상'이라는 조건은 파일의 글에서 낱말을 뽑을 때만(find_tokens) 쓰고 값의 꼴에는 쓰지
+# 않는다. 앞 7자가 모두 숫자인 진짜 커밋이 있을 수 있기 때문이다. [[external]]은 이 꼴이어도 그 파일에 적힌 낱말과
 # 글자가 같아야 등록이 통한다(앞부분만 같은 것은 통하지 않는다).
-_EXTERNAL_HASH = re.compile(r"[0-9a-f]{7,40}")
+_HASH_FORM = re.compile(r"[0-9a-f]{7,40}")
 
 # 규칙 2의 낱말 후보: 7~40자 소문자 16진수. 앞뒤가 ASCII 영문자·숫자·밑줄이 아니어야 한다. 파이썬의 \b는 한글도
-# 낱말 글자로 보므로(`139cb8a의`의 뒤가 경계로 안 잡힌다) 쓰지 않고 ASCII 경계를 직접 적는다. 이 정규식은 숫자뿐인
+# 낱말 글자로 보므로(`1234abc의`의 뒤가 경계로 안 잡힌다) 쓰지 않고 ASCII 경계를 직접 적는다. 이 정규식은 숫자뿐인
 # 글자열도 맞히는데, 그것을 낱말로 칠지는 find_tokens가 정한다(참조 표시가 달린 것만 낱말로 본다).
 _WORD = re.compile(r"(?<![0-9A-Za-z_])[0-9a-f]{7,40}(?![0-9A-Za-z_])")
 # 백틱 한 쌍(코드 조각)을 찾는 정규식. 여는 백틱 줄(길이 N)은 같은 길이의 닫는 백틱 줄을 만날 때까지다(백틱
@@ -174,19 +220,43 @@ class External:
 
 
 @dataclass(frozen=True)
+class RecordRule:
+    """기록 파일들에서 커밋 값을 찾아 검사하는 곳 하나([[record]]). number는 등록 파일의 몇 번째 항목인지."""
+
+    glob: str
+    keys: tuple[str, ...]
+    component: str
+    what: str
+    number: int
+
+
+@dataclass(frozen=True)
+class Pair:
+    """'규칙 → 결과' 짝 하나([[pair]]). number는 등록 파일의 몇 번째 항목인지."""
+
+    id: str
+    rule: str
+    result: str
+    where: str
+    what: str
+    number: int
+
+
+@dataclass(frozen=True)
 class Registry:
     """등록 파일을 읽은 결과.
 
-    externals는 꼴이 맞는 [[external]] 항목이다. 꼴이 틀린 항목은 여기서 빠지지만 그 이유가 problems에
-    남아 검사가 문제로 알린다(조용히 빠지지 않는다). records와 pairs는 [[record]]·[[pair]] 표를 있는 그대로
-    담는다(항목 안의 키는 아직 보지 않는다). source는 문제 줄에 쓰는 등록 파일 이름이다.
+    externals·records·pairs는 꼴이 맞는 항목이다. 꼴이 틀린 항목은 여기서 빠지지만 그 이유가 problems에 남아
+    검사가 문제로 알린다(조용히 빠지지 않는다). pair_total은 등록한 [[pair]] 항목 수(꼴이 틀린 것도 센다)로,
+    끝 줄의 `짝 P개`의 P다. source는 문제 줄에 쓰는 등록 파일 이름이다.
     """
 
     externals: tuple[External, ...] = ()
-    records: tuple[dict, ...] = ()
-    pairs: tuple[dict, ...] = ()
+    records: tuple[RecordRule, ...] = ()
+    pairs: tuple[Pair, ...] = ()
     problems: tuple[Problem, ...] = ()
     source: str = DEFAULT_REGISTRY
+    pair_total: int = 0
 
 
 @dataclass(frozen=True)
@@ -195,6 +265,14 @@ class ReferenceReport:
 
     problems: tuple[Problem, ...]
     references: int
+
+
+@dataclass(frozen=True)
+class RecordReport:
+    """check_records의 자세한 결과. problems는 정렬된 문제들, values는 끝 줄의 `기록 값 R개`의 R이다."""
+
+    problems: tuple[Problem, ...]
+    values: int
 
 
 # ---------------------------------------------------------------------------------------------
@@ -231,6 +309,80 @@ def _text_of(table: dict, key: str) -> tuple[str | None, str | None]:
     return value, None
 
 
+def _checked_text(
+    item: dict,
+    key: str,
+    kind: str,
+    number: int,
+    source: str,
+    problems: list[Problem],
+    check: Callable[[str], str | None] | None = None,
+) -> str | None:
+    """item[key]가 비어 있지 않은 글이고 check(있으면)가 받아들이는 꼴이면 그 글을, 아니면 None을 돌려준다.
+
+    받아들이지 못하면 이유(없다, 글이어야 한다, 비어 있다, 또는 check가 내놓은 말)를 그 항목의 문제로 problems에
+    적는다. check는 글을 받아 꼴 오류의 이유를 돌려주고, 맞으면 None을 돌려주는 함수다.
+    """
+    value, reason = _text_of(item, key)
+    if value is not None and check is not None:
+        why = check(value)
+        if why is not None:
+            value, reason = None, why
+    if value is None:
+        problems.append(_entry_problem(kind, source, number, key, reason or ""))
+    return value
+
+
+def _hash_problem(value: str) -> str | None:
+    """등록 값(hash, rule, result)이 7~40자 소문자 16진수가 아니면 이유를, 맞으면 None을 돌려준다."""
+    return None if _HASH_FORM.fullmatch(value) else "7~40자 소문자 16진수가 아니다"
+
+
+def _glob_problem(glob: str) -> str | None:
+    """glob이 꼴 규칙을 어기면 이유를, 지키면 None을 돌려준다.
+
+    glob은 저장소 뿌리 기준 `/` 경로이고 조각(`/` 사이)마다 견준다. 역슬래시, 맨 앞의 `/`, 빈 조각(`//`나 끝의
+    `/`), `**`가 든 조각은 받지 않는다. `*`는 폴더 하나를 넘지 않는다는 규칙을 `**`가 흐리기 때문이다.
+    """
+    if "\\" in glob:
+        return "역슬래시가 들어 있다(`/`로 가른 경로로 적는다)"
+    if glob.startswith("/"):
+        return "맨 앞이 `/`다(저장소 뿌리 기준 경로로 적는다)"
+    parts = glob.split("/")
+    if "" in parts:
+        return "빈 조각이 있다(`//`나 끝의 `/`)"
+    if any("**" in part for part in parts):
+        return "`**`는 받지 않는다(`*`는 폴더 하나 안에서만 맞는다)"
+    return None
+
+
+def _component_problem(component: str) -> str | None:
+    """component가 폴더 이름 하나(`/`나 역슬래시가 없음)가 아니면 이유를, 맞으면 None을 돌려준다."""
+    if "/" in component or "\\" in component:
+        return "폴더 이름 하나여야 한다(`/`가 들어 있다)"
+    return None
+
+
+def _keys_of(item: dict, number: int, source: str, problems: list[Problem]) -> tuple[str, ...] | None:
+    """[[record]]의 keys를 읽는다: 비어 있지 않은 글(빈 글이 아닌 글)의 목록이 하나 이상이어야 한다.
+
+    아니면 이유를 그 항목의 문제로 problems에 적고 None을 돌려준다. 키 이름이 하나도 없으면 아무것도 찾지 않는
+    등록이라 꼴 오류다.
+    """
+    if "keys" not in item:
+        reason = "없다"
+    elif not isinstance(item["keys"], list) or not all(isinstance(key, str) for key in item["keys"]):
+        reason = "글의 목록이어야 한다"
+    elif not item["keys"]:
+        reason = "비어 있다(찾을 키가 하나도 없다)"
+    elif any(not key.strip() for key in item["keys"]):
+        reason = "빈 글이 들어 있다"
+    else:
+        return tuple(item["keys"])
+    problems.append(_entry_problem("record", source, number, "keys", reason))
+    return None
+
+
 def _parse_externals(items: list[dict], source: str, problems: list[Problem]) -> list[External]:
     """[[external]] 항목들을 읽는다. 꼴이 틀린 항목은 이유를 problems에 적고 결과에서 뺀다.
 
@@ -243,16 +395,13 @@ def _parse_externals(items: list[dict], source: str, problems: list[Problem]) ->
         for key in item:
             if key not in EXTERNAL_KEYS:
                 problems.append(_entry_problem("external", source, number, key, "모르는 키(오타일 수 있다)"))
-        values: dict[str, str] = {}
-        for key in EXTERNAL_KEYS:
-            value, reason = _text_of(item, key)
-            if value is not None and key == "hash" and not _EXTERNAL_HASH.fullmatch(value):
-                value, reason = None, "7~40자 소문자 16진수가 아니다"
-            if value is None:
-                problems.append(_entry_problem("external", source, number, key, reason or ""))
-            else:
-                values[key] = value
-        if len(values) != len(EXTERNAL_KEYS):
+        values = {
+            key: _checked_text(
+                item, key, "external", number, source, problems, _hash_problem if key == "hash" else None
+            )
+            for key in EXTERNAL_KEYS
+        }
+        if any(value is None for value in values.values()):
             continue
         pair = (values["hash"], values["where"])
         if pair in seen:
@@ -262,6 +411,65 @@ def _parse_externals(items: list[dict], source: str, problems: list[Problem]) ->
         seen[pair] = number
         externals.append(External(values["hash"], values["where"], values["what"], number))
     return externals
+
+
+def _parse_records(items: list[dict], source: str, problems: list[Problem]) -> list[RecordRule]:
+    """[[record]] 항목들을 읽는다. 꼴이 틀린 항목은 이유를 problems에 적고 결과에서 뺀다.
+
+    모르는 키는 문제로 알리되 항목은 남긴다(필요한 키가 모두 맞는 항목을 오타 하나로 버리지 않는다).
+    component가 HEAD의 트리 맨 위 폴더인지, glob에 맞는 파일이 있는지, 등록한 키가 그 파일들에 나오는지는 저장소를
+    읽어야 알 수 있어 검사할 때 본다.
+    """
+    rules: list[RecordRule] = []
+    for number, item in enumerate(items, 1):
+        for key in item:
+            if key not in RECORD_KEYS:
+                problems.append(_entry_problem("record", source, number, key, "모르는 키(오타일 수 있다)"))
+        glob = _checked_text(item, "glob", "record", number, source, problems, _glob_problem)
+        keys = _keys_of(item, number, source, problems)
+        component = _checked_text(item, "component", "record", number, source, problems, _component_problem)
+        what = _checked_text(item, "what", "record", number, source, problems)
+        if glob is None or keys is None or component is None or what is None:
+            continue
+        rules.append(RecordRule(glob, keys, component, what, number))
+    return rules
+
+
+def _parse_pairs(items: list[dict], source: str, problems: list[Problem]) -> list[Pair]:
+    """[[pair]] 항목들을 읽는다. 꼴이 틀린 항목은 이유를 problems에 적고 결과에서 뺀다.
+
+    모르는 키는 문제로 알리되 항목은 남긴다. id는 등록 안에서 유일해야 하고, 겹치면 뒤의 것이 문제다(앞의 것이
+    남는다). where가 HEAD의 트리에 있는 파일인지는 저장소를 읽어야 알 수 있어 검사할 때 본다.
+    """
+    pairs: list[Pair] = []
+    seen: dict[str, int] = {}
+    for number, item in enumerate(items, 1):
+        for key in item:
+            if key not in PAIR_KEYS:
+                problems.append(_entry_problem("pair", source, number, key, "모르는 키(오타일 수 있다)"))
+        values = {
+            key: _checked_text(
+                item,
+                key,
+                "pair",
+                number,
+                source,
+                problems,
+                _hash_problem if key in ("rule", "result") else None,
+            )
+            for key in PAIR_KEYS
+        }
+        if any(value is None for value in values.values()):
+            continue
+        if values["id"] in seen:
+            reason = f"{seen[values['id']]}번째와 같은 id를 또 등록했다"
+            problems.append(_entry_problem("pair", source, number, "id", reason))
+            continue
+        seen[values["id"]] = number
+        pairs.append(
+            Pair(values["id"], values["rule"], values["result"], values["where"], values["what"], number)
+        )
+    return pairs
 
 
 def load_registry(path: Path, display: str | None = None) -> Registry:
@@ -281,14 +489,16 @@ def load_registry(path: Path, display: str | None = None) -> Registry:
         raise RegistryError(f"모르는 꼭대기 표나 키: {', '.join(unknown)} (받는 것: {', '.join(TOP_KEYS)})")
     problems: list[Problem] = []
     externals = _parse_externals(_tables(raw, "external", source, problems), source, problems)
-    records = _tables(raw, "record", source, problems)
-    pairs = _tables(raw, "pair", source, problems)
+    records = _parse_records(_tables(raw, "record", source, problems), source, problems)
+    pair_tables = _tables(raw, "pair", source, problems)
+    pairs = _parse_pairs(pair_tables, source, problems)
     return Registry(
         externals=tuple(externals),
         records=tuple(records),
         pairs=tuple(pairs),
         problems=tuple(problems),
         source=source,
+        pair_total=len(pair_tables),
     )
 
 
@@ -317,18 +527,39 @@ def _follows_commit_word(text: str, start: int, line_start: int) -> bool:
     return False
 
 
-def _claimed(text: str, start: int, end: int, line_start: int) -> bool:
+class _CodeSpans:
+    """줄 하나의 백틱 한 쌍 '안쪽' 구간들을 줄마다 한 번만 구해 두는 작은 기억 장치다(마지막으로 본 줄 하나만 기억한다).
+
+    find_tokens는 글을 앞에서 뒤로 한 번 훑으므로 한 줄의 낱말들이 잇달아 온다. 감싼 낱말마다 그 줄 전체에서 백틱 쌍을
+    다시 찾으면 줄 길이에 낱말 수를 곱한 만큼 걸린다(감싼 낱말 8000개가 든 한 줄, 약 8만 자에 이 PC에서 25초쯤). 그래서
+    줄이 바뀔 때만 다시 찾고 같은 줄의 낱말들이 그 결과를 함께 쓴다(같은 글에 0.02초쯤). 뜻은 낱말마다 찾던 것과 같다.
+    """
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._line_start = -1  # 지금 기억하는 줄이 시작하는 자리. -1이면 아직 아무 줄도 기억하지 않는다.
+        self._interiors: frozenset[tuple[int, int]] = frozenset()
+
+    def interiors(self, line_start: int) -> frozenset[tuple[int, int]]:
+        """line_start에서 시작하는 줄의 백틱 쌍 안쪽 구간들을 (줄 안 시작, 줄 안 끝) 쌍의 집합으로 돌려준다."""
+        if line_start != self._line_start:
+            line_end = self._text.find("\n", line_start)
+            if line_end == -1:
+                line_end = len(self._text)
+            line = self._text[line_start:line_end]
+            self._interiors = frozenset(span.span(2) for span in _CODE_SPAN.finditer(line))
+            self._line_start = line_start
+        return self._interiors
+
+
+def _claimed(text: str, start: int, end: int, line_start: int, code_spans: _CodeSpans) -> bool:
     """text[start:end]의 낱말을 문서가 커밋 참조로 적었는지(규칙 4가 말하는 두 꼴 가운데 하나인지)."""
     # 백틱 한 쌍 안이 통째로 그 낱말이다. 낱말 바로 앞뒤가 백틱일 때만 그 줄의 백틱 짝을 따져 본다(대부분의
-    # 낱말은 그렇지 않으므로 줄을 매번 훑지 않는다). 이웃한 백틱이 서로 다른 쌍에 속하는 `x`1234abc`y`는
-    # 짝을 맞춰 보면 낱말이 어느 쌍의 안쪽도 아니다.
-    if start > line_start and text[start - 1] == "`" and text.startswith("`", end):
-        line_end = text.find("\n", end)
-        if line_end == -1:
-            line_end = len(text)
-        wanted = (start - line_start, end - line_start)
-        if any(span.span(2) == wanted for span in _CODE_SPAN.finditer(text[line_start:line_end])):
-            return True
+    # 낱말은 그렇지 않다). 짝은 줄마다 한 번만 맞추고 그 줄의 낱말들이 함께 쓴다(code_spans). 이웃한 백틱이 서로
+    # 다른 쌍에 속하는 `x`1234abc`y`는 짝을 맞춰 보면 낱말이 어느 쌍의 안쪽도 아니다.
+    wrapped = start > line_start and text[start - 1] == "`" and text.startswith("`", end)
+    if wrapped and (start - line_start, end - line_start) in code_spans.interiors(line_start):
+        return True
     return _follows_commit_word(text, start, line_start)
 
 
@@ -341,7 +572,8 @@ def find_tokens(text: str) -> list[tuple[int, str, bool]]:
       - `커밋` 또는 `commit`(대소문자 무시, 바로 앞 글자가 ASCII 영문자가 아닐 것) 뒤에 공백·탭·백틱·여는
         괄호만 0개 이상 두고 그 낱말이 온다.
     파일 전체에 정규식을 한 번 걸고 줄 번호는 지나온 줄바꿈만 이어서 센다(낱말이 수십만 개여도 한 번에
-    끝낸다).
+    끝낸다). 백틱 쌍도 줄마다 한 번만 맞추고 그 줄의 낱말들이 함께 쓴다(감싼 낱말이 한 줄에 수천 개여도
+    줄 길이에 낱말 수를 곱한 만큼 걸리지 않는다).
 
     a~f 글자가 하나도 없는 숫자뿐인 글자열(날짜, 크기, 숫자 꼬리)은 해시가 아닌 수일 수 있어서, 위 두 꼴로
     적은 것(셋째 값이 참인 것)만 낱말로 낸다. 그 밖의 숫자뿐인 글자열은 버린다. 참조라고 밝혀 적은 자리는
@@ -349,6 +581,7 @@ def find_tokens(text: str) -> list[tuple[int, str, bool]]:
     파일에서도 느려지지 않도록, 바로 앞 글자가 참조 표시가 될 수 없는 것이면 줄 번호를 세기 전에 버린다.
     """
     found: list[tuple[int, str, bool]] = []
+    code_spans = _CodeSpans(text)
     line = 1
     line_start = 0
     counted_to = 0
@@ -363,7 +596,7 @@ def find_tokens(text: str) -> list[tuple[int, str, bool]]:
             line += newlines
             line_start = text.rfind("\n", counted_to, start) + 1
         counted_to = start
-        claimed = _claimed(text, start, end, line_start)
+        claimed = _claimed(text, start, end, line_start, code_spans)
         if digits_only and not claimed:
             continue
         found.append((line, word, claimed))
@@ -397,6 +630,53 @@ def _short_list(commits: Sequence[str]) -> str:
     return shown + (" …" if len(commits) > 5 else "")
 
 
+# 낱말·기록 값·짝의 커밋이 풀릴 때 걸리는 이유들. 세 검사가 같은 말을 쓰도록 한곳에 둔다.
+_UNRESOLVED = "이 저장소의 커밋으로 풀리지 않는다"
+_NOT_ANCESTOR = "이 저장소의 커밋이지만 HEAD의 조상이 아니다(다른 브랜치에만 있거나 이력에서 빠진 커밋일 수 있다)"
+
+
+def _ambiguous(matches: Sequence[str]) -> str:
+    """커밋 둘 이상에 맞는 값의 이유."""
+    return f"커밋 둘 이상에 맞는다(모호): {_short_list(matches)}"
+
+
+def commit_value_problem(
+    value: object, by_prefix: Mapping[str, Sequence[str]], ancestors: Collection[str]
+) -> tuple[str | None, str | None]:
+    """기록 파일의 값이나 등록 값 하나가 '이 저장소의 커밋'으로서 맞는지 보고 (문제의 이유, 풀린 커밋)을 돌려준다.
+
+    이유가 None이면 맞고, 그때 둘째 값은 풀린 커밋의 전체 해시다. 맞지 않으면 둘째 값은 None이다. 순서대로 본다.
+    ① 글이어야 한다(null·숫자·목록은 아니다). ② 7~40자 소문자 16진수여야 한다(unknown이나 `<해시>+dirty`는
+    아니다. a~f 글자가 없는 숫자뿐인 값도 꼴이 맞다). ③ 이 저장소의 커밋 하나로 풀려야 한다(풀리지 않음과 모호는
+    아니다). ④ 그 커밋이 HEAD의 조상이어야 한다.
+    """
+    if not isinstance(value, str):
+        return "글이 아니다", None
+    if not _HASH_FORM.fullmatch(value):
+        return "7~40자 소문자 16진수가 아니다", None
+    matches = resolve(value, by_prefix)
+    if not matches:
+        return _UNRESOLVED, None
+    if len(matches) > 1:
+        return _ambiguous(matches), None
+    if matches[0] not in ancestors:
+        return _NOT_ANCESTOR, None
+    return None, matches[0]
+
+
+def glob_matches(glob: str, path: str) -> bool:
+    """저장소 뿌리 기준 `/` 경로 path가 glob에 맞는지. 조각(`/` 사이)마다 견주고 조각 수가 같아야 한다.
+
+    조각 안에서 `*`·`?`·`[…]`를 쓸 수 있고(대소문자를 가린다), 조각을 넘나들지 않는다: `*`는 폴더 하나 안에서만
+    맞는다. 그래서 `a/*/m.json`은 `a/x/m.json`에 맞고 `a/x/y/m.json`에는 맞지 않는다.
+    """
+    glob_parts = glob.split("/")
+    path_parts = path.split("/")
+    return len(glob_parts) == len(path_parts) and all(
+        fnmatch.fnmatchcase(part, pattern) for part, pattern in zip(path_parts, glob_parts, strict=True)
+    )
+
+
 def judge_file(
     path: str,
     words: Sequence[tuple[int, str, bool]],
@@ -422,9 +702,9 @@ def judge_file(
         if matches:
             counted += 1
             if len(matches) > 1:
-                reason = f"커밋 둘 이상에 맞는다(모호): {_short_list(matches)}"
+                reason = _ambiguous(matches)
             elif matches[0] not in ancestors:
-                reason = "이 저장소의 커밋이지만 HEAD의 조상이 아니다(다른 브랜치에만 있거나 이력에서 빠진 커밋일 수 있다)"
+                reason = _NOT_ANCESTOR
             else:
                 continue
             problems.append(Problem("reference", path, f"{word}: {reason}", line=line))
@@ -552,11 +832,13 @@ def _batches(sized: Sequence[tuple[str, int]]) -> Iterator[list[str]]:
         yield batch
 
 
-def _read_blobs(repo: Path, oids: Sequence[str]) -> Iterator[tuple[str, bytes]]:
-    """`git cat-file --batch`로 블롭들의 내용을 한꺼번에 읽어 (객체 해시, 내용)을 차례로 낸다.
+def _read_objects(repo: Path, oids: Sequence[str], kind: bytes) -> Iterator[tuple[str, bytes]]:
+    """`git cat-file --batch`로 객체들의 내용을 한꺼번에 읽어 (객체 해시, 내용)을 차례로 낸다.
 
-    출력은 객체마다 `<해시> blob <크기>\\n<내용>\\n`이다. 내용은 저장된 바이트 그대로다(줄바꿈 변환 없음).
-    요청한 차례와 다르거나 객체가 없으면(`<해시> missing`) 읽지 못한 것이므로 CannotCheck다.
+    kind는 기대하는 객체 종류(b"blob" 또는 b"commit")다. 출력은 객체마다 `<해시> <종류> <크기>\\n<내용>\\n`이다.
+    내용은 저장된 바이트 그대로다(줄바꿈 변환 없음). 요청한 차례와 다르거나, 기대한 종류가 아니거나, 객체가
+    없으면(`<해시> missing`) 읽지 못한 것이므로 CannotCheck다. oids는 40자 전체 해시여야 한다(출력의 첫 낱말과
+    견주기 때문이다).
     """
     request = "".join(f"{oid}\n" for oid in oids).encode("ascii")
     out = _git(repo, "cat-file", "--batch", "--buffer", stdin=request)
@@ -564,7 +846,7 @@ def _read_blobs(repo: Path, oids: Sequence[str]) -> Iterator[tuple[str, bytes]]:
     for oid in oids:
         newline = out.find(b"\n", position)
         header = out[position:newline].split() if newline >= 0 else []
-        if len(header) != 3 or header[0] != oid.encode("ascii") or header[1] != b"blob":
+        if len(header) != 3 or header[0] != oid.encode("ascii") or header[1] != kind:
             raise CannotCheck(f"git cat-file의 출력을 읽을 수 없다: {oid}")
         size = int(header[2])
         begin = newline + 1
@@ -573,6 +855,76 @@ def _read_blobs(repo: Path, oids: Sequence[str]) -> Iterator[tuple[str, bytes]]:
             raise CannotCheck(f"git cat-file의 출력이 모자라다: {oid}")
         yield oid, out[begin:end]
         position = end + 1
+
+
+def _read_blobs(repo: Path, oids: Sequence[str]) -> Iterator[tuple[str, bytes]]:
+    """`_read_objects`로 블롭(파일 내용)을 읽는다."""
+    return _read_objects(repo, oids, b"blob")
+
+
+def _tree_ids(repo: Path, names: Sequence[str]) -> dict[str, str | None]:
+    """`<커밋>:<폴더>` 이름들이 가리키는 트리의 해시를 `git cat-file --batch-check` 한 번으로 묻는다.
+
+    이름마다 그 폴더가 그 커밋에 있으면 트리 해시, 없으면(또는 트리가 아니면) None이다. '없다'는 git이 `<이름>
+    missing`이라고 답하는 것이다. git 자체의 실패(종료 코드가 0이 아님)나 기대한 꼴이 아닌 출력은 읽지 못한 것이라
+    CannotCheck다(없다는 답과 섞지 않는다). 이름은 서로 달라야 한다.
+    """
+    if not names:
+        return {}
+    request = "".join(f"{name}\n" for name in names).encode("utf-8")
+    out = _git(repo, "cat-file", "--batch-check", stdin=request)
+    lines = out.decode("utf-8", errors="replace").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if len(lines) != len(names):
+        raise CannotCheck("git cat-file --batch-check가 묻은 이름 수와 다른 수의 줄을 냈다")
+    ids: dict[str, str | None] = {}
+    for name, line in zip(names, lines, strict=True):
+        fields = line.split(" ")
+        if fields[-1] == "missing":
+            ids[name] = None
+        elif len(fields) == 3 and re.fullmatch(r"[0-9a-f]{40,64}", fields[0]):
+            ids[name] = fields[0] if fields[1] == "tree" else None
+        else:
+            raise CannotCheck(f"git cat-file --batch-check의 출력을 읽을 수 없다: {line}")
+    return ids
+
+
+# 커밋 객체의 committer 줄 끝: `... <시각(초)> <시간대>`.
+_COMMITTER_TIME = re.compile(rb" (\d+) [+-]\d{4}$")
+
+
+def _commit_times(repo: Path, commits: Sequence[str]) -> dict[str, int]:
+    """커밋들의 커밋 시각(초, `%ct`와 같다)을 `git cat-file --batch` 한 번으로 읽는다.
+
+    커밋 객체의 committer 줄 끝의 시각이다. 사용자 설정(`log.showSignature`로 서명 확인 줄이 끼는 것 등)이 출력을
+    바꾸지 않도록 `git log`·`git show` 대신 배관 명령으로 읽는다. 커밋마다 프로세스를 띄우지도 않는다. 시각을 찾지
+    못하면 빈 값으로 넘기지 않고 CannotCheck다. commits는 40자 전체 해시여야 한다.
+    """
+    times: dict[str, int] = {}
+    for commit, data in _read_objects(repo, commits, b"commit"):
+        header = data.split(b"\n\n", 1)[0]
+        for line in header.split(b"\n"):
+            if line.startswith(b"committer "):
+                found = _COMMITTER_TIME.search(line)
+                if found is not None:
+                    times[commit] = int(found.group(1))
+                break
+        if commit not in times:
+            raise CannotCheck(f"커밋 {commit[:12]}의 committer 줄에서 시각을 읽을 수 없다")
+    return times
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    """`git merge-base --is-ancestor`: ancestor가 descendant의 조상(또는 같은 커밋)이면 참.
+
+    종료 코드는 조상이면 0, 아니면 1이다. 그 밖의 코드(모르는 이름은 128 등)는 읽지 못한 것이라 CannotCheck다.
+    """
+    done = _run(repo, "merge-base", "--is-ancestor", ancestor, descendant)
+    if done.returncode in (0, 1):
+        return done.returncode == 0
+    reason = _first_line(done.stderr)
+    raise CannotCheck(f"git merge-base 실패(종료 코드 {done.returncode})" + (f": {reason}" if reason else ""))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -627,33 +979,56 @@ def _sort_key(problem: Problem) -> tuple[str, int, int, str, str]:
     return (problem.path, problem.line, problem.order, problem.kind, problem.message)
 
 
-def scan_references(repo: Path, registry: Registry) -> ReferenceReport:
-    """repo의 HEAD를 읽어 규칙 3·4·5를 걸고 (정렬된 문제들, 센 출현 수)를 돌려준다. 읽기만 한다.
+@dataclass(frozen=True)
+class _Snapshot:
+    """한 번 읽은 저장소의 HEAD 모습. 세 검사(참조, 기록 값, 짝)가 같은 것을 보고 git을 되풀이해 부르지 않게 한다.
 
-    registry.problems(등록 파일의 꼴 오류)도 문제에 싣는다. 검사를 시작하거나 끝낼 수 없으면(폴더나 git
-    저장소가 아님, 얕은 복제, HEAD 없음, git 실패) 빈 결과를 돌려주지 않고 CannotCheck를 올린다.
+    ancestors는 HEAD에서 닿는 커밋들, by_prefix는 어느 ref에서든 닿는 커밋들의 앞 7자 사전, blobs는 HEAD의 트리의
+    일반 파일들, tree_paths는 그 경로들, top_folders는 그 가운데 트리 맨 위에 있는 폴더 이름들이다.
     """
+
+    repo: Path
+    ancestors: frozenset[str]
+    by_prefix: Mapping[str, Sequence[str]]
+    blobs: tuple[_Blob, ...]
+    tree_paths: frozenset[str]
+    top_folders: frozenset[str]
+
+
+def _take_snapshot(repo: Path) -> _Snapshot:
+    """repo의 HEAD를 읽어 _Snapshot으로 만든다. 읽을 수 없으면(폴더나 git 저장소가 아님, 얕은 복제, HEAD 없음, git
+    실패) 빈 결과를 돌려주지 않고 CannotCheck를 올린다."""
     _require_history(repo)
     ancestors = frozenset(_hashes(_git(repo, "rev-list", "HEAD")))
     everything = ancestors.union(_hashes(_git(repo, "rev-list", "--all")))
-    by_prefix = build_prefix_index(everything)
+    blobs = tuple(_head_blobs(repo))
+    tree_paths = frozenset(blob.path for blob in blobs)
+    top_folders = frozenset(path.split("/", 1)[0] for path in tree_paths if "/" in path)
+    return _Snapshot(repo, ancestors, build_prefix_index(everything), blobs, tree_paths, top_folders)
+
+
+def _scan_references(snapshot: _Snapshot, registry: Registry) -> ReferenceReport:
+    """snapshot에 규칙 3·4·5를 걸고 (정렬된 문제들, 센 출현 수)를 돌려준다.
+
+    등록 파일의 꼴 오류 가운데 [[external]]의 것(종류 external)도 문제에 싣는다. 기록 값과 짝의 꼴 오류는 그 검사가 싣는다.
+    """
+    repo, ancestors, by_prefix = snapshot.repo, snapshot.ancestors, snapshot.by_prefix
+    tree_paths = snapshot.tree_paths
 
     registered: dict[str, set[str]] = {}
     for entry in registry.externals:
         registered.setdefault(entry.where, set()).add(entry.hash)
 
-    blobs = _head_blobs(repo)
-    tree_paths = {blob.path for blob in blobs}
     # 같은 내용의 파일(같은 객체)은 한 번만 읽고 경로마다 판정한다. 잠금 파일은 읽지 않는다.
     paths_by_oid: dict[str, list[str]] = {}
     sizes: dict[str, int] = {}
-    for blob in blobs:
+    for blob in snapshot.blobs:
         if blob.path.rsplit("/", 1)[-1] in SKIPPED_NAMES:
             continue
         paths_by_oid.setdefault(blob.oid, []).append(blob.path)
         sizes[blob.oid] = blob.size
 
-    problems: list[Problem] = list(registry.problems)
+    problems: list[Problem] = [problem for problem in registry.problems if problem.kind == "external"]
     references = 0
     scanned_paths: set[str] = set()
     words_by_path: dict[str, set[str]] = {}
@@ -682,12 +1057,282 @@ def scan_references(repo: Path, registry: Registry) -> ReferenceReport:
     return ReferenceReport(problems=tuple(sorted(problems, key=_sort_key)), references=references)
 
 
+def scan_references(repo: Path, registry: Registry) -> ReferenceReport:
+    """repo의 HEAD를 읽어 규칙 3·4·5를 걸고 (정렬된 문제들, 센 출현 수)를 돌려준다. 읽기만 한다.
+
+    등록 파일의 꼴 오류 가운데 [[external]]의 것도 문제에 싣는다. 검사를 시작하거나 끝낼 수 없으면(폴더나 git
+    저장소가 아님, 얕은 복제, HEAD 없음, git 실패) 빈 결과를 돌려주지 않고 CannotCheck를 올린다.
+    """
+    return _scan_references(_take_snapshot(repo), registry)
+
+
 def check_references(repo: Path, registry: Registry) -> list[Problem]:
     """repo의 HEAD에 적힌 커밋 해시 참조를 검사하고 문제를 정렬해 돌려준다. 통과면 빈 목록. 읽기만 한다.
 
     scan_references와 같고 센 출현 수는 돌려주지 않는다. 검사를 시작하거나 끝낼 수 없으면 CannotCheck다.
     """
     return list(scan_references(repo, registry).problems)
+
+
+# ---------------------------------------------------------------------------------------------
+# 기록 파일의 커밋 값([[record]])
+# ---------------------------------------------------------------------------------------------
+
+
+def _documents(path: str, data: bytes) -> list[tuple[int, object]]:
+    """기록 파일의 바이트를 JSON으로 풀어 (줄 번호, 값) 목록으로 돌려준다.
+
+    이름이 .jsonl로 끝나면 줄마다 JSON 하나다(공백뿐인 줄은 건너뛴다. 줄 번호는 1부터 `\\n`으로 센다. 줄 끝의 CR은
+    JSON의 공백이라 괜찮다). 그 밖은 파일 전체가 JSON 하나다(줄 번호 0). 바이트는 utf-8-sig로 푼다(맨 앞의 BOM을
+    허용한다). 풀리지 않거나 JSON이 깨졌으면 문제로 세지 않고 CannotCheck를 올린다. 읽지 못한 기록을 건너뛴 채
+    통과하지 않게 하려는 것이고, 메시지에 파일 경로(.jsonl이면 줄 번호까지)가 있다.
+    """
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise CannotCheck(f"기록 파일을 UTF-8로 읽을 수 없다: {path}: {error}") from error
+    if not path.endswith(".jsonl"):
+        try:
+            return [(0, json.loads(text))]
+        except (ValueError, RecursionError) as error:
+            raise CannotCheck(f"기록 파일의 JSON을 읽을 수 없다: {path}: {error}") from error
+    documents: list[tuple[int, object]] = []
+    for number, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
+            continue
+        try:
+            documents.append((number, json.loads(line)))
+        except (ValueError, RecursionError) as error:
+            raise CannotCheck(f"기록 파일의 JSON을 읽을 수 없다: {path}:{number}: {error}") from error
+    return documents
+
+
+def _found_values(document: object, names: Collection[str]) -> Iterator[tuple[str, object, dict]]:
+    """document의 모든 깊이(객체와 목록 속)에서 키 이름이 names에 있는 것을 모두 (키, 값, 그 키가 든 객체)로 낸다.
+
+    값이 객체나 목록이면 그 안도 이어서 찾는다. 찾는 차례는 문서 순서와 같지 않을 수 있다(문제는 나중에 정렬한다).
+    아주 깊은 JSON에서도 파이썬의 재귀 한도에 걸리지 않도록 스택으로 내려간다.
+    """
+    stack: list[object] = [document]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in names:
+                    yield key, value, node
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(item for item in node if isinstance(item, (dict, list)))
+
+
+def _show_value(value: object) -> str:
+    """문제 줄에 적을 값의 모양. 한 줄에 보이는 글은 그대로, 그 밖(null, 숫자, 목록, 빈 글, 줄바꿈이 든 글)은 JSON 꼴로 쓴다."""
+    if isinstance(value, str) and value and value.isprintable():
+        return value
+    text = json.dumps(value, ensure_ascii=False)
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+@dataclass(frozen=True)
+class _TreeCheck:
+    """git_tree를 견줘 볼 값 하나: 어느 파일 몇째 줄의 어느 키가 가리키는 커밋, 구성 요소 폴더, 그 객체가 적은 git_tree."""
+
+    path: str
+    line: int
+    key: str
+    commit: str
+    component: str
+    tree: object
+
+
+def _tree_problem(check: _TreeCheck, actual: str | None) -> list[Problem]:
+    """git_tree 값 하나를 그 커밋의 구성 요소 폴더 트리(actual, 폴더가 없으면 None)와 견주어 문제를 낸다.
+
+    git_tree가 글이 아니거나(null 포함), 그 커밋에 그 폴더가 없거나, 트리 해시가 다르면 문제다. 줄은
+    `record <파일>: git_tree: <값>: <이유>`다.
+    """
+    about = f"{check.key} 값 {check.commit[:7]}"
+    if not isinstance(check.tree, str):
+        reason = f"글이 아니다({about}의 {check.component} 트리 해시를 적어야 한다)"
+    elif actual is None:
+        reason = f"{about}: 그 커밋에 이 폴더가 없다({check.component})"
+    elif check.tree != actual:
+        reason = f"{about}의 {check.component} 트리는 {actual}이다"
+    else:
+        return []
+    return [Problem("record", check.path, f"git_tree: {_show_value(check.tree)}: {reason}", line=check.line)]
+
+
+def _scan_records(snapshot: _Snapshot, registry: Registry) -> RecordReport:
+    """[[record]]마다 glob에 맞는 HEAD의 파일에서 등록한 키의 값을 찾아 검사한다(규칙 6).
+
+    값마다 하나씩 센다(문제인 값도 센다). 등록 파일의 꼴 오류 가운데 [[record]]의 것도 문제에 싣는다. 읽을 수 없는
+    기록 파일이 있으면 문제로 세지 않고 CannotCheck를 올린다. 트리 조회는 값마다 git을 부르지 않고 서로 다른
+    (커밋, 폴더) 쌍만 한 번에 묻는다.
+
+    glob에 맞는 파일이 있는데 등록한 키가 그 파일들 어디에도 한 번도 안 나오면, 그 키마다 그 항목의 문제다(키 이름의
+    오타이거나 낡은 등록이다. 알리지 않으면 그 키는 아무것도 검사하지 않은 채 통과한다). 파일 하나에 키가 없는 것은
+    문제가 아니고 세지도 않는다. 맞는 파일이 하나도 없는 항목은 낡은 등록 하나만 알리고 키 문제를 겹쳐 내지 않는다.
+    """
+    problems = [problem for problem in registry.problems if problem.kind == "record"]
+    source = registry.source
+    matched: dict[int, list[_Blob]] = {}
+    for rule in registry.records:
+        found = [blob for blob in snapshot.blobs if glob_matches(rule.glob, blob.path)]
+        if not found:
+            reason = f"{rule.glob}: HEAD의 트리에 맞는 파일이 없다(낡은 등록이다)"
+            problems.append(_entry_problem("record", source, rule.number, "glob", reason))
+        matched[rule.number] = found
+
+    # 맞는 파일을 한꺼번에 읽는다(같은 객체는 한 번만).
+    needed = {blob.oid: blob.size for found in matched.values() for blob in found}
+    contents: dict[str, bytes] = {}
+    for oids in _batches(list(needed.items())):
+        contents.update(_read_blobs(snapshot.repo, oids))
+
+    values = 0
+    parsed: dict[tuple[str, bool], list[tuple[int, object]]] = {}
+    pending: list[_TreeCheck] = []
+    for rule in registry.records:
+        folder_exists = rule.component in snapshot.top_folders
+        if not folder_exists:
+            reason = f"{rule.component}: HEAD의 트리 맨 위에 그 폴더가 없다(git_tree를 견주지 않는다)"
+            problems.append(_entry_problem("record", source, rule.number, "component", reason))
+        names = frozenset(rule.keys)
+        seen_keys: set[str] = set()  # 맞는 파일 어딘가에서 실제로 나온 등록 키
+        for blob in matched[rule.number]:
+            cache_key = (blob.oid, blob.path.endswith(".jsonl"))
+            if cache_key not in parsed:
+                parsed[cache_key] = _documents(blob.path, contents[blob.oid])
+            for line, document in parsed[cache_key]:
+                for key, value, container in _found_values(document, names):
+                    values += 1
+                    seen_keys.add(key)
+                    reason, commit = commit_value_problem(value, snapshot.by_prefix, snapshot.ancestors)
+                    if reason is not None:
+                        problems.append(
+                            Problem("record", blob.path, f"{key}: {_show_value(value)}: {reason}", line=line)
+                        )
+                    elif folder_exists and commit is not None and "git_tree" in container:
+                        pending.append(
+                            _TreeCheck(blob.path, line, key, commit, rule.component, container["git_tree"])
+                        )
+        if matched[rule.number]:
+            # 등록한 키가 맞는 파일 전체에서 한 번도 안 나오면 오타이거나 낡은 등록이다. 알리지 않으면 그 키는 아무것도
+            # 검사하지 않은 채 통과한다(끝 줄의 기록 값 수만이 단서가 된다). 파일 하나에 키가 없는 것은 괜찮고, 키가 든
+            # 파일이 하나라도 있으면 된다. 같은 키를 두 번 적었어도 한 번만 알린다. 맞는 파일이 없는 항목은 위에서 낡은
+            # 등록으로 이미 알렸으므로 겹쳐 내지 않는다.
+            for key in dict.fromkeys(rule.keys):
+                if key not in seen_keys:
+                    reason = (
+                        f"{key}: glob에 맞는 파일 {len(matched[rule.number])}개 어디에도 이 키가 없다"
+                        "(오타이거나 낡은 등록이다)"
+                    )
+                    problems.append(_entry_problem("record", source, rule.number, "keys", reason))
+
+    if pending:
+        names_to_ask = sorted({f"{item.commit}:{item.component}" for item in pending})
+        trees = _tree_ids(snapshot.repo, names_to_ask)
+        for item in pending:
+            problems += _tree_problem(item, trees[f"{item.commit}:{item.component}"])
+    return RecordReport(problems=tuple(sorted(problems, key=_sort_key)), values=values)
+
+
+def scan_records(repo: Path, registry: Registry) -> RecordReport:
+    """repo의 HEAD에서 [[record]]가 가리키는 기록 파일의 커밋 값을 검사해 (정렬된 문제들, 센 값 수)를 돌려준다. 읽기만 한다.
+
+    검사를 시작하거나 끝낼 수 없으면(저장소를 못 읽음, 기록 파일을 못 읽음, git 실패) CannotCheck를 올린다.
+    """
+    return _scan_records(_take_snapshot(repo), registry)
+
+
+def check_records(repo: Path, registry: Registry) -> list[Problem]:
+    """scan_records와 같고 센 값 수는 돌려주지 않는다. 문제를 정렬해 돌려준다. 통과면 빈 목록."""
+    return list(scan_records(repo, registry).problems)
+
+
+# ---------------------------------------------------------------------------------------------
+# '규칙 → 결과' 짝([[pair]])
+# ---------------------------------------------------------------------------------------------
+
+
+def _pair_problem(pair: Pair, reason: str) -> Problem:
+    """짝의 판정 문제. 줄은 `pair <where>: <id>: <이유>`다(where는 그 순서를 적은 문서)."""
+    return Problem("pair", pair.where, f"{pair.id}: {reason}", order=pair.number)
+
+
+def _scan_pairs(snapshot: _Snapshot, registry: Registry) -> list[Problem]:
+    """등록한 [[pair]]마다 규칙 7의 순서로 판정해 문제를 정렬해 돌려준다.
+
+    순서: ① 둘 다 이 저장소의 커밋 하나로 풀리고 HEAD의 조상인가(어느 쪽인지 적고, 걸리면 그 뒤는 보지 않는다).
+    ② 서로 다른 커밋인가. ③ `git merge-base --is-ancestor <규칙> <결과>`가 0인가. ④ 커밋 시각이 규칙 <= 결과인가(같은
+    초는 통과). ⑤ where 문서(HEAD의 내용)에 두 해시의 앞 7자가 글자로 있는가(없는 쪽마다 문제). ②부터는 앞에서
+    걸리면 그 뒤를 보지 않는다. 등록 파일의 꼴 오류 가운데 [[pair]]의 것도 문제에 싣는다.
+    """
+    problems = [problem for problem in registry.problems if problem.kind == "pair"]
+    sound: list[tuple[Pair, str, str]] = []
+    for pair in registry.pairs:
+        commits: list[str] = []
+        for label, value in (("규칙", pair.rule), ("결과", pair.result)):
+            reason, commit = commit_value_problem(value, snapshot.by_prefix, snapshot.ancestors)
+            if reason is not None:
+                problems.append(_pair_problem(pair, f"{label} 커밋 {value}: {reason}"))
+            elif commit is not None:
+                commits.append(commit)
+        if len(commits) == 2:
+            sound.append((pair, commits[0], commits[1]))
+    if not sound:
+        return sorted(problems, key=_sort_key)
+
+    # 여러 커밋의 시각과 여러 문서를 한 번에 읽는다(짝마다 프로세스를 띄우지 않는다).
+    commits_needed = sorted({commit for _, rule, result in sound for commit in (rule, result)})
+    times = _commit_times(snapshot.repo, commits_needed)
+    blob_by_path = {blob.path: blob for blob in snapshot.blobs}
+    needed = {
+        blob_by_path[pair.where].oid: blob_by_path[pair.where].size
+        for pair, _, _ in sound
+        if pair.where in blob_by_path
+    }
+    documents: dict[str, bytes] = {}
+    for oids in _batches(list(needed.items())):
+        documents.update(_read_blobs(snapshot.repo, oids))
+
+    for pair, rule, result in sound:
+        if rule == result:
+            reason = f"규칙 커밋과 결과 커밋이 같다({pair.rule}): 서로 다른 커밋이어야 한다"
+        elif not _is_ancestor(snapshot.repo, rule, result):
+            reason = f"규칙 커밋이 결과 커밋의 조상이 아니다({pair.rule} → {pair.result})"
+        elif times[rule] > times[result]:
+            reason = (
+                f"규칙 커밋의 커밋 시각({times[rule]})이 결과 커밋의 커밋 시각({times[result]})보다 늦다"
+                "(UNIX 초)"
+            )
+        elif pair.where not in blob_by_path:
+            reason = f"문서 {pair.where}가 HEAD의 트리에 없다(저장소 뿌리 기준 / 경로로 적는다)"
+        elif b"\0" in documents[blob_by_path[pair.where].oid]:
+            reason = f"문서 {pair.where}가 글이 아닌 파일이다"
+        else:
+            text = documents[blob_by_path[pair.where].oid].decode("utf-8", errors="replace")
+            for label, value in (("규칙", pair.rule), ("결과", pair.result)):
+                if value[:PREFIX_LENGTH] not in text:
+                    problems.append(
+                        _pair_problem(
+                            pair, f"{label} 커밋의 앞 7자 {value[:PREFIX_LENGTH]}가 {pair.where}에 글자로 없다"
+                        )
+                    )
+            continue
+        problems.append(_pair_problem(pair, reason))
+    return sorted(problems, key=_sort_key)
+
+
+def check_pairs(repo: Path, registry: Registry) -> list[Problem]:
+    """repo의 HEAD에서 등록한 [[pair]]의 순서를 검사하고 문제를 정렬해 돌려준다. 통과면 빈 목록. 읽기만 한다.
+
+    검사를 시작하거나 끝낼 수 없으면(저장소를 못 읽음, git 실패, `git merge-base`가 0이나 1이 아닌 코드를 냄)
+    CannotCheck를 올린다.
+    """
+    return _scan_pairs(_take_snapshot(repo), registry)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -733,8 +1378,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "문서와 코드에 적힌 커밋 해시 참조가 이 저장소의 이력과 맞는지 본다.\n"
             "\n"
-            "HEAD의 추적 파일에서 7~40자 소문자 16진수 낱말을 뽑아 이 저장소의 커밋으로 풀어 보고, 아래\n"
-            "규칙 다섯으로 문제를 알린다.\n"
+            "HEAD의 추적 파일에서 7~40자 소문자 16진수 낱말을 뽑아 이 저장소의 커밋으로 풀어 보고, 등록 파일에\n"
+            "적은 기록 파일의 커밋 값과 '규칙 → 결과' 짝도 보며, 아래 규칙 일곱으로 문제를 알린다.\n"
             "  1. 대상은 HEAD의 추적 파일이다. uv.lock·package-lock.json과 글이 아닌 파일(널 바이트가 든\n"
             "     파일)은 뺀다. 작업 트리가 아니라 HEAD의 내용을 읽는다.\n"
             "  2. 낱말은 7~40자 소문자 16진수다. a~f 글자가 하나도 없는 숫자뿐인 것은 규칙 4의 두 꼴로 적은\n"
@@ -749,21 +1394,39 @@ def _build_parser() -> argparse.ArgumentParser:
             "     [[external]]에 그 파일과 그 낱말이 등록돼 있으면 통과한다.\n"
             "  5. [[external]]이 가리키는 낱말이 그 파일에 더는 없으면(낡은 등록), 또는 그 낱말이 이\n"
             "     저장소의 커밋으로 풀리면(잘못 등록) 문제다.\n"
+            "  6. ([[record]]로 등록한 기록 파일) glob에 맞는 HEAD의 파일(JSON, .jsonl은 줄마다)에서 모든\n"
+            "     깊이의 등록한 키(keys)를 찾아 값마다 센다. 값은 7~40자 소문자 16진수(숫자뿐이어도 된다)인\n"
+            "     글이어야 하고, 이 저장소의 커밋 하나로 풀려야 하고, HEAD의 조상이어야 한다. 글이 아니거나\n"
+            "     (null), unknown이나 `<해시>+dirty`처럼 꼴이 다르거나, 풀리지 않거나, 모호하거나, 조상이\n"
+            "     아니면 문제다. 같은 객체에 git_tree가 있으면 그 커밋의 component 폴더 트리\n"
+            "     (`git rev-parse <커밋>:<component>`)와 같아야 한다. glob에 맞는 파일이 없으면 낡은\n"
+            "     등록이다. 파일이 있는데 등록한 키가 그 파일들 어디에도 한 번도 안 나오면 그 키가 오타이거나\n"
+            "     낡은 등록이다(키마다 문제. 아무것도 검사하지 않은 채 통과하지 않게 한다). 키가 없는 파일이\n"
+            "     섞인 것은 괜찮다. 읽을 수 없는 파일(깨진 JSON, UTF-8이 아님)은 문제가 아니라 종료 코드 2다.\n"
+            "  7. ([[pair]]로 등록한 '규칙 → 결과' 짝) 규칙 커밋과 결과 커밋이 둘 다 이 저장소의 커밋 하나로\n"
+            "     풀리고 HEAD의 조상이어야 한다. 서로 다른 커밋이어야 하고, 규칙이 결과의 조상이어야 하고\n"
+            "     (`git merge-base --is-ancestor`), 커밋 시각이 규칙 <= 결과여야 하고(같은 초는 된다),\n"
+            "     where 문서에 두 해시의 앞 7자가 글자로 있어야 한다. 앞 단계에서 걸리면 그 뒤는 보지 않는다.\n"
+            "     등록한 짝만 본다. 모든 측정을 망라하지 않는다.\n"
             "\n"
             "이 도구는 읽기만 한다. 등록 파일과 저장소의 어떤 파일도 고치지 않는다."
         ),
         epilog=(
             "등록 파일의 표: [[external]](hash, where, what)은 다른 저장소의 해시를 문서가 커밋 참조처럼 적은\n"
-            "곳 하나를 그 파일에서만 통하게 등록한다. [[record]]·[[pair]]는 표의 배열인지만 본다.\n"
+            "곳 하나를 그 파일에서만 통하게 등록한다. [[record]](glob, keys, component, what)는 커밋 값을\n"
+            "담은 키가 있는 기록 파일들을, [[pair]](id, rule, result, where, what)는 규칙 커밋 뒤에 결과\n"
+            "커밋이 있다고 문서에 적은 짝 하나를 등록한다. 다른 저장소의 값이 든 키(revision 등)는 등록하지\n"
+            "않는다.\n"
             "\n"
             "출력: 문제마다 한 줄 `<종류> <파일>:<줄>: <낱말>: <이유>`(종류는 reference, external, record,\n"
-            "pair), 끝 줄 `참조 N개, 기록 값 R개, 짝 P개, 문제 M개`. --report-only를 주면 그 뒤에 `보고만`\n"
-            "줄이 붙는다.\n"
+            "pair). 기록 값의 문제는 `record <파일>: <키>: <값>: <이유>`, 짝의 문제는 `pair <where>: <id>:\n"
+            "<이유>`다. 끝 줄은 `참조 N개, 기록 값 R개, 짝 P개, 문제 M개`(R은 찾은 기록 값, P는 등록한 짝의\n"
+            "수). --report-only를 주면 그 뒤에 `보고만` 줄이 붙는다.\n"
             "\n"
             "종료 코드: 0 = 문제 없음(--report-only면 문제가 있어도 0), 1 = 문제 있음, 2 = 검사를 시작하거나\n"
             "끝낼 수 없음(등록 파일이 없거나 읽을 수 없음, TOML 문법 오류, 모르는 꼭대기 표, 저장소 폴더가\n"
-            "아니거나 git 저장소가 아님, git 실행 불가나 읽기 실패, 얕은 복제, HEAD 없음). --report-only여도\n"
-            "2는 2다. 통과 여부는 끝 줄 글자가 아니라 종료 코드로 판정한다.\n"
+            "아니거나 git 저장소가 아님, git 실행 불가나 읽기 실패, 얕은 복제, HEAD 없음, 기록 파일을 읽을\n"
+            "수 없음). --report-only여도 2는 2다. 통과 여부는 끝 줄 글자가 아니라 종료 코드로 판정한다.\n"
             "\n"
             "이력이 모자라면 풀리지 않는 낱말이 늘어 증거가 틀린 것처럼 보이므로 전체 이력이 필요하다\n"
             "(얕은 복제에서는 git fetch --unshallow, CI 체크아웃은 fetch-depth: 0).\n"
@@ -799,7 +1462,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """등록 파일을 읽어 HEAD의 해시 참조를 검사하고 문제를 출력한다. 종료 코드는 0(통과), 1(문제), 2(시작·완료 불가)."""
+    """등록 파일을 읽어 HEAD의 해시 참조, 기록 값, 짝을 검사하고 문제를 출력한다. 종료 코드는 0(통과), 1(문제), 2(시작·완료 불가)."""
     _use_utf8_output()
     args = _build_parser().parse_args(argv)
     repo = args.repo if args.repo is not None else DEFAULT_REPO
@@ -811,18 +1474,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"등록 파일을 읽을 수 없다: {registry_path}: {type(error).__name__}: {error}", file=sys.stderr)
         return 2
     try:
-        report = scan_references(repo, registry)
+        # 저장소를 한 번만 읽고 세 검사(참조, 기록 값, 짝)가 같은 모습을 본다.
+        snapshot = _take_snapshot(repo)
+        references = _scan_references(snapshot, registry)
+        records = _scan_records(snapshot, registry)
+        pair_problems = _scan_pairs(snapshot, registry)
     except CannotCheck as error:
         print(f"검사를 시작하거나 끝낼 수 없다: {error}", file=sys.stderr)
         return 2
-    for problem in report.problems:
+    problems = sorted([*references.problems, *records.problems, *pair_problems], key=_sort_key)
+    for problem in problems:
         print(problem)
-    # 기록 값과 짝은 이 도구가 아직 검사하지 않으므로 세지 않는다(늘 0).
-    print(f"참조 {report.references}개, 기록 값 0개, 짝 0개, 문제 {len(report.problems)}개")
+    print(
+        f"참조 {references.references}개, 기록 값 {records.values}개, 짝 {registry.pair_total}개,"
+        f" 문제 {len(problems)}개"
+    )
     if args.report_only:
         print("보고만: 문제가 있어도 종료 코드는 0이다")
         return 0
-    return 1 if report.problems else 0
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":
