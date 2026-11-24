@@ -1,6 +1,6 @@
-# voice-translator
+# 실시간 음성 계층 · 음성 번역 서비스 (voice-translator)
 
-> [korean-voice-ai](../README.md)의 구성 요소다(통화 한 건의 흐름에서 '실시간 음성 계층' 단계). 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+> [korean-voice-ai](../README.md)의 구성 요소다. 통화 흐름에서의 자리: 음성 인식([whisper-ko-ft](../whisper-ko-ft/README.md), [stt-scratch](../stt-scratch/README.md)) → **실시간 음성 계층**(이 폴더) → 상담 에이전트([support-agent](../support-agent/README.md)) → 상담 후처리([call-summary](../call-summary/README.md)). 화살표는 통화 순서일 뿐이고, 코드로 이어진 곳은 [docs/architecture.md](../docs/architecture.md)에 있다.
 
 영어↔한국어 음성 번역 웹 서비스. 말하거나 입력하면 음성 인식(STT), 번역, 음성 합성(TTS)을 거쳐 원문과 번역문을 보여 주고 번역문을 읽어 준다. 로그인한 사용자별로 번역 기록을 남긴다. 모델은 모두 로컬 GPU에서 돌고, 공개 평가 데이터(Google FLEURS)로 측정해서 골랐다.
 
@@ -195,4 +195,4 @@ uv run python -m eval.supertonic_download    # 한국어 합성 시험용 Supert
 
 ## 이 폴더의 글 읽는 법
 
-이 폴더는 [korean-voice-ai](../README.md) 저장소의 구성 요소 `voice-translator/`다. 이 폴더의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/voice-translator.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다. 다른 구성 요소와의 연결은 [docs/architecture.md](../docs/architecture.md)에 있다.
+이 폴더(`voice-translator/`)의 글에서 경로는 별말이 없으면 이 폴더 안을 기준으로 읽는다. '이 저장소'와 '이 프로젝트'는 이 구성 요소를, 다른 구성 요소의 이름이 붙은 '저장소'나 '프로젝트'는 그 이름의 폴더를 뜻한다. CI 워크플로는 korean-voice-ai 저장소 맨 위의 `.github/workflows/voice-translator.yml`이다(글에 `.github/workflows/ci.yml`이라고 적힌 곳은 이 파일을 가리킨다). 이 폴더의 글에 적힌 이 구성 요소와 다른 구성 요소의 커밋 해시는 korean-voice-ai 저장소에서 그대로 열린다.
