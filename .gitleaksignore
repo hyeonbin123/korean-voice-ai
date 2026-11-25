@@ -20,3 +20,8 @@ b24d14a8ae4f7544c2d10640bb29a6b511fcd70e:backend/eval/metricx_score.py:generic-a
 4e5a0358df5db744ee8bf08fa4d51472d582dea4:backend/eval/reports/reanalysis_t32fix_20261014_024253.json:generic-api-key:87
 # voice-translator 평가 재분석 기록(JSON)에서 비교 항목의 "key" 칸이다. 값은 평가 스크립트 reanalysis.py가 비교마다 붙이는 이름(같은 항목의 stage·direction·label 칸에 있는 말을 이어 만든 것)이고 비밀값이 아니다.
 4e5a0358df5db744ee8bf08fa4d51472d582dea4:backend/eval/reports/reanalysis_t32fix_20261014_024253.json:generic-api-key:240
+# 같은 발화 인식 비교의 결과 파일(JSON)에서 묶음 항목의 "key" 칸이다. 값은 견주는 가설 묶음의 이름(whisper-large-v3-turbo, qwen3-asr-1.7b, qwen3-asr-1.7b-qn, qwen3-asr-1.7b-qn-s050 — docs/asr-comparison.md의 재료 표에 있는 키)이고 비밀값이 아니다. 결과 파일은 한 번 잰 그대로 두므로 글자를 바꾸지 않는다. 아래 넷은 커밋하기 전 스캔의 지문이라 커밋이 없는 "파일:규칙:줄" 꼴이다.
+evaluation/asr/results/fleurs-ko-test.json:generic-api-key:158
+evaluation/asr/results/fleurs-ko-test.json:generic-api-key:304
+evaluation/asr/results/fleurs-ko-test.json:generic-api-key:330
+evaluation/asr/results/fleurs-ko-test.json:generic-api-key:356
