@@ -1,12 +1,19 @@
 'use strict';
 
 // [파일 역할] 관리 화면(admin.html)의 동작. 관리자 토큰 확인, 승인 대기열의 표시·승인·반려, 상담 세션 목록과
-// 한 세션의 대화·감사 로그 표시를 맡는다.
+// 한 세션의 대화·상담 후처리 기록·감사 로그 표시, 후처리 기록 만들기를 맡는다.
 // [연결] app.py의 관리자 API(/api/admin/approvals, /api/admin/approvals/{id}/decision, /api/admin/sessions,
-// /api/admin/sessions/{id})를 X-Admin-Token 헤더로 부른다.
-// [설계 이유] 프레임워크 없이 DOM API만 쓴다. 서버에서 온 글(고객 메시지, 감사 로그)은 모두 textContent로
-// 넣고 innerHTML은 쓰지 않아, 고객이 보낸 스크립트 문장이 화면에서 실행되지 않는다(docs/service.md 스캔 9의
-// 판단 근거).
+// /api/admin/sessions/{id}, 후처리 기록을 만드는 POST /api/admin/sessions/{id}/summary)를 X-Admin-Token
+// 헤더로 부른다. 토큰이 필요 없는 GET /healthz는 헤더 없이 따로 불러, 로그인한 뒤 후처리 서비스 연결이
+// 켜져 있는지(응답의 summary 칸)를 한 번 읽는다.
+// [설계 이유] 프레임워크 없이 DOM API만 쓴다. 서버에서 온 글(고객 메시지, 감사 로그, 후처리 서비스가 만든
+// 기록)은 모두 textContent로 넣고 innerHTML은 쓰지 않아, 고객이 보낸 스크립트 문장이 화면에서 실행되지
+// 않는다(docs/service.md 스캔 9의 판단 근거. tests/test_service.py의 test_admin_script_never_writes_html이
+// 이 약속을 지킨다).
+// 후처리 기록은 후처리 서비스가 만든 값을 서버가 최상위 다섯 칸의 형과 겹침 깊이만 확인해 저장한 것이라
+// (service/summary.py) 안쪽 칸은 없거나 다른 형일 수 있다. 그래도 그리는 코드는 예외를 내면 안 된다
+// (openSession 전체가 멈춰 대화와 감사 표까지 안 보인다). 그래서 칸을 읽을 때마다 형을 확인한다(isObject,
+// textOf).
 // 전체를 즉시 실행 함수로 감싸 전역 변수를 만들지 않는다.
 
 (() => {
@@ -26,6 +33,27 @@
   };
   const SESSION_STATUS = { open: '진행 중', handoff: '상담원 연결', closed: '종료' };
   const ROLE_NAMES = { customer: '고객', agent: '상담원' };
+  // 후처리 기록의 '확인이 필요한 번호'가 걸린 사유(후처리 서비스의 값) → 화면 표기. 모르는 값은 받은 글 그대로
+  // 보인다. 사유는 서버 밖에서 온 글이라 객체가 아니라 Map으로 찾는다(객체로 찾으면 'constructor' 같은 글이
+  // 객체의 기본 속성에 걸려 엉뚱한 값이 나온다).
+  const REASON_NAMES = new Map([
+    ['format', '형식이 맞지 않음'],
+    ['not_in_transcript', '대화에 없음'],
+  ]);
+  // 후처리 기록 만들기의 결과 문구: 성공 문구와, 실패했을 때의 안내(키는 HTTP 상태 코드). 서버가 주는 영어
+  // detail은 화면에 옮기지 않고 상태 코드로 문구를 고른다. 401·503은 api()가 이미 로그인 화면으로 처리하므로
+  // 여기 없다. 502와 504가 같은 문구인 까닭: 둘 다 후처리 서비스에 닿지 못했거나 제때 답을 받지 못한 경우다.
+  // SUMMARY_FAILED는 표에 없는 상태 코드(404 등)와 네트워크 오류에 쓴다.
+  const SUMMARY_CREATED = '후처리 기록을 만들었습니다.';
+  const SUMMARY_FAILURES = {
+    409: '요약할 대화가 없습니다.',
+    422: '후처리 서비스가 이 대화를 받지 않았습니다(너무 길거나 받을 수 없는 글자).',
+    429: '후처리 서비스가 바쁩니다. 잠시 뒤 다시 눌러 주세요.',
+    501: '후처리 연결이 꺼져 있습니다.',
+    502: '후처리 서비스에 닿지 못했습니다.',
+    504: '후처리 서비스에 닿지 못했습니다.',
+  };
+  const SUMMARY_FAILED = '후처리 기록을 만들지 못했습니다.';
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -46,18 +74,25 @@
     sessionsEmpty: $('sessions-empty'),
     sessions: $('sessions'),
     detail: $('detail'),
+    summaryCreate: $('summary-create'),
+    summaryResult: $('summary-result'),
+    summaryRecord: $('summary-record'),
   };
   const tabs = { approvals: $('tab-approvals'), sessions: $('tab-sessions') };
   const panels = { approvals: $('panel-approvals'), sessions: $('panel-sessions') };
 
   // 화면 상태: 토큰, 그려 둔 승인 목록, 같은 응답이면 다시 그리지 않으려고 기억하는 직렬화 결과(snapshot),
-  // 겹친 요청을 막는 표시, 결정을 보내는 중인 승인, 고른 세션, 승인별로 입력 중인 메모.
+  // 겹친 요청을 막는 표시, 결정을 보내는 중인 승인, 고른 세션, 승인별로 입력 중인 메모, 후처리 기록 만들기의
+  // 상태(연결이 켜졌는가, 요청이 진행 중인가, 상세에 그려진 세션).
   let token = read(TOKEN_KEY);
   let approvals = [];
   let snapshot = ''; // 승인 목록을 그린 근거. 응답이 같으면 DOM(과 입력 중인 글)을 그대로 둔다
   let loadingApprovals = false;
   let deciding = null; // 결정을 보내는 중인 승인의 id
-  let selectedSession = null;
+  let selectedSession = null; // 고른 세션. 상세의 응답을 기다리는 중이면 아직 그려진 세션이 아닐 수 있다
+  let shownSession = null; // 상세에 실제로 그려진 세션. 후처리 기록 만들기 단추가 만드는 대상이다
+  let summaryEnabled = false; // 로그인한 뒤 /healthz로 읽은, 후처리 서비스 연결이 켜져 있는지
+  let summaryBusy = false; // 후처리 기록 만들기 요청이 진행 중인지. 다른 세션을 열어도 끝날 때까지 이어진다
   const notes = new Map(); // 승인 id -> 입력 중인 메모
 
   // ------------------------------------------------------------ 도우미 (helpers)
@@ -116,6 +151,11 @@
     return Number.isNaN(date.getTime()) ? iso : timeFormat.format(date);
   }
 
+  // 서버가 저장해 둔 값을 믿지 않고 읽는 도우미(후처리 기록). isObject: null과 목록이 아닌 객체인가.
+  // textOf: 비어 있지 않은 글이면 그대로, 글이 아니거나(수·목록·객체·null·없음) 비었으면 '-'.
+  const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const textOf = (value) => (typeof value === 'string' && value.trim() !== '' ? value : '-');
+
   // HTTP 상태 코드를 담은 오류. handled는 401(토큰 틀림)·503(관리자 API 꺼짐)처럼 api()가 이미 로그인
   // 화면으로 처리한 오류인지 가른다.
   class ApiError extends Error {
@@ -161,7 +201,8 @@
   }
 
   // 토큰으로 대기열 API를 한 번 불러 보고, 통과하면 본 화면을 연다. 토큰을 따로 검사하는 끝점이 없으므로 실제
-  // API로 확인한다.
+  // API로 확인한다. 본 화면을 연 뒤 후처리 연결이 켜져 있는지도 읽는데, 그 응답을 기다리지 않는다(본 화면
+  // 열기가 늦어지지 않게).
   async function enter() {
     try {
       await api('/api/admin/approvals?status=pending');
@@ -175,6 +216,7 @@
     snapshot = '';
     selectTab('approvals');
     loadApprovals();
+    loadSummaryLink();
   }
 
   // ------------------------------------------------------------ 승인 대기열 (approval queue)
@@ -360,8 +402,9 @@
     }
   }
 
-  // 한 세션의 대화(고객이 본 것), 대기 중인 승인, 감사 로그 표를 그린다. 응답을 기다리는 사이 다른 세션을
-  // 골랐으면 늦게 온 응답은 버린다. 감사 로그의 payload는 JSON 문자열 그대로 pre에 넣는다.
+  // 한 세션의 대화(고객이 본 것), 대기 중인 승인, 후처리 기록, 감사 로그 표를 그린다. 응답을 기다리는 사이
+  // 다른 세션을 골랐으면 늦게 온 응답은 버린다. 감사 로그의 payload는 JSON 문자열 그대로 pre에 넣는다.
+  // 후처리 기록은 같은 응답의 감사 로그에서 꺼내 그린다(renderSummary).
   async function openSession(id) {
     selectedSession = id;
     for (const button of els.sessions.querySelectorAll('button')) {
@@ -394,8 +437,143 @@
         return row;
       }),
     );
+    renderSummary(data.audit);
+    shownSession = id;
     els.detail.hidden = false;
     els.detail.scrollIntoView({ block: 'nearest' });
+  }
+
+  // ------------------------------------------------------------ 후처리 기록 (after-call record)
+
+  // 후처리 서비스 연결이 켜져 있는지 /healthz에서 읽어 단추를 보이거나 숨긴다. 로그인에 성공할 때마다 한 번
+  // 부른다(enter). 기다리지 않고 부르므로 본 화면이 먼저 열리고, 응답이 오기 전에는 단추가 숨겨져 있다.
+  // /healthz는 토큰이 필요 없는 끝점이라 api()를 쓰지 않고 토큰 머리 없이 fetch로 읽는다(토큰이 필요 없는
+  // 요청에 싣지 않는다). 서버를 다시 띄우면 값이 바뀔 수 있으므로 브라우저 캐시를 쓰지 않는다.
+  // 읽지 못하면(네트워크 오류, 200이 아님, JSON이 아님) 단추를 숨긴 채 둔다. 예외를 여기서 삼키는 까닭: 이
+  // 값이 정하는 것은 단추를 보일지뿐이고 화면의 다른 기능은 이 값 없이 돌며, 켜져 있다고 확인하지 못한
+  // 연결의 단추를 보이지 않는 쪽이 안전하다.
+  async function loadSummaryLink() {
+    summaryEnabled = false;
+    syncSummaryButton();
+    try {
+      const response = await fetch('/healthz', { cache: 'no-store' });
+      if (response.ok) {
+        const health = await response.json();
+        summaryEnabled = isObject(health) && health.summary === true;
+      }
+    } catch {
+      // 위에서 summaryEnabled를 false로 두었으므로 단추는 숨은 채로 남는다
+    }
+    syncSummaryButton();
+  }
+
+  // '후처리 기록 만들기' 단추의 모양을 상태에 맞춘다: 연결이 켜져 있을 때만 보이고(summaryEnabled), 요청이
+  // 진행 중이면 잠근다(summaryBusy). 두 상태가 바뀌는 곳은 모두 이것을 거친다.
+  function syncSummaryButton() {
+    els.summaryCreate.hidden = !summaryEnabled;
+    els.summaryCreate.disabled = summaryBusy;
+  }
+
+  // 확인이 필요한 번호 하나의 한 줄: "<유형> <값> (<사유>, <사유>)". 사유가 없으면 괄호를 붙이지 않는다. 유형과
+  // 값이 글이 아니면 '-'이고, 객체가 아닌 원소는 '-' 한 줄이다. 사유는 글인 것만 보이고 아는 값(REASON_NAMES)은
+  // 한국어로 바꾼다.
+  function flagLine(flag) {
+    if (!isObject(flag)) return '-';
+    const reasons = (Array.isArray(flag.reasons) ? flag.reasons : [])
+      .filter((reason) => typeof reason === 'string' && reason.trim() !== '')
+      .map((reason) => REASON_NAMES.get(reason) || reason);
+    const line = `${textOf(flag.type)} ${textOf(flag.value)}`;
+    return reasons.length > 0 ? `${line} (${reasons.join(', ')})` : line;
+  }
+
+  // 후처리 기록 하나(감사 행 summary_created)를 dl로 그린다: 만든 때(시각 · 담당자 · 모델), 문의 유형, 처리
+  // 결과, 요약, 확인이 필요한 번호. 만든 때를 보이는 까닭: 그 뒤 대화가 이어졌으면 기록이 낡았을 수 있어 언제
+  // 만든 것인지 알아야 한다. entities·actions_taken·follow_up은 그리지 않는다(감사 표의 내용 칸에 그대로
+  // 있다). 모든 칸을 형을 확인하며 읽으므로 어떤 값이 와도 예외 없이 그려진다.
+  function summaryFacts(event) {
+    const payload = isObject(event.payload) ? event.payload : {};
+    const record = isObject(payload.record) ? payload.record : {};
+    const flags = Array.isArray(payload.needs_confirmation) ? payload.needs_confirmation : [];
+    const confirm = el('dd');
+    if (flags.length === 0) confirm.textContent = '없음';
+    else confirm.append(...flags.map((flag) => el('div', '', flagLine(flag))));
+    const when = time(typeof event.at === 'string' ? event.at : '');
+    const made = `${when} · ${textOf(payload.by)} · ${textOf(payload.model)}`;
+    const facts = el('dl', 'facts');
+    facts.append(
+      el('dt', '', '만든 때'),
+      el('dd', '', made),
+      el('dt', '', '문의 유형'),
+      el('dd', '', textOf(record.category)),
+      el('dt', '', '처리 결과'),
+      el('dd', '', textOf(record.resolution)),
+      el('dt', '', '요약'),
+      el('dd', '', textOf(record.summary)),
+      el('dt', '', '확인이 필요한 번호'),
+      confirm,
+    );
+    return facts;
+  }
+
+  // 후처리 기록 묶음을 감사 로그(audit, 오래된 것이 먼저)에서 새로 그린다.
+  // - 가장 최근 summary_created를 그린다. 없으면 '아직 없습니다'.
+  // - 알림 줄: summary_created와 summary_failed 두 종류만 추린 것 가운데 가장 최근 것이 summary_failed면
+  //   "마지막 시도(<시각>)는 실패했습니다: <error>"를 보인다. 감사 로그 전체의 마지막 행이 아니라 이 두 종류
+  //   안에서 본다(그 뒤에 다른 종류의 행이 생겨도 마지막 시도의 결과는 같다). 앞서 만든 기록은 실패했다고
+  //   지우지 않고 그대로 보인다. 그 밖에는 알림을 지운다.
+  // 단추를 누른 결과 문구는 이 함수가 아니라 createSummary가 이 뒤에 쓴다.
+  function renderSummary(audit) {
+    const events = Array.isArray(audit) ? audit : [];
+    const kinds = ['summary_created', 'summary_failed'];
+    let latest = null; // 두 종류 가운데 가장 최근 것
+    let created = null; // 가장 최근 summary_created
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (!isObject(event) || !kinds.includes(event.kind)) continue;
+      if (latest === null) latest = event;
+      if (event.kind === 'summary_created') {
+        created = event;
+        break;
+      }
+    }
+    els.summaryRecord.replaceChildren(created ? summaryFacts(created) : el('p', 'empty', '아직 없습니다'));
+    if (latest !== null && latest.kind === 'summary_failed') {
+      const payload = isObject(latest.payload) ? latest.payload : {};
+      const when = time(typeof latest.at === 'string' ? latest.at : '');
+      say(els.summaryResult, `마지막 시도(${when})는 실패했습니다: ${textOf(payload.error)}`, 'warn');
+    } else say(els.summaryResult, '', 'warn');
+  }
+
+  // '후처리 기록 만들기' 단추. 상세에 그려진 세션(shownSession)의 후처리 기록을 만들어 달라고 서버에 청한다.
+  // 담당자 이름은 승인 결정과 같은 값이다. 요청이 끝날 때까지 단추를 잠그고, 그동안 다른 세션을 열어도 잠긴 채다
+  // (서버가 동시에 받는 후처리 요청 수는 제한되어 있고, 요청 하나가 모델 호출이라 오래 걸릴 수 있다).
+  // 끝나면 성공이든 실패든, 그때도 같은 세션을 보고 있을 때만 그 세션을 다시 열어 감사 표와 기록을 새로 그리고,
+  // 그 뒤에 이번 누름의 결과 문구를 알림 줄에 쓴다. 차례가 이런 까닭: 다시 열 때 renderSummary가 '마지막 시도는
+  // 실패했습니다'(서버의 영어 문장)를 먼저 그리므로, 결과 문구를 그 앞에 쓰면 덮인다. 그 사이 다른 세션을
+  // 골랐거나 로그아웃했으면 다시 열지도 알리지도 않는다(남의 세션 화면에 이 세션의 결과를 쓰지 않는다).
+  // 문구는 상태 코드로 고른다(SUMMARY_FAILURES). 401·503은 api()가 이미 로그인 화면으로 처리했으므로 쓸 글이
+  // 없다. 그 밖의 실패(409·422·429·501·502·504, 네트워크 오류)에서는 로그인이 풀리지 않는다. 501이면 연결이
+  // 꺼진 것이므로 단추도 숨긴다.
+  async function createSummary() {
+    const id = shownSession;
+    if (!id || summaryBusy || !summaryEnabled) return;
+    summaryBusy = true;
+    syncSummaryButton();
+    const by = els.by.value.trim() || 'admin';
+    let notice = { text: SUMMARY_CREATED, tone: 'ok' };
+    try {
+      await api(`/api/admin/sessions/${encodeURIComponent(id)}/summary`, { by });
+    } catch (error) {
+      const status = error instanceof ApiError ? error.status : 0;
+      notice = handled(error) ? null : { text: SUMMARY_FAILURES[status] || SUMMARY_FAILED, tone: 'warn' };
+      if (status === 501) summaryEnabled = false;
+    } finally {
+      summaryBusy = false;
+      syncSummaryButton();
+    }
+    if (notice === null || !token || selectedSession !== id) return;
+    await openSession(id);
+    if (selectedSession === id) say(els.summaryResult, notice.text, notice.tone);
   }
 
   // ------------------------------------------------------------ 탭과 이벤트 연결 (tabs and wiring)
@@ -449,6 +627,9 @@
     loadSessions();
     if (selectedSession) openSession(selectedSession);
   });
+  // 후처리 기록 만들기 단추. 연결이 켜졌는지 확인하기 전의 모양(숨김)을 HTML의 hidden과 같게 맞춰 둔다.
+  els.summaryCreate.addEventListener('click', createSummary);
+  syncSummaryButton();
 
   // 로그인했고 본 화면이 보이며 탭이 앞에 있을 때만 주기적으로 대기열을 갱신한다(숨긴 탭에서는 요청하지
   // 않음).

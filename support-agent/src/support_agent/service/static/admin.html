@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="ko">
 <!-- [파일 역할] 담당자용 관리 화면(GET /admin). 환불액이 큰 취소·반품의 승인 대기열을 처리하고, 상담 -->
-<!-- 기록과 감사 로그를 본다. 동작은 /static/admin.js가 맡는다. -->
+<!-- 기록과 감사 로그를 보고, 상담 후처리 기록(문의 유형, 처리 결과, 요약)을 보고 만든다. 동작은 -->
+<!-- /static/admin.js가 맡는다. -->
 <!-- [구조] 관리자 토큰 입력(로그인) → 탭 두 개: 승인 대기열(담당자 이름, 처리된 항목 보기, 카드 목록)과 -->
-<!-- 상담 기록(최근 세션 목록 + 선택한 세션의 대화·감사 로그). -->
+<!-- 상담 기록(최근 세션 목록 + 선택한 세션의 대화·후처리 기록·감사 로그). -->
 <!-- [설계 이유] 관리자 인증은 공유 토큰 하나뿐이고, 토큰은 쿠키가 아니라 요청마다 X-Admin-Token 헤더로 -->
 <!-- 보낸다(docs/service.md "하지 않은 것"). 인라인 스크립트는 CSP가 막으므로 별도 파일을 쓴다. -->
 <head>
@@ -69,8 +70,8 @@
         <div id="approvals" class="cards"></div>
       </section>
 
-      <!-- 상담 기록. 최근 세션 50건(서버 ChatService.sessions의 기본 한도) 목록과 고른 세션의 대화·감사 -->
-      <!-- 로그 표. 넓은 화면(900px 이상)에서는 둘이 나란히 놓인다(style.css .split). -->
+      <!-- 상담 기록. 최근 세션 50건(서버 ChatService.sessions의 기본 한도) 목록과 고른 세션의 대화·후처리 -->
+      <!-- 기록·감사 로그 표. 넓은 화면(900px 이상)에서는 둘이 나란히 놓인다(style.css .split). -->
       <section id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" tabindex="0" hidden>
         <div class="toolbar">
           <button type="button" id="sessions-refresh" class="btn">새로 고침</button>
@@ -88,6 +89,18 @@
             <h3>대화</h3>
             <div id="detail-messages" class="messages"></div>
             <ul id="detail-chips" class="chips"></ul>
+            <!-- 후처리 기록: 이 상담의 감사 로그에서 가장 최근 summary_created의 내용(만든 때, 문의 유형, 처리 -->
+            <!-- 결과, 요약, 확인이 필요한 번호)을 admin.js가 아래 기록 자리에 그린다. 단추는 상담 후처리 서비스 -->
+            <!-- 연결이 켜져 있을 때만 보인다(admin.js가 로그인한 뒤 /healthz로 확인하므로 처음에는 hidden). -->
+            <!-- 알림 줄은 마지막 시도가 실패했을 때와 단추를 누른 결과를 알린다. 단추를 알림 줄보다 위에 둔 -->
+            <!-- 까닭: 알림이 나타나도 단추의 자리가 밀리지 않게 하려는 것이다. 서버에서 온 글은 모두 -->
+            <!-- textContent로만 넣는다. -->
+            <h3>후처리 기록</h3>
+            <div class="toolbar">
+              <button type="button" id="summary-create" class="btn" hidden>후처리 기록 만들기</button>
+            </div>
+            <p id="summary-result" class="flash" role="status" hidden></p>
+            <div id="summary-record"></div>
             <h3>감사 로그</h3>
             <div class="table-wrap">
               <!-- 감사 로그 표: 시각(KST로 표시), 종류(customer_message, llm_call, tool_call 등), -->

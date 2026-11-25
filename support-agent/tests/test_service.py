@@ -19,10 +19,12 @@ from __future__ import annotations
 # 잠금을 쥔 채 멈춰 두고(Event), 다른 요청이 그 잠금을 기다리기 시작할 때까지 짧게 되풀이해 확인한다. asyncio:
 # 음성 끝점이 세션 확인(DB 조회)을 이벤트 루프 스레드 밖에서 하는지 본다(그 스레드에서는 get_running_loop가
 # 실패한다). sqlalchemy.event: 한 요청이 실행한 SQL을 before_cursor_execute로 받아 적는다. logging: 시작 때
-# 모델 예열의 결과가 서버 로그에 남는지 본다.
+# 모델 예열의 결과가 서버 로그에 남는지 본다. re: 관리 화면 스크립트(static/admin.js)가 HTML 문자열을 문서에
+# 쓰는 호출을 찾는 정규식.
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -1314,6 +1316,50 @@ def test_static_pages_carry_no_inline_code():
         html = (STATIC / name).read_text(encoding="utf-8")
         assert " style=" not in html and "onclick" not in html.lower()
         assert all("src=" in tag for tag in html.split("<script")[1:])
+
+
+# 관리 화면 스크립트(static/admin.js)가 HTML 문자열을 문서에 쓰는 호출. 화면은 고객이 보낸 글, 감사 로그, 상담
+# 후처리 서비스가 만든 기록처럼 서버에서 온 글을 모두 textContent로만 넣는다(el 도우미). 누군가 편의로 그
+# 글을 innerHTML 같은 곳에 넣으면 고객이 보낸 문장이 관리자 화면에서 실행될 수 있는데도 다른 시험은 모두
+# 통과하므로, 이 약속은 따로 시험으로 묶는다. 낱말만 찾으면 안 된다: admin.js 머리 주석에도 innerHTML이라는
+# 낱말이 있다. 그래서 속성에 쓰는 것(앞의 점과 낱말 끝)과 호출(여는 괄호)만 건다. 우연히 쓰는 것을 막는
+# 그물이지, 일부러 돌아가는 코드(대괄호로 속성 이름을 만드는 식)까지 막는 장치는 아니다.
+HTML_WRITE_PATTERN = re.compile(r"\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML\s*\(|document\.write\s*\(")
+
+
+def test_admin_script_never_writes_html():
+    from support_agent.service.app import STATIC
+
+    script = (STATIC / "admin.js").read_text(encoding="utf-8")
+    found = []
+    for hit in HTML_WRITE_PATTERN.finditer(script):
+        line = script.count("\n", 0, hit.start()) + 1
+        found.append(f"{line}행 {hit.group(0)}")
+    assert not found, f"admin.js가 HTML 문자열을 문서에 쓴다(서버 글은 textContent로만 넣는다): {found}"
+
+
+# 위 정규식이 껍데기가 아니라는 확인: 네 갈래(안쪽 HTML 대입, 바깥 HTML 대입, 인접 위치 삽입, 문서에 쓰기)가
+# 각각 걸리고, 점 없이 낱말만 적은 주석과 글은 걸리지 않는다.
+def test_the_html_write_pattern_catches_an_assignment():
+    for code in (
+        "node.innerHTML = text;",
+        "node.outerHTML = text;",
+        "el.insertAdjacentHTML('beforeend', text);",
+        "document.write(text);",
+        # 덧셈 대입, 호출 괄호 앞의 공백도 같은 호출이다.
+        "node.innerHTML += text;",
+        "el.insertAdjacentHTML ('afterbegin', text);",
+        "document.write (text);",
+    ):
+        assert HTML_WRITE_PATTERN.search(code), code
+    for text in (
+        # admin.js 머리 주석과 같은 꼴: 점이 없는 낱말, 괄호가 없는 낱말.
+        "// 넣고 innerHTML은 쓰지 않아, 고객이 보낸 스크립트 문장이 화면에서 실행되지 않는다",
+        "// outerHTML과 insertAdjacentHTML 같은 호출도 쓰지 않는다",
+        "const label = 'document.write는 쓰지 않는다';",
+        "node.textContent = text;",
+    ):
+        assert HTML_WRITE_PATTERN.search(text) is None, text
 
 
 # -------------------------------------------------------------------- voice
