@@ -46,8 +46,8 @@ from sqlalchemy import Engine
 # 멈춘다.
 from starlette.concurrency import run_in_threadpool
 
-# 프로젝트 내부: 모델 제공자(기본 OllamaProvider), DB 준비(bootstrap), 대화 처리와 그 예외(core), 설정, 음성
-# 앞단.
+# 프로젝트 내부: 모델 제공자(기본 OllamaProvider), DB 준비(bootstrap), 대화 처리와 그 예외(core), 설정, 상담
+# 후처리 서비스(call-summary) 클라이언트와 그 실패(summary), 음성 앞단.
 from support_agent.chat import ChatProvider
 from support_agent.ollama import OllamaProvider
 from support_agent.service.bootstrap import prepare_database
@@ -59,6 +59,7 @@ from support_agent.service.core import (
     SessionNotFoundError,
 )
 from support_agent.service.settings import Settings
+from support_agent.service.summary import SummaryClient, SummaryError
 from support_agent.service.voice_frontend import VoiceFrontEnd, load_voice_front_end
 from support_agent.voice.speech import AudioTooLongError
 
@@ -103,6 +104,21 @@ class DecisionIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+# 관리자 API의 후처리 기록 만들기 본문. by는 승인 결정(DecisionIn)과 같은 담당자 이름 칸이고 입력한 그대로
+# 감사 로그에 남는다(인증은 공유 토큰 하나뿐). 빈 객체를 보내면 admin이다.
+class SummaryIn(BaseModel):
+    by: str = Field(default="admin", min_length=1, max_length=64)
+
+
+# 동시에 만들 수 있는 후처리 기록의 수(관리자 API POST /api/admin/sessions/{id}/summary). 관리자 API
+# 처리기는 동기 함수라 anyio 스레드 풀(기본 40자리)의 작업 스레드에서 도는데, 후처리 요청 하나는 그쪽이 답할
+# 때까지(모델 호출이라 길면 수십 초, 최악에는 SUMMARY_TIMEOUT_S의 약 두 배) 그 스레드를 쥔다. 한도가 없으면
+# 단추를 거듭 누르거나 토큰을 가진 요청을 겹쳐 보내는 것만으로 같은 풀을 쓰는 /healthz·대화 조회·다른 관리자
+# API가 멈출 수 있다(답 읽어 주기에 한도를 둔 것과 같은 까닭, docs/service.md "한도"). 관리자는 몇 사람뿐이라
+# 둘이면 된다: 하나가 도는 동안 다른 하나를 받는다. 넘으면 기다리지 않고 429다(create_app의 create_summary).
+SUMMARY_SLOTS = 2
+
+
 # SSE 한 덩어리를 만든다: "event: 이름" 줄, "data: JSON" 줄, 빈 줄. ensure_ascii=False로 한국어를
 # 이스케이프하지 않고 그대로 보낸다.
 def sse(event: str, data: dict[str, Any]) -> str:
@@ -144,13 +160,15 @@ def start_preload(provider: OllamaProvider) -> threading.Thread:
 
 # 앱을 만드는 팩토리. 인자를 주지 않으면 환경 변수 설정으로 실제 DB·Ollama·음성 모델을 쓴다.
 # provider·engine·voice를 넘기면 그것을 쓴다: 테스트는 대본대로 답하는 가짜 모델과 임시 DB를, offline.py는
-# 규칙 대역을 넣는다.
+# 규칙 대역을 넣는다. summary(상담 후처리 서비스 클라이언트)도 같다: 넘기면 그것을 쓰고(테스트의 가짜 서비스),
+# 없으면 설정의 summary_url이 있을 때만 여기서 만들며, 둘 다 없으면 후처리 연결은 꺼진다.
 def create_app(
     settings: Settings | None = None,
     *,
     provider: ChatProvider | None = None,
     engine: Engine | None = None,
     voice: VoiceFrontEnd | None = None,
+    summary: SummaryClient | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     headers = dict(SECURITY_HEADERS)
@@ -186,12 +204,21 @@ def create_app(
         app.state.preload_thread = None
         if settings.preload and provider is None:
             app.state.preload_thread = start_preload(own_provider)
+        # 상담 후처리 서비스 클라이언트: 넘겨받은 것이 있으면 그것, 없고 주소가 설정돼 있으면 여기서 만든
+        # 것(끝날 때 닫는다), 둘 다 없으면 None(후처리 연결 꺼짐: 끝점은 501, /healthz의 summary는 false).
+        # 만들기만 하고 연결하지 않으므로 후처리 서비스가 꺼져 있어도 이 서비스는 그대로 뜬다.
+        own_summary = None
+        if summary is None and settings.summary_url:
+            own_summary = SummaryClient(settings.summary_url, timeout_s=settings.summary_timeout_s)
+        app.state.summary = summary if summary is not None else own_summary
         yield
-        # yield 뒤는 서버 종료 시점이다. 직접 만든 Ollama 연결과 DB 연결 풀만 닫는다.
+        # yield 뒤는 서버 종료 시점이다. 직접 만든 Ollama 연결, DB 연결 풀, 후처리 서비스 클라이언트만 닫는다.
         if provider is None:
             own_provider.close()
         if engine is None:
             own_engine.dispose()
+        if own_summary is not None:
+            own_summary.close()
 
     # 문서 화면(/docs, /redoc)은 끈다. API 설명(/openapi.json)은 EXPOSE_OPENAPI=1일 때만 내놓는다. 보안
     # 스캐너가 경로와 본문 형태를 정확히 알게 할 때만 켜고 평소에는 꺼 둔다(docs/service.md).
@@ -202,6 +229,8 @@ def create_app(
         redoc_url=None,
         openapi_url="/openapi.json" if settings.expose_openapi else None,
     )
+    # 동시에 만드는 후처리 기록의 자리(SUMMARY_SLOTS의 주석). 앱마다 하나이고 처리기가 app.state에서 읽는다.
+    app.state.summary_slots = threading.BoundedSemaphore(SUMMARY_SLOTS)
 
     # Host 허용 목록(DNS 리바인딩 차단): Host 헤더가 settings.host_allow_list()(기본 127.0.0.1·localhost에
     # SUPPORT_AGENT_ALLOWED_HOSTS로 더한 이름)에 없는 요청은 화면·정적 파일·API 어디로 가든, 없는 경로로 가는
@@ -276,7 +305,8 @@ def create_app(
         return FileResponse(str(STATIC / "admin.html"))
 
     # 상태 확인. Dockerfile의 HEALTHCHECK가 부르고, 어떤 모델·think·규정 모드·음성으로 떠 있는지 보여
-    # 준다(모델 교체 뒤 실제 설정 확인용).
+    # 준다(모델 교체 뒤 실제 설정 확인용). summary는 상담 후처리 서비스 연결이 켜졌는지다(주소가 설정되거나
+    # 클라이언트를 넘겨받았는가. 그 서비스가 지금 답하는지는 보지 않는다).
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
         return {
@@ -285,6 +315,7 @@ def create_app(
             "think": settings.think,
             "policy": settings.policy,
             "voice": getattr(app.state, "voice", None) is not None,
+            "summary": getattr(app.state, "summary", None) is not None,
         }
 
     # ------------------------------------------------------------ 채팅 (chat)
@@ -533,6 +564,53 @@ def create_app(
             return {"transcript": svc.transcript(session_id), "audit": svc.audit(session_id)}
         except SessionNotFoundError:
             raise HTTPException(404, "no such session") from None
+
+    # 후처리 연결 의존성: 꺼져 있으면(주소를 설정하지 않았고 넘겨받은 클라이언트도 없음) 501이다. 503이 아닌
+    # 까닭: 관리 화면(static/admin.js의 api)은 503을 '관리자 기능이 꺼짐'으로 읽어 로그인 화면을 띄우므로,
+    # 서버를 주소 없이 다시 띄운 뒤 열려 있던 화면에서 이 끝점을 불러도 로그인이 풀리지 않게 한다(음성이
+    # 꺼졌을 때의 503과 다르게 고른 까닭). 의존성으로 두는 까닭은 검사의 차례다: FastAPI는 의존성을 선언한
+    # 차례대로 푼 뒤에 본문 칸을 검사하므로 관리자 토큰(401·503) → 꺼짐(501) → 본문(422) 차례가 되고, 꺼져
+    # 있으면 자리도 잡지 않고 세션이 있는지도 보지 않는다(꺼진 기능이 세션의 있고 없음을 알려 주지 않게).
+    # 본문이 JSON 문법부터 틀린 요청만은 FastAPI가 의존성을 풀기 전에 422로 끝낸다(다른 본문 끝점과 같다).
+    def summary_link(request: Request) -> SummaryClient:
+        client = getattr(request.app.state, "summary", None)
+        if client is None:
+            raise HTTPException(501, "the summary link is disabled (SUPPORT_AGENT_SUMMARY_URL is not set)")
+        return client
+
+    # 한 세션의 상담 후처리 기록을 상담 후처리 서비스로 만든다(core.ChatService.create_summary). 성공하면
+    # 201과 기록이고, 성공과 실패가 감사 로그에 남는다(summary_created·summary_failed). 대화와 턴은 건드리지
+    # 않는다.
+    # 자리(SUMMARY_SLOTS)를 기다리지 않고 잡아, 없으면 바로 429와 Retry-After(10초)다. 10초인 까닭: 자리는
+    # 앞선 후처리 요청이 끝나야(모델 호출이라 길면 수십 초) 돌아오므로 더 짧게 다시 청하면 같은 답을 받기
+    # 쉽다.
+    # 자리는 어느 길로 끝나도(없는 세션, 빈 대화, 후처리 서비스의 실패, 뜻밖의 예외, 성공) finally에서 반드시
+    # 돌려준다. 하나라도 새면 그 뒤의 모든 호출이 429가 된다.
+    # SummaryError는 그 status와 고정 문장(detail)을 그대로 HTTP 응답으로 옮긴다(429면 Retry-After도). 표와
+    # 까닭은 service/summary.py의 머리 주석('상태 코드')이다: 시간 초과 504, 연결 실패·이상한 답 502, 그쪽이
+    # 대화를 받지 않음 422, 그쪽이 붐빔 429, 대화가 빔 409.
+    @app.post("/api/admin/sessions/{session_id}/summary", status_code=201, dependencies=[Depends(admin)])
+    def create_summary(
+        session_id: str,
+        body: SummaryIn,
+        request: Request,
+        client: SummaryClient = Depends(summary_link),
+        svc: ChatService = Depends(service),
+    ) -> dict[str, Any]:
+        slots = request.app.state.summary_slots
+        if not slots.acquire(blocking=False):
+            raise HTTPException(
+                429, "too many after-call records are being made at once, try again", {"Retry-After": "10"}
+            )
+        try:
+            return svc.create_summary(session_id, by=body.by, client=client)
+        except SessionNotFoundError:
+            raise HTTPException(404, "no such session") from None
+        except SummaryError as exc:
+            headers = None if exc.retry_after is None else {"Retry-After": exc.retry_after}
+            raise HTTPException(exc.status, exc.detail, headers) from None
+        finally:
+            slots.release()
 
     # 화면이 불러오는 js·css를 /static 아래로 내보낸다.
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")

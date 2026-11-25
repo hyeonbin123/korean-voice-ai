@@ -45,6 +45,9 @@ from support_agent.service.store import (
     SessionStatus,
     approval_code,
 )
+
+# 상담 후처리 서비스(call-summary) 연결: 클라이언트와 그 실패(create_summary). 턴 경로는 쓰지 않는다.
+from support_agent.service.summary import SummaryClient, SummaryError
 from support_agent.toolkit import (
     ConversationState,
     Registry,
@@ -945,6 +948,58 @@ class ChatService:
             return [
                 {"id": e.id, "at": e.at.isoformat(), "kind": e.kind, "payload": e.payload} for e in events
             ]
+
+    # 한 세션의 상담 후처리 기록을 상담 후처리 서비스(call-summary)로 만든다(관리자 API
+    # POST /api/admin/sessions/{id}/summary). 순서:
+    # 1) 고객이 본 대화를 읽는다(transcript. 없는 세션이면 SessionNotFoundError — NUL이 든 번호도 같다)
+    # 2) 대화가 비었으면(MCP 상담은 대화가 없다) 보내지 않고 SummaryError(409)
+    # 3) client.summarize로 한 번 부른다
+    # 4) 성공하면 summary_created 감사 행 하나를 쓰고 기록을 돌려준다
+    # 5) 2)나 3)에서 SummaryError가 나면 summary_failed 감사 행 하나를 쓰고 그 예외를 다시 올린다
+    # 왜 턴 경로 밖에 두는가: 후처리는 대화를 읽기만 하고 고치지 않는다(대화 상태, 턴 수, 세션 상태를 쓰지
+    # 않는다). 그래서 평가와 바이트까지 같은 턴 경로(_handle_locked, _run_tool)를 건드리지 않고, 세션 잠금도
+    # 잡지 않는다. 후처리 서비스를 부르는 동안(길면 수십 초) DB 세션도 쥐지 않는다: transcript와 _audit는
+    # 각자 짧은 with 블록이라 부르기 전에 이미 닫혔다. 그래서 그동안 고객은 같은 세션에서 계속 상담할 수 있고,
+    # 기록은 읽은 때의 대화로 만든다.
+    # 왜 실패도 감사 로그에 남기는가: 관리자가 시도한 일과 결과(누가, 어떤 상태 코드, 어떤 까닭)가 관리 화면의
+    # 감사 표에 남아야 '해 봤는데 안 됐다'를 나중에 알 수 있다. 실패 행에는 SummaryError의 고정 문장만 넣고
+    # 대화의 글, 그쪽 본문의 글, 주소는 넣지 않는다(SummaryError.detail이 그렇게 만들어졌다). 웹 계층이 자리가
+    # 없어 바로 돌려보낸 429는 여기까지 오지 않으므로 남지 않는다. SummaryError가 아닌 예외(꼴이 틀린 대화의
+    # ValueError 등, 저장된 대화에서는 생기지 않아야 한다)는 남기지 않고 그대로 올린다.
+    # 감사 행 summary_created의 칸: by(담당자 이름), session_status(읽은 때의 세션 상태), turns(보낸 발화 수),
+    # record·needs_confirmation·model·attempts·request_id(후처리 서비스의 답 그대로). record는 그 서비스가
+    # 대화로 만든 기록이라 대화에서 나온 값(요약 글, 주문 번호 같은 핵심 값)이 들어 있다 — 그것을 남기는 것이
+    # 이 기능의 목적이다. 돌려주는 값은 {"session_id", "summary": {record, needs_confirmation, model,
+    # attempts}}다.
+    def create_summary(self, session_id: str, *, by: str, client: SummaryClient) -> dict[str, Any]:
+        """상담 하나의 후처리 기록을 만든다. 실패는 SummaryError(감사 로그에 남긴 뒤 다시 올림)."""
+        transcript = self.transcript(session_id)
+        messages = transcript["messages"]
+        try:
+            if not messages:
+                raise SummaryError(409, "this session has no conversation to summarize")
+            made = client.summarize(messages)
+        except SummaryError as exc:
+            self._audit(session_id, "summary_failed", {"by": by, "status": exc.status, "error": exc.detail})
+            raise
+        self._audit(
+            session_id,
+            "summary_created",
+            {
+                "by": by,
+                "session_status": transcript["status"],
+                "turns": len(messages),
+                "record": made["record"],
+                "needs_confirmation": made["needs_confirmation"],
+                "model": made["model"],
+                "attempts": made["attempts"],
+                "request_id": made["request_id"],
+            },
+        )
+        return {
+            "session_id": session_id,
+            "summary": {key: made[key] for key in ("record", "needs_confirmation", "model", "attempts")},
+        }
 
     # ---------------------------------------------------------------- 도우미 (helpers)
 

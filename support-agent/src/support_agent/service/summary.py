@@ -171,9 +171,14 @@ class SummaryClient:
         # 연결 제한은 ollama.py와 같이 10초 이하로 짧게 둔다. trust_env=False·follow_redirects=False의
         # 까닭은 파일 머리의 '넘겨 주기와 프록시'다(follow_redirects=False는 httpx의 기본값이기도 하지만
         # 뜻을 드러내려고 적는다).
+        # 쉬는 연결은 남기지 않는다(max_keepalive_connections=0): 요청마다 새 연결을 열고 답을 받으면 닫는다.
+        # 관리자가 가끔 부르는 호출이라 연결을 다시 쓸 이득이 거의 없다. 반대로 쉬던 연결을 다시 쓰면, 그
+        # 순간 그쪽 서버가 그 연결을 닫는 경우(uvicorn은 기본으로 5초 쉰 연결을 닫고, httpx도 쉬는 연결을
+        # 기본 5초 남겨 두므로 두 시계가 겹칠 수 있다) 요청이 답 없이 끊겨 드물게 502가 된다. 그 길을 막는다.
         self._http = httpx.Client(
             base_url=base_url,
             timeout=httpx.Timeout(timeout_s, connect=min(10.0, timeout_s)),
+            limits=httpx.Limits(max_keepalive_connections=0),
             transport=transport,
             trust_env=False,
             follow_redirects=False,

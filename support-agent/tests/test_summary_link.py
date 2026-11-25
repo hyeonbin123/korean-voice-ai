@@ -5,19 +5,28 @@
 # (3) 후처리 서비스 쪽 실패(시간 초과, 연결 실패, 거절, 붐빔, 넘겨 주기, 그 밖의 상태, 쓸 수 없는 답)를
 # 설명이 붙은 상태 코드로 옮기는 표 (4) 그쪽 거절 본문의 글을 옮기지 않음 (5) 너무 큰 답과 느린 답은 흘려
 # 받는 동안 끊음 (6) 너무 큰 요청은 보내지 않음 (7) 프록시 환경 변수를 읽지 않음과 기다리는 시간의 제한
-# (8) 두 스레드가 한 클라이언트를 함께 씀 (9) 설정의 기본값(꺼짐)과 주소·시간 검사.
+# (8) 두 스레드가 한 클라이언트를 함께 씀 (9) 설정의 기본값(꺼짐)과 주소·시간 검사 (10) 관리자 API
+# `POST /api/admin/sessions/{id}/summary`: 꺼져 있을 때 501, 검사의 차례(토큰 → 연결 → 본문), 기록을 만들고
+# 감사 로그에 남김, 실패도 감사 로그에 남기고 대화는 그대로 둠, 없는 세션·빈 대화·거절·시간 초과·붐빔의
+# 상태 코드, 자리를 어느 길로 끝나도 돌려줌, `by` 검사, 후처리 서비스를 기다리는 동안 세션 잠금과 DB 세션을
+# 쥐지 않음, 턴의 감사 차례가 그대로임, 앱이 설정으로 만든 클라이언트를 닫음.
 # [왜 중요한가] 이 연결은 고객의 대화를 서비스 밖으로 보내는 길이다. 보내는 곳은 설정한 한 곳뿐이어야 하고
 # (넘겨 주기와 프록시를 따르지 않는다), 그쪽이 어떤 답을 하든 정해진 상태 코드와 고정 문장으로만 끝나야
 # 하며(다른 예외가 새면 서비스의 500이 되고, 그쪽 본문을 옮기면 고객의 글이 오류 응답에 실려 나간다), 큰
-# 답이나 느린 답이 메모리와 작업 스레드를 오래 쥐지 못해야 한다.
+# 답이나 느린 답이 메모리와 작업 스레드를 오래 쥐지 못해야 한다. 관리 화면은 503을 '관리자 기능이 꺼짐'으로
+# 읽어 로그인 화면을 띄우므로 이 끝점은 503을 쓰지 않는다(꺼짐은 501, 붐빔은 429).
 # [방법] 가짜 서비스는 httpx.MockTransport에 넣은 함수다. 실제 네트워크와 실제 후처리 서비스는 부르지
-# 않고 DB도 쓰지 않는다. 시간은 가짜 시계(clock)로 움직인다.
+# 않는다. 클라이언트 시험은 DB를 쓰지 않고, 관리자 API 시험은 마이그레이션한 SQLite 파일과 대본대로 답하는
+# 가짜 모델로 앱을 만들어 서비스의 주소(127.0.0.1)로 부른다(tests/test_service.py의 local_client). 시간은
+# 가짜 시계(clock)로 움직인다.
 
 from __future__ import annotations
 
 # gzip: 압축한 답을 만든다. threading: 두 요청이 동시에 처리 중인 상태를 만든다. httpx: 가짜
 # 서비스(MockTransport)와 응답·전송 오류를 만든다. ValidationError: 설정이 잘못된 값을 거절하는지 본다.
-# yaml: compose.yaml의 앱 환경 변수를 읽는다.
+# yaml: compose.yaml의 앱 환경 변수를 읽는다. test_service에서는 관리자 토큰 머리, 시험 고객, 앱을 부르는
+# 클라이언트, 메시지 한 턴, 생성 데이터가 든 DB(engine·seeded_template은 fixture라 이 파일에서 쓰려면
+# 가져와야 한다. 그래서 F401·F811 경고를 끈다)를 가져온다.
 import gzip
 import json
 import threading
@@ -27,8 +36,20 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from fastapi import FastAPI
 from pydantic import ValidationError
+from test_service import (
+    ADMIN,
+    SMALL,
+    engine,  # noqa: F401 - fixture
+    local_client,
+    say,
+    seeded_template,  # noqa: F401 - fixture
+    verify_and_cancel,
+)
 
+from support_agent.chat import ScriptedProvider
+from support_agent.service.app import create_app
 from support_agent.service.settings import Settings
 from support_agent.service.summary import (
     DOMAIN,
@@ -603,3 +624,377 @@ def test_compose_and_the_env_example_pass_the_summary_settings_through():
     assert "SUMMARY_URL=" in example and "SUMMARY_TIMEOUT_S=" in example
     empty = Settings.from_env({"SUPPORT_AGENT_SUMMARY_URL": "", "SUPPORT_AGENT_SUMMARY_TIMEOUT_S": ""})
     assert (empty.summary_url, empty.summary_timeout_s) == ("", 120)
+
+
+# 클라이언트는 쉬는 연결을 남기지 않는다(연결 풀의 keep-alive 수 0): 요청마다 새 연결을 열고 답을 받으면
+# 닫는다. 쉬던 연결을 다시 쓰는 순간 그쪽 서버가 그 연결을 닫으면 요청이 답 없이 끊겨 502가 될 수 있는데,
+# 관리자가 가끔 부르는 호출이라 연결을 다시 쓸 이득이 없다. 시험용 transport 없이 만든 클라이언트 자신의
+# 연결 풀 설정을 본다.
+def test_the_client_keeps_no_idle_connection_between_calls():
+    client = SummaryClient(BASE_URL, timeout_s=5)
+    try:
+        assert client._http._transport._pool._max_keepalive_connections == 0
+    finally:
+        client.close()
+
+
+# -------------------------------------------------------------------- 관리자 API
+
+
+SUMMARY_PATH = "/api/admin/sessions/{}/summary"
+# summary_created 감사 행의 payload 칸.
+CREATED_KEYS = {
+    "by",
+    "session_status",
+    "turns",
+    "record",
+    "needs_confirmation",
+    "model",
+    "attempts",
+    "request_id",
+}
+
+
+# 가짜 후처리 서비스의 정상 답.
+def reply_ok(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json=REPLY)
+
+
+# 가짜 후처리 서비스가 고장 난 경우: httpx의 전송 오류가 아닌 예외를 던진다(뜻밖의 예외 길).
+def explode(request: httpx.Request) -> httpx.Response:
+    raise RuntimeError("the fake summary service broke")
+
+
+# 후처리 연결이 켜진 앱. 대본대로 답하는 가짜 모델, 주어진 DB, 넘겨준 클라이언트(link, None이면 꺼짐)를
+# 쓴다. 관리자 토큰은 ADMIN과 같은 값이고 다른 설정은 키워드로 덮어쓴다.
+def app_with_link(db_engine, link: SummaryClient | None, script: list | None = None, **overrides) -> FastAPI:
+    settings = Settings(admin_token="test-token", **overrides)
+    return create_app(settings, provider=ScriptedProvider(script or []), engine=db_engine, summary=link)
+
+
+# 한 세션의 감사 로그(관리자 조회).
+def audit_of(web, session_id: str) -> list[dict]:
+    return web.get(f"/api/admin/sessions/{session_id}", headers=ADMIN).json()["audit"]
+
+
+# 지금 비어 있는 자리 수. 잡을 수 있는 만큼 잡아 세고 바로 돌려준다(위로 열 개까지만 센다).
+def free_slots(app: FastAPI) -> int:
+    slots = app.state.summary_slots
+    taken = 0
+    while taken < 10 and slots.acquire(blocking=False):
+        taken += 1
+    for _ in range(taken):
+        slots.release()
+    return taken
+
+
+# 주소를 설정하지 않은(넘겨준 클라이언트도 없는) 앱은 후처리 연결이 꺼져 있다: /healthz의 summary가 false,
+# 끝점은 501과 설정 이름이 든 문장이다. 꺼져 있으면 세션이 있는지도 보지 않고(없는 세션에도 501 — 꺼진
+# 기능이 세션의 있고 없음을 알려 주지 않게), 자리를 잡지 않으며, 감사 로그에도 남기지 않는다.
+def test_disabled_by_default(blank_service_engine):
+    with local_client(app_with_link(blank_service_engine, None)) as web:
+        assert web.get("/healthz").json()["summary"] is False
+        session_id = web.post("/api/sessions").json()["session_id"]
+        for target in (session_id, "no-such-session"):
+            answer = web.post(SUMMARY_PATH.format(target), json={"by": "김담당"}, headers=ADMIN)
+            assert answer.status_code == 501
+            assert (
+                answer.json()["detail"]
+                == "the summary link is disabled (SUPPORT_AGENT_SUMMARY_URL is not set)"
+            )
+        assert [event["kind"] for event in audit_of(web, session_id)] == ["session_started"]
+        assert free_slots(web.app) == 2
+
+
+# 관리자 토큰이 없거나 틀리면 401이고 가짜 서비스는 요청을 받지 않는다(다른 관리자 API와 같은 의존성).
+def test_admin_token_is_required(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    with local_client(app_with_link(blank_service_engine, connect(service), ["네, 말씀하세요."])) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        for headers in ({}, {"X-Admin-Token": "wrong"}):
+            answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=headers)
+            assert answer.status_code == 401
+    assert service.requests == []
+
+
+# 검사의 차례: 관리자 토큰(401, 토큰을 설정하지 않은 서버는 503) → 후처리 연결이 꺼짐(501) → 본문 칸
+# 검사(422) → 처리기(없는 세션 404). FastAPI는 의존성(토큰, 연결)을 먼저 풀고 본문 칸 검사를 그 뒤에 한다.
+# 예외 하나: 본문이 JSON 문법부터 틀리면 FastAPI가 의존성을 풀기 전에 본문을 읽다가 422로 끝낸다(다른
+# 본문 끝점도 같다).
+def test_the_checks_run_token_then_link_then_body(blank_service_engine, connect):
+    empty_by = {"by": ""}
+    broken_json = {"content": b"{", "headers": {"Content-Type": "application/json"}}
+    with local_client(app_with_link(blank_service_engine, None)) as web:
+        assert web.post(SUMMARY_PATH.format("x"), json=empty_by).status_code == 401
+        assert web.post(SUMMARY_PATH.format("x"), json=empty_by, headers=ADMIN).status_code == 501
+        assert web.post(SUMMARY_PATH.format("x"), **broken_json).status_code == 422
+    no_token = create_app(Settings(), provider=ScriptedProvider([]), engine=blank_service_engine)
+    with local_client(no_token) as web:
+        assert web.post(SUMMARY_PATH.format("x"), json=empty_by, headers=ADMIN).status_code == 503
+    service = FakeService(reply_ok)
+    with local_client(app_with_link(blank_service_engine, connect(service))) as web:
+        assert web.post(SUMMARY_PATH.format("x"), json=empty_by, headers=ADMIN).status_code == 422
+        assert web.post(SUMMARY_PATH.format("x"), json={"by": "김담당"}, headers=ADMIN).status_code == 404
+    assert service.requests == []
+
+
+# 고객 발화 둘을 보낸 세션의 후처리 기록을 만든다: 201과 가짜 서비스가 준 기록. 가짜 서비스가 받은 발화의
+# 첫 줄은 상담원 인사말이고 화자는 상담원·고객이 번갈아 온다. 감사 로그의 마지막 행은 summary_created이고
+# payload는 정해진 여덟 칸이다(turns는 보낸 발화 수). /healthz의 summary는 true이고 voice 뒤에 있다.
+def test_creates_a_record_and_audits_it(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    script = ["네, 말씀하세요.", "확인해 드렸습니다."]
+    with local_client(app_with_link(blank_service_engine, connect(service), script)) as web:
+        health = web.get("/healthz").json()
+        assert health["summary"] is True and list(health)[-2:] == ["voice", "summary"]
+        created = web.post("/api/sessions").json()
+        session_id, greeting = created["session_id"], created["messages"][0]["text"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        say(web, session_id, "어제 시킨 거예요.")
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        audit = audit_of(web, session_id)
+    assert answer.status_code == 201
+    assert answer.json() == {
+        "session_id": session_id,
+        "summary": {key: REPLY[key] for key in ("record", "needs_confirmation", "model", "attempts")},
+    }
+    (request,) = service.requests
+    turns = json.loads(request.content)["turns"]
+    assert turns[0] == {"speaker": "상담원", "text": greeting}
+    assert [turn["speaker"] for turn in turns] == ["상담원", "고객", "상담원", "고객", "상담원"]
+    assert audit[-1]["kind"] == "summary_created"
+    payload = audit[-1]["payload"]
+    assert set(payload) == CREATED_KEYS
+    assert (payload["by"], payload["session_status"], payload["turns"]) == ("김담당", "open", 5)
+    assert (payload["record"], payload["request_id"], payload["model"]) == (
+        REPLY["record"],
+        REPLY["request_id"],
+        REPLY["model"],
+    )
+
+
+# 후처리 서비스가 실패하면(500 → 502) 실패도 감사 로그에 남고(summary_failed: 누가, 상태 코드, 고정 문장),
+# 상담은 그대로다: 호출 앞뒤의 대화가 같고, 그 뒤에도 그 세션에 메시지를 보낼 수 있다.
+def test_failure_is_audited_and_the_session_is_untouched(blank_service_engine, connect):
+    service = FakeService(answer_with(500))
+    script = ["네, 말씀하세요.", "다른 것도 도와드릴게요."]
+    with local_client(app_with_link(blank_service_engine, connect(service), script)) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        detail = f"/api/admin/sessions/{session_id}"
+        before = web.get(detail, headers=ADMIN).json()["transcript"]
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        after = web.get(detail, headers=ADMIN).json()
+        events = say(web, session_id, "하나 더 물어볼게요.")
+    assert (answer.status_code, answer.json()) == (502, {"detail": "the summary service answered 500"})
+    assert after["transcript"] == before
+    assert after["audit"][-1]["kind"] == "summary_failed"
+    assert after["audit"][-1]["payload"] == {
+        "by": "김담당",
+        "status": 502,
+        "error": "the summary service answered 500",
+    }
+    assert [name for name, _ in events][-2:] == ["reply", "end"] and events[-1][1] == {"status": "open"}
+
+
+# 없는 세션은 404이고(NUL이 든 번호도 같다) 가짜 서비스는 요청을 받지 않는다.
+def test_unknown_session_is_404(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    with local_client(app_with_link(blank_service_engine, connect(service))) as web:
+        for target in ("no-such-session", "no%00such"):
+            answer = web.post(SUMMARY_PATH.format(target), json={"by": "김담당"}, headers=ADMIN)
+            assert (answer.status_code, answer.json()) == (404, {"detail": "no such session"})
+    assert service.requests == []
+
+
+# 대화가 빈 세션(MCP 상담은 대화가 없다)은 409이고 가짜 서비스는 요청을 받지 않는다. 그래도 관리자가 시도한
+# 것이므로 summary_failed가 남는다.
+def test_empty_conversation_is_409(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    with local_client(app_with_link(blank_service_engine, connect(service))) as web:
+        session_id = web.app.state.service.new_session("mcp")["session_id"]
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        audit = audit_of(web, session_id)
+    assert (answer.status_code, answer.json()) == (
+        409,
+        {"detail": "this session has no conversation to summarize"},
+    )
+    assert service.requests == []
+    assert audit[-1]["kind"] == "summary_failed"
+    assert audit[-1]["payload"] == {
+        "by": "김담당",
+        "status": 409,
+        "error": "this session has no conversation to summarize",
+    }
+
+
+# 후처리 서비스가 그 대화를 받지 않으면(422) 422이고 그쪽 본문의 글은 옮기지 않는다. 감사 로그에도 남는다.
+def test_rejected_conversation_is_422(blank_service_engine, connect):
+    service = FakeService(answer_with(422))
+    with local_client(app_with_link(blank_service_engine, connect(service), ["네, 말씀하세요."])) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        audit = audit_of(web, session_id)
+    detail = "the summary service rejected this conversation (422)"
+    assert (answer.status_code, answer.json()) == (422, {"detail": detail})
+    assert audit[-1]["payload"] == {"by": "김담당", "status": 422, "error": detail}
+
+
+# 후처리 서비스가 제때 답하지 않으면 504다.
+def test_timeout_is_504(blank_service_engine, connect):
+    service = FakeService(fail_with(httpx.ReadTimeout))
+    with local_client(app_with_link(blank_service_engine, connect(service), ["네, 말씀하세요."])) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        audit = audit_of(web, session_id)
+    assert (answer.status_code, answer.json()) == (504, {"detail": TIMED_OUT})
+    assert audit[-1]["payload"] == {"by": "김담당", "status": 504, "error": TIMED_OUT}
+
+
+# 붐빔은 429와 Retry-After다(503이 아님). 자리 둘이 모두 차 있으면 기다리지 않고 바로 429와 Retry-After:
+# 10이고, 가짜 서비스는 요청을 받지 않으며 감사 로그에도 남지 않는다(처리기가 바로 돌려보냈다). 가짜
+# 서비스가 503 + Retry-After: 7로 답하면 429와 Retry-After: 7이고, 이것은 감사 로그에 남는다.
+def test_busy_is_429_with_retry_after(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    with local_client(app_with_link(blank_service_engine, connect(service), ["네, 말씀하세요."])) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        slots = web.app.state.summary_slots
+        assert slots.acquire(blocking=False) and slots.acquire(blocking=False)
+        try:
+            full = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        finally:
+            slots.release()
+            slots.release()
+        kinds_after_full = [event["kind"] for event in audit_of(web, session_id)]
+        service.answer = answer_with(503, {"Retry-After": "7"})
+        busy = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        audit = audit_of(web, session_id)
+    assert full.status_code == 429 and full.headers["Retry-After"] == "10"
+    assert kinds_after_full[-1] == "agent_reply"
+    assert busy.status_code == 429 and busy.headers["Retry-After"] == "7"
+    assert busy.json() == {"detail": BUSY}
+    assert len(service.requests) == 1
+    assert audit[-1]["payload"] == {"by": "김담당", "status": 429, "error": BUSY}
+
+
+# 자리는 어느 길로 끝나도 돌아온다: 후처리 서비스의 실패(502), 시간 초과(504), 없는 세션(404), 빈
+# 대화(409), 뜻밖의 예외(500), 성공(201). 자리가 하나라도 새면 그 뒤의 모든 호출이 429가 된다.
+def test_slot_is_returned_after_a_failure(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    link = connect(service)
+    with local_client(
+        app_with_link(blank_service_engine, link, ["네, 말씀하세요."]), raise_server_exceptions=False
+    ) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        mcp_id = web.app.state.service.new_session("mcp")["session_id"]
+        cases = [
+            (session_id, answer_with(500), 502),
+            (session_id, fail_with(httpx.ReadTimeout), 504),
+            ("no-such-session", reply_ok, 404),
+            (mcp_id, reply_ok, 409),
+            (session_id, explode, 500),
+            (session_id, reply_ok, 201),
+        ]
+        for target, answer, status in cases:
+            service.answer = answer
+            got = web.post(SUMMARY_PATH.format(target), json={"by": "김담당"}, headers=ADMIN)
+            assert got.status_code == status
+            assert free_slots(web.app) == 2, status
+
+
+# 담당자 이름(by)은 1~64자다. 빈 글과 65자는 422이고 64자는 된다. 본문이 빈 객체면 admin으로 남는다. 짝 없는
+# 서로게이트가 든 이름도 422이고, 그 입력 원문을 응답에 되돌려 보내지 않는다(이 서비스의 요청 검사 오류
+# 처리기). 422로 끝난 요청은 가짜 서비스에 닿지 않는다.
+def test_by_is_validated(blank_service_engine, connect):
+    service = FakeService(reply_ok)
+    with local_client(app_with_link(blank_service_engine, connect(service), ["네, 말씀하세요."])) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        path = SUMMARY_PATH.format(session_id)
+        for by in ("", "가" * 65):
+            assert web.post(path, json={"by": by}, headers=ADMIN).status_code == 422
+        surrogate = web.post(
+            path, content=b'{"by": "\\ud800"}', headers={**ADMIN, "Content-Type": "application/json"}
+        )
+        assert surrogate.status_code == 422 and "ud800" not in surrogate.text.lower()
+        assert "input" not in surrogate.json()["detail"][0]
+        assert web.post(path, json={"by": "가" * 64}, headers=ADMIN).status_code == 201
+        assert web.post(path, json={}, headers=ADMIN).status_code == 201
+        audit = audit_of(web, session_id)
+    assert [event["payload"]["by"] for event in audit if event["kind"] == "summary_created"] == [
+        "가" * 64,
+        "admin",
+    ]
+    assert len(service.requests) == 2
+
+
+# 후처리 서비스를 기다리는 동안 세션 잠금과 DB 세션을 쥐지 않는다: 가짜 서비스가 답하기 전에 같은 세션에서
+# 고객의 다음 메시지 한 턴을 끝까지 돌린다(그 턴은 세션 잠금을 기다리지 않고 바로 잡으며 DB에 대화와 감사
+# 행을 쓴다). 잠금을 쥐고 있었다면 BusyError, DB 쓰기 트랜잭션을 쥐고 있었다면 쓰기가 막혀 이 시험이 깨진다.
+def test_the_summary_call_holds_neither_the_session_lock_nor_a_database_session(
+    blank_service_engine, connect
+):
+    shared: dict = {}
+    nested_events: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        shared["service"].handle(
+            shared["session_id"], "하나 더 여쭤볼게요.", lambda event, data: nested_events.append(event)
+        )
+        return httpx.Response(200, json=REPLY)
+
+    script = ["네, 말씀하세요.", "추가로 도와드릴게요."]
+    with local_client(app_with_link(blank_service_engine, connect(FakeService(answer)), script)) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        shared.update(service=web.app.state.service, session_id=session_id)
+        answer_ = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        roles = [message["role"] for message in web.get(f"/api/sessions/{session_id}").json()["messages"]]
+    assert answer_.status_code == 201
+    assert nested_events[-2:] == ["reply", "end"]
+    assert roles == ["agent", "customer", "agent", "customer", "agent"]
+
+
+# 후처리 연결이 켜져 있어도 상담 한 턴의 감사 종류 차례는 그대로다: 세션 시작, 고객 메시지, 도구 호출(턴
+# 도중 도구마다), LLM 호출(턴이 끝날 때 호출마다), 답. 이 기능은 턴 경로를 고치지 않는다.
+def test_existing_audit_order_is_unchanged(engine, connect):  # noqa: F811
+    script = [*verify_and_cancel(SMALL), "주문 O-90005를 취소했습니다. 89,100원이 환불됩니다."]
+    with local_client(app_with_link(engine, connect(FakeService(reply_ok)), script)) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "정예준이고 01000009005입니다. O-90005 취소해 주세요.")
+        kinds = [event["kind"] for event in audit_of(web, session_id)]
+    assert kinds == [
+        "session_started",
+        "customer_message",
+        "tool_call",
+        "tool_call",
+        "llm_call",
+        "llm_call",
+        "llm_call",
+        "agent_reply",
+    ]
+
+
+# 주소를 설정하면 앱이 그 주소와 시간 상한으로 클라이언트를 직접 만들고, 앱이 끝날 때 닫는다. 넘겨받은
+# 클라이언트(시험의 가짜 서비스)는 부른 쪽 것이라 닫지 않는다(모델 제공자·DB 엔진과 같다).
+def test_the_app_makes_its_own_client_from_the_setting_and_closes_it(blank_service_engine, connect):
+    own_app = app_with_link(
+        blank_service_engine, None, summary_url="http://127.0.0.1:9/", summary_timeout_s=7
+    )
+    with local_client(own_app) as web:
+        assert web.get("/healthz").json()["summary"] is True
+        own = web.app.state.summary
+        assert isinstance(own, SummaryClient)
+        assert str(own._http.base_url) == "http://127.0.0.1:9"
+        assert own._http.timeout == httpx.Timeout(7, connect=7)
+        assert not own._http.is_closed
+    assert own._http.is_closed
+    passed = connect(FakeService(reply_ok))
+    with local_client(app_with_link(blank_service_engine, passed)) as web:
+        assert web.app.state.summary is passed
+    assert not passed._http.is_closed

@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+# httpx: 모든 경로를 켠 앱에 넣는 가짜 상담 후처리 서비스(MockTransport). 불리면 안 되는 서비스다.
+import httpx
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -28,6 +30,7 @@ from support_agent.service import store
 from support_agent.service.app import create_app
 from support_agent.service.offline import create_offline_app
 from support_agent.service.settings import Settings
+from support_agent.service.summary import SummaryClient
 from support_agent.service.voice_frontend import VoiceFrontEnd
 
 # 리바인딩한 페이지의 fetch가 싣는 헤더 꼴: Host와 Origin이 모두 공격자의 이름이다.
@@ -35,12 +38,22 @@ FOREIGN = "attacker.example:8062"
 REBOUND = {"Host": FOREIGN, "Origin": f"http://{FOREIGN}"}
 
 
-# 모든 경로가 살아 있는 앱: 음성 앞단(대역)과 API 설명(/openapi.json)까지 켠다. 경로가 없거나 꺼져 있어서 나온
-# 404·503이 아니라 Host 검사가 400을 낸 것임을 보이려는 것이다.
+# 모든 경로가 살아 있는 앱: 음성 앞단(대역)과 API 설명(/openapi.json), 상담 후처리 연결까지 켠다. 경로가
+# 없거나 꺼져 있어서 나온 404·501·503이 아니라 Host 검사가 400을 낸 것임을 보이려는 것이다. 후처리 서비스는
+# 가짜이고 불리면 예외를 던진다(Host가 틀린 요청은 처리기에 닿지 않으므로 불릴 일이 없다).
 def app_with_every_route(engine, **overrides):
     settings = Settings(admin_token="test-token", expose_openapi=True, **overrides)
     front_end = VoiceFrontEnd(FakeSpeaker(), FakeListener())
-    return create_app(settings, provider=ScriptedProvider(["네."]), engine=engine, voice=front_end)
+
+    def summary_service(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("the summary service must not be called")
+
+    summary = SummaryClient(
+        "http://summary.test", timeout_s=5, transport=httpx.MockTransport(summary_service)
+    )
+    return create_app(
+        settings, provider=ScriptedProvider(["네."]), engine=engine, voice=front_end, summary=summary
+    )
 
 
 # 서비스 테이블의 행 수. 거절된 요청이 세션·감사 행·승인 대기를 만들거나 바꾸지 않았는지 본다.
@@ -198,6 +211,7 @@ SURFACES = [
     ("POST", "/api/admin/approvals/1/decision", {"json": {"approve": True}, "headers": ADMIN}),
     ("GET", "/api/admin/sessions", {"headers": ADMIN}),
     ("GET", "/api/admin/sessions/{id}", {"headers": ADMIN}),
+    ("POST", "/api/admin/sessions/{id}/summary", {"json": {"by": "admin"}, "headers": ADMIN}),
 ]
 
 

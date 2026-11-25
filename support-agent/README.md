@@ -253,6 +253,7 @@ docker compose up --build        # 채팅 http://127.0.0.1:8062, 관리 화면 /
 - 띄운 직후와 모델이 60분 동안 쓰이지 않아 내려간 뒤의 첫 메시지는 모델을 올리는 시간만큼 늦다 (이 PC의 D: HDD에서 첫 호출 55초). 시작할 때 미리 올리려면 `.env`에 `PRELOAD=1`, 더 오래 두려면 `KEEP_ALIVE`(예: `24h`, `-1`은 내리지 않음). 기본값(60분, 미리 올리지 않음)은 GPU를 다른 작업과 나눠 쓰기 때문이다 ([docs/service.md](docs/service.md) "실행")
 - Docker 없이: `uv run uvicorn support_agent.service.app:create_app --factory --port 8062 --no-access-log` (SQLite 파일. 고객 API 경로에 든 세션 id를 로그에 남기지 않게 접근 로그를 끈다, [docs/service.md](docs/service.md) "세션 id가 곧 열쇠다")
 - MCP 서버: `uv run python -m support_agent.mcp_server` (읽기 도구만), `--scope write`(쓰기 포함), `--http`(토큰 필요). MCP로 호출해도 규정 검사, 사람 승인, 감사 로그를 똑같이 지난다
+- 상담 후처리 기록 (2026-11-25 추가, 기본 꺼짐): 상담 후처리 서비스(이 저장소의 call-summary)의 주소를 `SUPPORT_AGENT_SUMMARY_URL`(Compose는 `.env`의 `SUMMARY_URL`)로 주면, 관리자가 `POST /api/admin/sessions/{id}/summary`로 상담 하나의 고객에게 보인 대화를 그 서비스에 보내 후처리 기록(문의 유형, 처리 결과, 핵심 값, 요약)을 만든다. 성공과 실패가 감사 로그에 남고 상담은 그대로다. 대화의 글이 그 주소로 나가므로 믿는 서비스의 주소만 준다 ([docs/service.md](docs/service.md) "상담 후처리 기록")
 
 ## 구조
 
