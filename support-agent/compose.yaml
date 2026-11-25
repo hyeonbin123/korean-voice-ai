@@ -45,6 +45,11 @@ services:
       # 127.0.0.1과 localhost뿐이고 그 밖의 이름으로 오는 요청은 400이다(DNS 리바인딩 방어, docs/service.md "정한 것과
       # 이유"). 비워 두면 기본 그대로다. 다른 이름(앞단 프록시의 이름 등)으로 접속해야 할 때만 .env에 적는다
       SUPPORT_AGENT_ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      # 상담 후처리 서비스(call-summary)의 주소와 그 요청 하나를 기다리는 시간 상한(초, 1~600. service/settings.py의
+      # summary_url·summary_timeout_s). 비워 두면 기본 그대로다: 주소가 없으면 후처리 연결이 꺼지고, 시간 상한은
+      # 120초다. 주소는 컨테이너 안에서 본 주소다(컨테이너 안의 127.0.0.1은 앱 컨테이너 자신이다). 쓸 때만 .env에 적는다
+      SUPPORT_AGENT_SUMMARY_URL: ${SUMMARY_URL:-}
+      SUPPORT_AGENT_SUMMARY_TIMEOUT_S: ${SUMMARY_TIMEOUT_S:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

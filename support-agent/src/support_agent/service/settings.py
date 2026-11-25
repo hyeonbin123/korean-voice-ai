@@ -61,6 +61,11 @@ _HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[
 # 한다.
 _OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
 _IPV4 = re.compile(rf"(?:{_OCTET}\.){{3}}{_OCTET}")
+# SUMMARY_URL의 꼴: `http://`·`https://`(대소문자 무관) + 호스트 + 선택 포트(`:` 뒤 숫자 1~5자리) + 선택
+# 경로(`/`로 시작하고 영문·숫자와 `-._~/`만). host 묶음은 `/`·`:` 앞까지를 잡고, 그것이 이름이나 IPv4
+# 주소인지는 검증기가 위 _HOST_NAME·_IPV4로 다시 본다. 사용자 정보(`@`), 질의(`?`), 조각(`#`), 공백, 퍼센트
+# 인코딩, 역슬래시, IPv6 주소(대괄호)는 이 꼴에 들 수 없다(Settings._summary_url_is_a_plain_http_address).
+_SUMMARY_URL = re.compile(r"(?i:https?)://(?P<host>[^/:]+)(?::(?P<port>[0-9]{1,5}))?(?:/[A-Za-z0-9._~/-]*)?")
 
 
 # ALLOWED_HOSTS의 한 항목을 검사해 Host 헤더에 실리는 꼴(소문자)로 돌려준다. 잘못된 항목은
@@ -186,6 +191,21 @@ class Settings(BaseModel):
     # 이름이나 IPv4 주소가 아닌 값(`*`와 하위 도메인 패턴, 포트, http://, 경로, IPv6 주소, 빈 항목)은 서비스가
     # 시작할 때 거절한다(_allowed_host). 목록이 실제로 쓰이는 곳은 app.py의 Host 검사다(host_allow_list).
     allowed_hosts: tuple[str, ...] = ()
+    # 상담 후처리 서비스(call-summary)의 주소. 비어 있으면(기본) 후처리 연결이 꺼진다. 이 주소 뒤에
+    # /summarize를 붙여 부르는 클라이언트는 service/summary.py의 SummaryClient다. 값은 http:// 또는
+    # https://와 호스트(이름이나 IPv4 주소)가 있어야 하고, 포트와 경로(앞단 프록시의 경로 접두사 등)는 붙여도
+    # 된다. 앞뒤 공백과 끝의 `/`는 떼고, 공백뿐인 값은 빈 값(꺼짐)이다. 그 밖의 값(다른 스킴, 호스트 없음,
+    # 사용자 정보, 질의·조각, IPv6 주소 등)은 서비스가 시작할 때 거절한다
+    # (_summary_url_is_a_plain_http_address). 이 주소로 고객의 대화가 나가므로 주소는 이 설정에서만
+    # 받는다(까닭은 service/summary.py의 머리 주석).
+    summary_url: str = ""
+    # 후처리 요청 하나를 기다리는 시간 상한(초, 1~600, 기본 120). 연결·보내기·응답을 기다리는 단계마다
+    # httpx의 제한으로 걸리고(연결은 10초 이하), 응답 본문을 받는 동안에는 요청을 시작한 때부터 잰 전체 시간이
+    # 이 값을 넘으면 끊는다(service/summary.py). 후처리 서비스 쪽의 최악 대기는 약 270초(자리 대기 30초 + 모델
+    # 호출 한도 120초 × 두 번)라, 그쪽이 오래 줄을 서거나 다시 시도하는 요청은 기본값에서 시간 초과(504)로
+    # 끝날 수 있다. 그런 일이 잦으면 600까지 올린다. 상한을 두는 것은 summarize가 동기 호출이라 끝날 때까지
+    # 부른 스레드를 쥐기 때문이다. 범위 밖 값은 시작할 때 거절한다.
+    summary_timeout_s: int = Field(default=120, ge=1, le=600)
 
     # THINK를 비워 두면 모델에 맞춰 채운다: 기본 모델(qwen3.5:4b)은 잰 그대로 "off", 다른 모델은 "omit"(보내지
     # 않음).
@@ -230,6 +250,38 @@ class Settings(BaseModel):
     @classmethod
     def _allowed_hosts_are_plain_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(dict.fromkeys(_allowed_host(entry) for entry in value))
+
+    # SUMMARY_URL이 부를 수 있는 주소 꼴인지 시작할 때 본다(위 _SUMMARY_URL과 필드 주석). 받지 않는 것과
+    # 이유:
+    # - 사용자 정보(`http://이름:비밀번호@호스트`): httpx는 주소의 사용자 정보를 Authorization 머리로 바꿔
+    #   보낸다. 후처리 요청은 인증 머리를 싣지 않는 약속이다(후처리 서비스에는 인증이 없다)
+    # - 질의·조각(`?`, `#`): 클라이언트가 주소 뒤에 붙이는 /summarize와 섞여 요청 경로가 깨진다. 서비스가
+    #   떠서 요청마다 실패하는 대신 시작할 때 거절한다(ALLOWED_HOSTS의 _allowed_host와 같은 까닭)
+    # - IPv6 주소, ASCII 밖의 이름, IPv4 꼴이지만 틀린 주소: ALLOWED_HOSTS가 받는 이름과 같은 범위로 묶었다.
+    #   그런 주소가 필요하면 이름을 붙여 쓴다
+    # - 0이나 65535를 넘는 포트: 연결할 수 없는 포트다
+    # 오류 글(영어)에는 값을 넣지 않는다.
+    @field_validator("summary_url")
+    @classmethod
+    def _summary_url_is_a_plain_http_address(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        found = _SUMMARY_URL.fullmatch(value)
+        host = found.group("host").lower() if found else ""
+        port = found.group("port") if found else None
+        if (
+            found is None
+            or len(host) > 253
+            or not _HOST_NAME.fullmatch(host)
+            or (host.rsplit(".", 1)[-1].isdigit() and not _IPV4.fullmatch(host))
+            or (port is not None and not 1 <= int(port) <= 65535)
+        ):
+            raise ValueError(
+                "summary_url must be an http:// or https:// address with a host name or an IPv4 address and "
+                "optionally a port and a path (no user info, query, fragment, spaces or IPv6 address)"
+            )
+        return value.rstrip("/")
 
     # OllamaProvider에 넘길 think 값(True/False/None). app.py의 create_app이 제공자를 만들 때 쓴다.
     def agent_think(self) -> bool | None:
