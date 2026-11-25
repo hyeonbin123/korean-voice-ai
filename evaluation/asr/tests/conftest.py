@@ -35,6 +35,7 @@
 import json
 import random
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -353,3 +354,42 @@ def build_repository(tmp_path):
         return write_repository(tmp_path / name, **options)
 
     return build
+
+
+# 명령줄은 언제나 기본값(382발화, 한글 전용 257, 알려진 차이 행 23·57)으로 검증하므로, 명령줄 시험은 이
+# 크기를 쓴다.
+FULL_SIZE = {"utterances": 382, "hangul_only": 257, "differences": (23, 57)}
+
+
+@pytest.fixture(scope="session")
+def full_repository(tmp_path_factory) -> Synthetic:
+    """실제 크기의 합성 저장소 한 벌. 시험 묶음 전체에서 한 번만 만든다.
+
+    실제처럼 stt-scratch 가설 파일만 CRLF다.
+    이 폴더는 고치지 않는다. 고치는 시험은 `copy_repository`로 복사해서 고친다.
+    """
+    return write_repository(tmp_path_factory.mktemp("full") / "repo", **FULL_SIZE)
+
+
+@pytest.fixture(scope="session")
+def full_repository_crlf(tmp_path_factory) -> Synthetic:
+    """`full_repository`와 같은 내용을 모든 재료 파일이 CRLF인 꼴로 만든 것.
+
+    줄바꿈 변환을 켠 채 받은 복제본을 흉내 낸다.
+    """
+    return write_repository(tmp_path_factory.mktemp("full-crlf") / "repo", line_endings="crlf", **FULL_SIZE)
+
+
+@pytest.fixture
+def copy_repository(tmp_path):
+    """합성 저장소 폴더를 이 시험의 임시 폴더로 복사하는 함수를 돌려준다.
+
+    copy(synthetic, 이름) -> 복사한 폴더.
+    """
+
+    def copy(source: Synthetic, name: str = "copy") -> Path:
+        destination = tmp_path / name
+        shutil.copytree(source.root, destination)
+        return destination
+
+    return copy
