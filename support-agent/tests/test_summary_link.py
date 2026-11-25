@@ -2,19 +2,24 @@
 
 # [테스트 묶음] (1) 고객에게 보인 대화를 후처리 요청의 발화로 바꾸는 규칙(summary_turns) (2) 보내는
 # 요청의 꼴: POST /summarize, 업종 shop, 인증 머리 없음, 압축하지 않은 답을 청함, 잰 바이트 그대로의 본문
-# (3) 후처리 서비스 쪽 실패(시간 초과, 연결 실패, 거절, 붐빔, 넘겨 주기, 그 밖의 상태, 쓸 수 없는 답)를
-# 설명이 붙은 상태 코드로 옮기는 표 (4) 그쪽 거절 본문의 글을 옮기지 않음 (5) 너무 큰 답과 느린 답은 흘려
-# 받는 동안 끊음 (6) 너무 큰 요청은 보내지 않음 (7) 프록시 환경 변수를 읽지 않음과 기다리는 시간의 제한
-# (8) 두 스레드가 한 클라이언트를 함께 씀 (9) 설정의 기본값(꺼짐)과 주소·시간 검사 (10) 관리자 API
-# `POST /api/admin/sessions/{id}/summary`: 꺼져 있을 때 501, 검사의 차례(토큰 → 연결 → 본문), 기록을 만들고
-# 감사 로그에 남김, 실패도 감사 로그에 남기고 대화는 그대로 둠, 없는 세션·빈 대화·거절·시간 초과·붐빔의
-# 상태 코드, 자리를 어느 길로 끝나도 돌려줌, `by` 검사, 후처리 서비스를 기다리는 동안 세션 잠금과 DB 세션을
-# 쥐지 않음, 턴의 감사 차례가 그대로임, 앱이 설정으로 만든 클라이언트를 닫음.
+# (3) 후처리 서비스 쪽 실패(시간 초과, 연결 실패, 거절, 붐빔, 넘겨 주기, 그 밖의 상태, 쓸 수 없는 답, 본문을
+# 읽는 도중의 전송 오류)를 설명이 붙은 상태 코드로 옮기는 표 (4) 그쪽 거절 본문의 글을 옮기지 않음 (5) 답의 꼴
+# 확인: 다섯 칸의 형, 겹침 깊이, JSON으로 다시 쓸 수 없는 값을 거절하고 쓸 수 있는 값은 그대로 받음 (6) 너무
+# 큰 답과 느린 답은 흘려 받는 동안과 다 받은 뒤에 끊음 (7) 너무 큰 요청은 보내지 않음 (8) 프록시 환경 변수를
+# 읽지 않음과 기다리는 시간의 제한 (9) 두 스레드가 한 클라이언트를 함께 씀 (10) 설정의 기본값(꺼짐)과
+# 주소·시간 검사 (11) 관리자 API `POST /api/admin/sessions/{id}/summary`: 꺼져 있을 때 501, 검사의 차례(토큰
+# → 연결 → 본문 → 자리 → 세션), 기록을 만들고 감사 로그에 남김(칸의 값이 그때의 세션 상태와 서비스의 답을
+# 따름), 실패도 감사 로그에 남기고 대화는 그대로 둠, 쓸 수 없는 답은 저장하지 않아 관리자 조회가 계속 됨,
+# 없는 세션·빈 대화·거절·시간 초과·붐빔의 상태 코드, 자리를 어느 길로 끝나도 돌려줌, `by` 검사, 후처리
+# 서비스를 기다리는 동안 세션 잠금과 DB 연결을 쥐지 않음, 턴의 감사 차례가 그대로임, 앱이 설정으로 만든
+# 클라이언트를 닫음.
 # [왜 중요한가] 이 연결은 고객의 대화를 서비스 밖으로 보내는 길이다. 보내는 곳은 설정한 한 곳뿐이어야 하고
 # (넘겨 주기와 프록시를 따르지 않는다), 그쪽이 어떤 답을 하든 정해진 상태 코드와 고정 문장으로만 끝나야
 # 하며(다른 예외가 새면 서비스의 500이 되고, 그쪽 본문을 옮기면 고객의 글이 오류 응답에 실려 나간다), 큰
-# 답이나 느린 답이 메모리와 작업 스레드를 오래 쥐지 못해야 한다. 관리 화면은 503을 '관리자 기능이 꺼짐'으로
-# 읽어 로그인 화면을 띄우므로 이 끝점은 503을 쓰지 않는다(꺼짐은 501, 붐빔은 429).
+# 답이나 느린 답이 메모리와 작업 스레드를 오래 쥐지 못해야 한다. 그쪽이 준 값은 감사 로그에 저장하고 다시
+# 내보내도 되는 꼴일 때만 받아야 한다(그렇지 않으면 저장된 답 하나로 그 세션의 관리자 조회가 계속 500이 된다).
+# 관리 화면은 503을 '관리자 기능이 꺼짐'으로 읽어 로그인 화면을 띄우므로 이 끝점은 503을 쓰지 않는다(꺼짐은
+# 501, 붐빔은 429).
 # [방법] 가짜 서비스는 httpx.MockTransport에 넣은 함수다. 실제 네트워크와 실제 후처리 서비스는 부르지
 # 않는다. 클라이언트 시험은 DB를 쓰지 않고, 관리자 API 시험은 마이그레이션한 SQLite 파일과 대본대로 답하는
 # 가짜 모델로 앱을 만들어 서비스의 주소(127.0.0.1)로 부른다(tests/test_service.py의 local_client). 시간은
@@ -38,6 +43,7 @@ import pytest
 import yaml
 from fastapi import FastAPI
 from pydantic import ValidationError
+from sqlalchemy.orm import Session
 from test_service import (
     ADMIN,
     SMALL,
@@ -51,12 +57,15 @@ from test_service import (
 from support_agent.chat import ScriptedProvider
 from support_agent.service.app import create_app
 from support_agent.service.settings import Settings
+from support_agent.service.store import ChatSession, SessionStatus
 from support_agent.service.summary import (
     DOMAIN,
     MAX_REPLY_BYTES,
+    MAX_REPLY_DEPTH,
     MAX_REQUEST_BYTES,
     SummaryClient,
     SummaryError,
+    _nesting_depth,
     summary_turns,
 )
 
@@ -164,6 +173,53 @@ def fail_with(error: type[httpx.TransportError]) -> Callable[[httpx.Request], ht
         raise error("simulated", request=request)
 
     return answer
+
+
+# 응답 머리(200)와 첫 조각을 준 뒤, 본문을 읽는 도중에 그 전송 오류를 던지는 answer.
+def fail_while_reading(error: type[httpx.TransportError]) -> Callable[[httpx.Request], httpx.Response]:
+    def answer(request: httpx.Request) -> httpx.Response:
+        def body() -> Iterator[bytes]:
+            yield b'{"record": {'
+            raise error("simulated", request=request)
+
+        return httpx.Response(200, content=body())
+
+    return answer
+
+
+# 칸을 뺄 때 값 자리에 쓰는 표시(None은 JSON의 null이라는 값이므로 따로 둔다).
+MISSING = object()
+
+
+# 정상 답(REPLY)에서 칸을 바꾸거나(값을 줌) 뺀(MISSING을 줌) 200 답의 본문 바이트. json.dumps의 기본(ASCII
+# 이스케이프)으로 쓰므로 짝 없는 서로게이트는 "\ud800" 이스케이프로, nan과 inf는 NaN·Infinity 낱말로 나간다.
+def reply_body(**slots) -> bytes:
+    body = {key: value for key, value in {**REPLY, **slots}.items() if value is not MISSING}
+    return json.dumps(body).encode("utf-8")
+
+
+# record 칸에 이 JSON 글을 그대로 넣은 200 답의 본문 바이트(json.dumps로는 쓸 수 없는 글을 넣을 때).
+def record_text(record_json: str) -> bytes:
+    return (
+        '{"request_id": "req-1", "record": ' + record_json + ', "needs_confirmation": [], '
+        '"model": "offline:canned", "attempts": 1}'
+    ).encode("utf-8")
+
+
+# 빈 목록을 levels단으로 겹친 값([[…[]…]]). levels는 1 이상이다.
+def nested_lists(levels: int) -> list:
+    value: list = []
+    for _ in range(levels - 1):
+        value = [value]
+    return value
+
+
+# 다섯 칸을 담은 최상위 객체를 1단으로 세어 가장 깊은 곳이 levels단인 200 답의 본문 바이트. 깊이를 record 안
+# (최상위 → record → 목록들)이나 needs_confirmation 안(최상위 → 목록들)에서 맞춘다.
+def deep_reply(slot: str, levels: int) -> bytes:
+    if slot == "record":
+        return reply_body(record={"x": nested_lists(levels - 2)})
+    return reply_body(needs_confirmation=nested_lists(levels - 1))
 
 
 # -------------------------------------------------------------------- 대화 → 요청
@@ -319,7 +375,9 @@ def test_busy_passes_on_only_a_small_whole_number_of_seconds(connect, header, pa
 # 표의 나머지 경우도 같은 상태 코드로 끝나고, 어느 것도 SummaryError 밖의 예외로 새지 않는다: 200이 아닌 2xx와
 # 307도 502, 연결·쓰기·연결 풀 대기의 시간 초과도 504, 읽다가 끊기거나 HTTP 꼴이 틀린 답은 502(연결 실패와
 # 같은 문장), JSON 객체가 아니거나 record가 객체가 아니거나 너무 깊게 겹친(json이 RecursionError로 멈추는)
-# 답과 UTF-8이 아닌 답도 502.
+# 답과 UTF-8이 아닌 답도 502. 응답 머리를 받은 뒤 본문을 읽는 도중(첫 조각 뒤)에 나는 전송 오류도 머리를 받기
+# 전과 같다: 읽기 시간 초과는 504, 읽기 오류와 HTTP 꼴 오류는 502. 본문 읽기가 오류를 잡는 범위 밖에 있으면 이
+# 오류들이 그대로 새어 서비스의 500이 된다.
 @pytest.mark.parametrize(
     ("answer", "status", "detail"),
     [
@@ -337,9 +395,17 @@ def test_busy_passes_on_only_a_small_whole_number_of_seconds(connect, header, pa
         pytest.param(fail_with(httpx.PoolTimeout), 504, TIMED_OUT, id="pool-timeout"),
         pytest.param(fail_with(httpx.ReadError), 502, UNREACHABLE, id="read-error"),
         pytest.param(fail_with(httpx.RemoteProtocolError), 502, UNREACHABLE, id="remote-protocol-error"),
+        pytest.param(fail_while_reading(httpx.ReadTimeout), 504, TIMED_OUT, id="read-timeout-in-body"),
+        pytest.param(fail_while_reading(httpx.ReadError), 502, UNREACHABLE, id="read-error-in-body"),
+        pytest.param(
+            fail_while_reading(httpx.RemoteProtocolError),
+            502,
+            UNREACHABLE,
+            id="remote-protocol-error-in-body",
+        ),
         pytest.param(reply_with(b"[]"), 502, UNEXPECTED, id="200-json-list"),
-        pytest.param(reply_with(b'{"record": null}'), 502, UNEXPECTED, id="200-record-null"),
-        pytest.param(reply_with(b'{"record": "summary"}'), 502, UNEXPECTED, id="200-record-text"),
+        pytest.param(reply_with(reply_body(record=None)), 502, UNEXPECTED, id="200-record-null"),
+        pytest.param(reply_with(reply_body(record="summary")), 502, UNEXPECTED, id="200-record-text"),
         pytest.param(reply_with(b"[" * 100_000), 502, UNEXPECTED, id="200-nested-too-deep"),
         pytest.param(reply_with(b'{"record": "\xc3\x28"}'), 502, UNEXPECTED, id="200-not-utf8"),
     ],
@@ -372,6 +438,110 @@ def test_rejection_does_not_echo_the_conversation(connect):
     for shown in (error.detail, str(error), repr(error), *map(str, error.args)):
         assert "비밀스러운" not in shown
     assert error.__cause__ is None and error.__context__ is None
+
+
+# -------------------------------------------------------------------- 답의 꼴
+
+
+# 후처리 서비스의 답은 믿지 않는다. 돌려주는 다섯 칸은 이 서비스가 감사 로그에 그대로 저장하고 응답으로 다시
+# 내보낼 값이기 때문이다. 그래서 다섯 칸이 모두 있고 형이 맞아야 받는다: record는 객체, needs_confirmation은
+# 목록, model·request_id는 글, attempts는 정수(참·거짓은 정수가 아니다). 하나라도 없거나 형이 다르면 502다.
+# 후처리 서비스(call-summary)의 응답 모델은 다섯 칸을 늘 이 형으로 내므로 정상 답은 걸리지 않는다.
+@pytest.mark.parametrize(
+    ("slot", "value"),
+    [
+        pytest.param("record", MISSING, id="record-missing"),
+        pytest.param("record", [], id="record-list"),
+        pytest.param("needs_confirmation", MISSING, id="needs_confirmation-missing"),
+        pytest.param("needs_confirmation", None, id="needs_confirmation-null"),
+        pytest.param("needs_confirmation", {}, id="needs_confirmation-object"),
+        pytest.param("needs_confirmation", "O-90005", id="needs_confirmation-text"),
+        pytest.param("model", MISSING, id="model-missing"),
+        pytest.param("model", None, id="model-null"),
+        pytest.param("model", 7, id="model-number"),
+        pytest.param("model", ["offline:canned"], id="model-list"),
+        pytest.param("attempts", MISSING, id="attempts-missing"),
+        pytest.param("attempts", None, id="attempts-null"),
+        pytest.param("attempts", True, id="attempts-true"),
+        pytest.param("attempts", "2", id="attempts-text"),
+        pytest.param("attempts", 1.5, id="attempts-fraction"),
+        pytest.param("request_id", MISSING, id="request_id-missing"),
+        pytest.param("request_id", None, id="request_id-null"),
+        pytest.param("request_id", 12, id="request_id-number"),
+        pytest.param("request_id", {"id": "req-1"}, id="request_id-object"),
+    ],
+)
+def test_a_reply_with_a_missing_or_mistyped_slot_is_refused(connect, slot, value):
+    service = FakeService(reply_with(reply_body(**{slot: value})))
+    error = refused(connect(service))
+    assert (error.status, error.detail, error.retry_after) == (502, UNEXPECTED, None)
+    assert len(service.requests) == 1
+
+
+# 겹침 깊이: 답의 다섯 칸을 담은 최상위 객체를 1단으로 세어 가장 깊은 객체·목록이 MAX_REPLY_DEPTH단까지는
+# 받고, 하나라도 더 깊으면 502다. 깊이를 record 안과 needs_confirmation 안에서 각각 맞춰 본다(정상 답은 4단
+# 안쪽이다). 100단은 이 서비스가 응답으로 다시 내보내는 직렬화가 멈추는 깊이 근처의 값이고 500단은 그보다 훨씬
+# 깊은 값이다. 어느 깊이에서도 SummaryError 밖의 예외(RecursionError 등)가 새지 않아야 한다.
+@pytest.mark.parametrize("slot", ["record", "needs_confirmation"])
+def test_a_reply_nested_past_the_limit_is_refused(connect, slot):
+    assert MAX_REPLY_DEPTH == 32
+    at_limit = deep_reply(slot, MAX_REPLY_DEPTH)
+    kept = connect(FakeService(reply_with(at_limit))).summarize(CONVERSATION)
+    assert kept[slot] == json.loads(at_limit)[slot]
+    for levels in (MAX_REPLY_DEPTH + 1, 100, 500):
+        service = FakeService(reply_with(deep_reply(slot, levels)))
+        error = refused(connect(service))
+        assert (error.status, error.detail, error.retry_after) == (502, UNEXPECTED, None), levels
+        assert len(service.requests) == 1
+
+
+# 깊이를 세는 일이 깊은 값 때문에 터지면 안 된다(재귀하지 않고 반복문으로 센다). 파이썬의 재귀 한도(기본
+# 1,000단)보다 훨씬 깊은 값을 코드로 만들어 센다(JSON 글로 읽어서는 이만큼 깊은 값을 받을 수 없다). 객체·목록
+# 하나가 1단이고, 빈 것도 1단이며, 글·수·참거짓·null은 0단이다.
+def test_counting_the_nesting_does_not_recurse():
+    deep: list = []
+    for _ in range(5_000):
+        deep = [deep]
+    assert _nesting_depth(deep) == 5_001
+    assert _nesting_depth({"a": [{"b": 1}, "text", 2]}) == 3
+    assert _nesting_depth({"wide": [[]] * 3, "deep": [[[]]]}) == 4
+    assert [_nesting_depth(value) for value in ("text", 1, 1.5, True, None, [], {})] == [0, 0, 0, 0, 0, 1, 1]
+
+
+# JSON으로 다시 쓸 수 없는 값이 어느 칸에든 있으면 502다. 이 서비스는 그 값을 감사 로그에 저장하고 응답으로
+# 내보내는데, 그때 걸리는 값이다: NaN·Infinity(너무 큰 수 1e999도 inf로 읽힌다)와 짝 없는 서로게이트(UTF-8로
+# 쓸 수 없다). 값뿐 아니라 키에 있어도 같고, record 밖의 칸(model, request_id, needs_confirmation)도 같다.
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(reply_body(record={"x": float("nan")}), id="nan-in-record"),
+        pytest.param(reply_body(record={"x": float("inf")}), id="infinity-in-record"),
+        pytest.param(reply_body(record={"x": -float("inf")}), id="minus-infinity-in-record"),
+        pytest.param(record_text('{"x": 1e999}'), id="too-large-number-in-record"),
+        pytest.param(record_text('{"x": -1e999}'), id="too-small-number-in-record"),
+        pytest.param(reply_body(needs_confirmation=[float("nan")]), id="nan-in-needs_confirmation"),
+        pytest.param(reply_body(record={"x": "\ud800"}), id="lone-surrogate-in-record"),
+        pytest.param(reply_body(record={"x": ["\udc00"]}), id="lone-low-surrogate-in-record"),
+        pytest.param(reply_body(record={"\ud800": "x"}), id="lone-surrogate-as-record-key"),
+        pytest.param(reply_body(needs_confirmation=["\ud800"]), id="lone-surrogate-in-needs_confirmation"),
+        pytest.param(reply_body(model="\ud800"), id="lone-surrogate-in-model"),
+        pytest.param(reply_body(request_id="\ud800"), id="lone-surrogate-in-request_id"),
+    ],
+)
+def test_a_reply_that_cannot_be_written_back_as_json_is_refused(connect, body):
+    service = FakeService(reply_with(body))
+    error = refused(connect(service))
+    assert (error.status, error.detail, error.retry_after) == (502, UNEXPECTED, None)
+    assert len(service.requests) == 1
+
+
+# 쓸 수 있는 값은 그대로 받는다: 한글, NUL 문자(\u0000), 짝이 맞는 서로게이트(이모지), 아주 큰 정수와 수,
+# 빈 객체·목록. 위 검사가 정상 답을 막는 데까지 가지 않았음을 보이는 짝 시험이다.
+def test_values_that_can_be_written_back_are_kept(connect):
+    record = {"summary": "취소 요청 \u0000 😀", "big": 10**30, "small": 1.5e-300, "empty": [{}, []]}
+    service = FakeService(reply_with(reply_body(record=record, request_id="요청-1")))
+    result = connect(service).summarize(CONVERSATION)
+    assert (result["record"], result["request_id"]) == (record, "요청-1")
 
 
 # -------------------------------------------------------------------- 크기와 시간
@@ -444,19 +614,22 @@ def test_a_compressed_reply_is_refused_without_reading_it(connect):
 
 # 전체 시간 상한: 요청을 시작한 때부터 가짜 시계로 잰 시간이 timeout_s를 넘기면, 조각이 계속 오더라도 그
 # 조각에서 끊고 504다(httpx의 시간 제한은 조각마다 새로 시작하므로 천천히 흘리는 답을 끊지 못한다). 답의
-# 머리가 상한을 넘겨 도착하면 본문을 읽지 않는다. 상한과 같은 시간은 넘긴 것이 아니다.
+# 머리가 상한을 넘겨 도착하면 본문을 읽지 않는다. 본문 조각을 다 받은 뒤(끝 조각 다음에 따라오는 마무리를
+# 받는 동안)에 상한을 넘겨도 그 답은 쓰지 않고 504다. 상한과 같은 시간은 넘긴 것이 아니다. 가짜 답은 모두
+# 쓸 수 있는 정상 답(REPLY)이라, 시간 확인이 없으면 받아들여지는 답이다.
 def test_slow_reply_hits_the_total_deadline(connect):
     clock = FakeClock()
     pulled: list[int] = []
+    whole = json.dumps(REPLY).encode("utf-8")
 
     def trickle() -> Iterator[bytes]:
         pulled.append(1)
-        yield b'{"record": {}, '
+        yield whole[:10]
         clock.now += 61  # 다음 조각은 요청을 시작한 지 61초 뒤에 온다
         pulled.append(2)
-        yield b'"model": "offline:canned"'
+        yield whole[10:-1]
         pulled.append(3)
-        yield b"}"
+        yield whole[-1:]
 
     service = FakeService(lambda request: httpx.Response(200, content=trickle()))
     error = refused(connect(service, timeout_s=60, clock=clock))
@@ -468,7 +641,7 @@ def test_slow_reply_hits_the_total_deadline(connect):
 
     def late_body() -> Iterator[bytes]:
         unread.append(1)
-        yield json.dumps(REPLY).encode("utf-8")
+        yield whole
 
     def late(request: httpx.Request) -> httpx.Response:
         late_clock.now += 61
@@ -477,16 +650,27 @@ def test_slow_reply_hits_the_total_deadline(connect):
     assert refused(connect(FakeService(late), timeout_s=60, clock=late_clock)).status == 504
     assert unread == []
 
+    # 마지막 조각은 제때 왔지만 본문이 끝나기까지 상한을 넘긴 답이다(조각 사이의 확인으로는 잡히지 않는다).
+    end_clock = FakeClock()
+
+    def slow_end() -> Iterator[bytes]:
+        yield whole
+        end_clock.now += 61
+
+    service = FakeService(lambda request: httpx.Response(200, content=slow_end()))
+    error = refused(connect(service, timeout_s=60, clock=end_clock))
+    assert (error.status, error.detail, error.retry_after) == (504, TIMED_OUT, None)
+
     on_time_clock = FakeClock()
 
     def on_time() -> Iterator[bytes]:
-        yield b'{"record": {}, '
+        yield whole[:10]
         on_time_clock.now += 60
-        yield b'"model": "offline:canned"}'
+        yield whole[10:]
 
     service = FakeService(lambda request: httpx.Response(200, content=on_time()))
     result = connect(service, timeout_s=60, clock=on_time_clock).summarize(CONVERSATION)
-    assert (result["record"], result["model"]) == ({}, "offline:canned")
+    assert result == {key: REPLY[key] for key in RETURNED}
 
 
 # -------------------------------------------------------------------- 클라이언트의 꼴
@@ -569,7 +753,9 @@ def test_settings_default_is_off_and_validated():
 
 # 주소는 http(s)://호스트[:포트][/경로] 꼴만 받는다. 사용자 정보(httpx가 Authorization 머리로 바꿔 보낸다),
 # 질의·조각(뒤에 붙는 /summarize와 섞여 경로가 깨진다), 공백, 역슬래시, 퍼센트 인코딩, IPv6 주소, ASCII 밖의
-# 이름, IPv4 꼴이지만 틀린 주소, 범위 밖 포트는 서비스가 시작할 때 거절한다.
+# 이름, IPv4 꼴이지만 틀린 주소, 범위 밖 포트, 그리고 스킴에 든 ASCII 밖의 글자(대소문자를 가리지 않는 비교는
+# ſ(U+017F)를 s로 받아들이는데 httpx는 그런 주소를 스킴 없는 주소로 읽어 요청마다 실패한다)는 서비스가 시작할
+# 때 거절한다.
 @pytest.mark.parametrize(
     "wrong",
     [
@@ -588,6 +774,8 @@ def test_settings_default_is_off_and_validated():
         "http://127.0.0.1:65536",
         "http://127.0.0.1:",
         "https:/127.0.0.1",
+        "httpſ://summary.example",
+        "HTTPſ://summary.example:8072",
     ],
 )
 def test_the_summary_url_takes_only_a_plain_http_address(wrong):
@@ -742,6 +930,9 @@ def test_the_checks_run_token_then_link_then_body(blank_service_engine, connect)
 # 고객 발화 둘을 보낸 세션의 후처리 기록을 만든다: 201과 가짜 서비스가 준 기록. 가짜 서비스가 받은 발화의
 # 첫 줄은 상담원 인사말이고 화자는 상담원·고객이 번갈아 온다. 감사 로그의 마지막 행은 summary_created이고
 # payload는 정해진 여덟 칸이다(turns는 보낸 발화 수). /healthz의 summary는 true이고 voice 뒤에 있다.
+# 칸의 값이 상수가 아니라 그때의 세션 상태와 서비스의 답을 따르는지도 본다(session_status, attempts,
+# needs_confirmation): 같은 세션을 사람 상담원에게 넘긴 상태(handoff)로 바꾸고, 서비스가 두 번째 시도에 통과한
+# 답과 확인할 번호를 주게 해서 한 번 더 만든다. 첫 번째는 열린 세션, 시도 1, 확인할 번호 없음이다.
 def test_creates_a_record_and_audits_it(blank_service_engine, connect):
     service = FakeService(reply_ok)
     script = ["네, 말씀하세요.", "확인해 드렸습니다."]
@@ -754,12 +945,24 @@ def test_creates_a_record_and_audits_it(blank_service_engine, connect):
         say(web, session_id, "어제 시킨 거예요.")
         answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
         audit = audit_of(web, session_id)
+        (request,) = service.requests
+
+        with Session(blank_service_engine) as db:
+            db.get(ChatSession, session_id).status = SessionStatus.HANDOFF.value
+            db.commit()
+        flag = {"type": "주문번호", "value": "O-90005", "reasons": ["not_in_transcript"]}
+
+        def second_try(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={**REPLY, "attempts": 2, "needs_confirmation": [flag]})
+
+        service.answer = second_try
+        again = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        again_payload = audit_of(web, session_id)[-1]["payload"]
     assert answer.status_code == 201
     assert answer.json() == {
         "session_id": session_id,
         "summary": {key: REPLY[key] for key in ("record", "needs_confirmation", "model", "attempts")},
     }
-    (request,) = service.requests
     turns = json.loads(request.content)["turns"]
     assert turns[0] == {"speaker": "상담원", "text": greeting}
     assert [turn["speaker"] for turn in turns] == ["상담원", "고객", "상담원", "고객", "상담원"]
@@ -772,6 +975,14 @@ def test_creates_a_record_and_audits_it(blank_service_engine, connect):
         REPLY["request_id"],
         REPLY["model"],
     )
+    assert (payload["attempts"], payload["needs_confirmation"]) == (1, [])
+    assert again.status_code == 201
+    assert (again.json()["summary"]["attempts"], again.json()["summary"]["needs_confirmation"]) == (2, [flag])
+    assert (
+        again_payload["session_status"],
+        again_payload["attempts"],
+        again_payload["needs_confirmation"],
+    ) == ("handoff", 2, [flag])
 
 
 # 후처리 서비스가 실패하면(500 → 502) 실패도 감사 로그에 남고(summary_failed: 누가, 상태 코드, 고정 문장),
@@ -854,8 +1065,67 @@ def test_timeout_is_504(blank_service_engine, connect):
     assert audit[-1]["payload"] == {"by": "김담당", "status": 504, "error": TIMED_OUT}
 
 
+# 후처리 서비스의 답이 위 '답의 꼴' 검사에 걸리면 502이고 그 답은 저장되지 않는다: 감사 로그에는
+# summary_failed(상태 502, 고정 문장)만 남고 summary_created는 없으며, 그 뒤에도 같은 세션의 관리자 대화
+# 조회가 200이다(전에는 이런 답이 감사 로그에 저장돼 그 조회가 영구히 500이 됐다. 짝 없는 서로게이트와 너무
+# 깊은 값은 응답으로 내보내는 직렬화가 실패하는 값이다). 자리도 돌아온다. 응답에는 돌려주지 않고 감사 로그에만
+# 남는 칸(request_id)도 같다.
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(reply_body(record={"summary": "\ud800"}), id="lone-surrogate-in-record"),
+        pytest.param(reply_body(record={"\ud800": "x"}), id="lone-surrogate-as-record-key"),
+        pytest.param(reply_body(record={"x": float("nan")}), id="nan-in-record"),
+        pytest.param(deep_reply("record", 100), id="record-nested-100"),
+        pytest.param(deep_reply("needs_confirmation", 100), id="needs_confirmation-nested-100"),
+        pytest.param(reply_body(request_id="\ud800"), id="lone-surrogate-in-request_id"),
+        pytest.param(reply_body(request_id=nested_lists(100)), id="request_id-nested-100"),
+        pytest.param(reply_body(request_id=float("nan")), id="nan-in-request_id"),
+    ],
+)
+def test_an_unusable_reply_is_not_stored_and_the_admin_view_keeps_working(
+    blank_service_engine, connect, body
+):
+    service = FakeService(reply_with(body))
+    link = connect(service)
+    with local_client(
+        app_with_link(blank_service_engine, link, ["네, 말씀하세요."]), raise_server_exceptions=False
+    ) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        detail = web.get(f"/api/admin/sessions/{session_id}", headers=ADMIN)
+        again = web.get(f"/api/admin/sessions/{session_id}", headers=ADMIN)
+        slots_free = free_slots(web.app)
+    assert answer.status_code == 502, answer.text
+    assert answer.json() == {"detail": UNEXPECTED}
+    assert (detail.status_code, again.status_code) == (200, 200)
+    audit = detail.json()["audit"]
+    assert "summary_created" not in [event["kind"] for event in audit]
+    assert audit[-1]["kind"] == "summary_failed"
+    assert audit[-1]["payload"] == {"by": "김담당", "status": 502, "error": UNEXPECTED}
+    assert slots_free == 2
+    assert len(service.requests) == 1
+
+
+# NUL 문자(\u0000)가 든 글은 거절하지 않는다. 그대로 감사 로그에 저장되고 응답과 관리자 조회로 돌아온다
+# (이 시험의 DB는 SQLite다).
+def test_a_nul_character_in_the_record_is_stored_and_shown(blank_service_engine, connect):
+    record = {**REPLY["record"], "summary": "취소 요청 \u0000 접수"}
+    service = FakeService(reply_with(reply_body(record=record)))
+    with local_client(app_with_link(blank_service_engine, connect(service), ["네, 말씀하세요."])) as web:
+        session_id = web.post("/api/sessions").json()["session_id"]
+        say(web, session_id, "주문을 취소하고 싶어요.")
+        answer = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+        detail = web.get(f"/api/admin/sessions/{session_id}", headers=ADMIN)
+    assert answer.status_code == 201 and answer.json()["summary"]["record"] == record
+    assert detail.status_code == 200
+    assert detail.json()["audit"][-1]["payload"]["record"] == record
+
+
 # 붐빔은 429와 Retry-After다(503이 아님). 자리 둘이 모두 차 있으면 기다리지 않고 바로 429와 Retry-After:
-# 10이고, 가짜 서비스는 요청을 받지 않으며 감사 로그에도 남지 않는다(처리기가 바로 돌려보냈다). 가짜
+# 10이고, 가짜 서비스는 요청을 받지 않으며 감사 로그에도 남지 않는다(처리기가 바로 돌려보냈다). 검사의 차례는
+# 자리 → 세션이라, 자리가 없으면 세션이 있는지 보기 전에 429다(없는 세션 번호도 404가 아니라 429). 가짜
 # 서비스가 503 + Retry-After: 7로 답하면 429와 Retry-After: 7이고, 이것은 감사 로그에 남는다.
 def test_busy_is_429_with_retry_after(blank_service_engine, connect):
     service = FakeService(reply_ok)
@@ -866,6 +1136,7 @@ def test_busy_is_429_with_retry_after(blank_service_engine, connect):
         assert slots.acquire(blocking=False) and slots.acquire(blocking=False)
         try:
             full = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
+            unknown = web.post(SUMMARY_PATH.format("no-such-session"), json={"by": "김담당"}, headers=ADMIN)
         finally:
             slots.release()
             slots.release()
@@ -874,6 +1145,7 @@ def test_busy_is_429_with_retry_after(blank_service_engine, connect):
         busy = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
         audit = audit_of(web, session_id)
     assert full.status_code == 429 and full.headers["Retry-After"] == "10"
+    assert unknown.status_code == 429 and unknown.headers["Retry-After"] == "10"
     assert kinds_after_full[-1] == "agent_reply"
     assert busy.status_code == 429 and busy.headers["Retry-After"] == "7"
     assert busy.json() == {"detail": BUSY}
@@ -936,13 +1208,17 @@ def test_by_is_validated(blank_service_engine, connect):
 # 후처리 서비스를 기다리는 동안 세션 잠금과 DB 세션을 쥐지 않는다: 가짜 서비스가 답하기 전에 같은 세션에서
 # 고객의 다음 메시지 한 턴을 끝까지 돌린다(그 턴은 세션 잠금을 기다리지 않고 바로 잡으며 DB에 대화와 감사
 # 행을 쓴다). 잠금을 쥐고 있었다면 BusyError, DB 쓰기 트랜잭션을 쥐고 있었다면 쓰기가 막혀 이 시험이 깨진다.
+# 읽기만 하는 DB 세션도 연결 풀의 연결 하나를 쥐지만, SQLite에서는 다른 연결의 쓰기를 막지 않아 위 턴으로는
+# 잡히지 않는다. 그래서 후처리 서비스를 부르는 동안 연결 풀에서 꺼내 간 연결이 하나도 없는지도 직접 본다.
 def test_the_summary_call_holds_neither_the_session_lock_nor_a_database_session(
     blank_service_engine, connect
 ):
     shared: dict = {}
     nested_events: list[str] = []
+    checked_out: list[int] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
+        checked_out.append(blank_service_engine.pool.checkedout())
         shared["service"].handle(
             shared["session_id"], "하나 더 여쭤볼게요.", lambda event, data: nested_events.append(event)
         )
@@ -956,6 +1232,7 @@ def test_the_summary_call_holds_neither_the_session_lock_nor_a_database_session(
         answer_ = web.post(SUMMARY_PATH.format(session_id), json={"by": "김담당"}, headers=ADMIN)
         roles = [message["role"] for message in web.get(f"/api/sessions/{session_id}").json()["messages"]]
     assert answer_.status_code == 201
+    assert checked_out == [0]
     assert nested_events[-2:] == ["reply", "end"]
     assert roles == ["agent", "customer", "agent", "customer", "agent"]
 

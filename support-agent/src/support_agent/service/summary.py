@@ -26,13 +26,26 @@
 # 압축하지 않은 답을 청하고(Accept-Encoding: identity), Content-Encoding이 identity가 아닌 답은 읽지 않고
 # 502다.
 #
-# [시간] httpx의 시간 제한은 단계마다 따로 걸린다: 연결은 10초와 timeout_s 가운데 작은 값, 보내기와 응답
-# 기다리기(조각 하나를 읽는 사이)와 연결 풀 대기는 timeout_s다. 읽기 제한은 조각이 올 때마다 새로
+# [시간] httpx의 시간 제한은 단계마다 따로 걸린다: 연결은 10초와 timeout_s 가운데 작은 값, 보내기와 읽기 한
+# 번(응답 머리나 본문 조각 하나를 기다리는 사이)과 연결 풀 대기는 timeout_s다. 읽기 제한은 읽을 때마다 새로
 # 시작하므로 천천히 흘려보내는 답은 그것만으로 끊기지 않는다. 그래서 요청을 시작한 때부터 clock()으로 잰
-# 전체 시간이 timeout_s를 넘기면, 200 답의 머리를 받았을 때와 본문 조각을 받을 때마다 끊고 시간 초과(504)로
-# 본다. 이 확인은 머리나 조각이 도착할 때 하므로 그 사이에 멈춘 서버는 httpx의 제한이 끊는다. 그래서 한
-# 요청이 스레드를 쥐는 시간은 최악에 timeout_s의 약 두 배(와 연결 시간)다. 응답 머리를 받는 동안에는 이
-# 전체 상한을 볼 수 없어 단계별 제한만 걸린다(머리를 아주 천천히 흘리는 서버는 그보다 오래 붙잡을 수 있다).
+# 전체 시간이 timeout_s를 넘기면, 200 답의 머리를 받았을 때, 본문 조각을 받을 때마다, 본문을 다 받은 뒤에
+# 끊고 시간 초과(504)로 본다(다 받은 답도 상한을 넘겨 끝났으면 쓰지 않는다. 끝 조각 뒤에 따라오는 마무리
+# 부분(chunked 전송의 trailer)을 천천히 흘리는 서버도 여기서 걸린다). 이 확인은 머리나 조각이 도착한 뒤에
+# 하므로, 그 사이에 멈춘 서버는 httpx의 읽기 제한이 끊는다.
+# 전체 상한이 없는 곳: 응답 머리를 받는 동안(101이 아닌 1xx 임시 응답이 이어지는 동안 포함)에는 읽기 제한만
+# 걸린다. httpcore는 그런 임시 응답 뒤에 다음 응답을 다시 기다리는 고리를 돌기 때문에, 머리를 조금씩 계속
+# 흘리는 서버는 읽기 제한이 새로 시작되는 만큼 한 요청을 오래 붙잡을 수 있다. 소켓을 다른 스레드에서 끊어 이
+# 구간까지 막는 방법은 쓰지 않았다: httpcore 안쪽(trace 확장으로 소켓을 얻어 쓰는 것)에 기대야 해서 복잡하고
+# 깨지기 쉬운데, 이 길은 설정한 서비스가 고약할 때만 열리고 그 피해는 app.py의 자리 둘에 갇힌다(후처리 기록
+# 만들기만 429가 되고 다른 경로는 그대로다).
+#
+# [답의 꼴] 그쪽 서비스는 믿지 않는다. summarize가 돌려주는 다섯 칸은 이 서비스가 감사 로그에 그대로 저장하고
+# 응답과 관리자 대화 조회로 다시 내보낼 값인데, 감사 로그는 추가만 하고 지우는 길이 없다. 저장은 되지만 다시
+# 내보내는 직렬화가 실패하는 값(짝 없는 서로게이트, 너무 깊게 겹친 값)이 한 번 저장되면 그 세션의 관리자 대화
+# 조회가 계속 500이 된다. 그래서 받은 답의 꼴을 여기서 확인하고(_usable_slots: 다섯 칸의 형, 겹침 깊이,
+# JSON으로 다시 쓸 수 있는 값) 통과하지 못하면 502로 끝낸다. 칸의 내용은 해석하지 않고 그대로 남기며, 그것을
+# 화면에 그리는 쪽은 글로만 그린다(static/admin.js).
 #
 # [다시 보내지 않음] 한 번 부르고 끝이다. 후처리 서비스의 일은 모델 호출이라 무겁고, 그 서비스는 기록의
 # 형식이 틀리면 안에서 이미 한 번 다시 시도한다(응답의 attempts). 실패하면 사람이 다시 누르면 된다.
@@ -40,8 +53,9 @@
 # [상태 코드] SummaryError.status는 이 서비스가 그대로 답할 상태 코드다.
 # - 504: 시간 초과(httpx의 단계별 제한, 또는 위 전체 상한). 앞단이 제때 답하지 않은 게이트웨이의 뜻이다.
 # - 502: 그 밖의 전송 오류(연결 거절, 이름 풀기 실패, 답 도중 끊김), 200이 아닌 그 밖의 상태(3xx 포함),
-#   쓸 수 없는 200 답(JSON 객체가 아님, record가 객체가 아님, 압축함, MAX_REPLY_BYTES를 넘음). 앞단이
-#   잘못 답한 게이트웨이의 뜻이다.
+#   쓸 수 없는 200 답(JSON 객체가 아님, 압축함, MAX_REPLY_BYTES를 넘음, 다섯 칸 가운데 없거나 형이 틀린 것이
+#   있음, MAX_REPLY_DEPTH단보다 깊음, JSON으로 다시 쓸 수 없는 값이 있음). 앞단이 잘못 답한 게이트웨이의
+#   뜻이다.
 # - 422: 그쪽의 422(모르는 업종, 발화 꼴·제어문자)와 413(조립한 전사가 너무 김, 모델의 컨텍스트 초과),
 #   그리고 보내기 전에 잰 본문이 MAX_REQUEST_BYTES를 넘을 때. 같은 대화를 다시 보내도 결과가 같으므로 다시
 #   시도할 일이 아니고, 이 서비스로 온 요청이 큰 것이 아니라 그 대화가 그쪽 한도에 안 맞는 것이라 413이
@@ -78,6 +92,13 @@ DOMAIN = "shop"
 # 아래 MAX_REQUEST_BYTES). 정상 답은 모델이 컨텍스트 4,096토큰 안에서 쓴 기록 하나와 번호 확인 표시 몇
 # 개라 이보다 훨씬 작고, 넘는 답은 쓸 수 없는 답으로 본다(502).
 MAX_REPLY_BYTES = 1 << 20
+# 받아들이는 답의 겹침 깊이 상한. 다섯 칸을 담은 객체를 1단으로 세어 가장 깊은 객체·목록의 단 수다
+# (_nesting_depth). 이 서비스는 받은 값을 감사 로그에 그대로 저장하고 응답과 관리자 대화 조회로 다시 내보내는
+# 데, 그 JSON 직렬화(pydantic)는 객체·목록이 100단까지는 쓰지만 101단 겹치면 오류를 낸다(재 본 값이다). 한도
+# 없이 저장하면 깊은 답 하나로 그 세션의 관리자 조회가 계속 500이 된다. 정상 답은 4단 안쪽이다(다섯 칸을 담은
+# 객체 → record나 needs_confirmation → entities나 reasons 같은 목록 → 그 항목). 32는 그보다 훨씬 넉넉하면서,
+# 관리자 대화 조회가 값 위에 더하는 3단을 합쳐도 35단이라 직렬화가 멈추는 100단 근처에 한참 못 미친다.
+MAX_REPLY_DEPTH = 32
 # 보내는 요청 본문의 상한(바이트, 64 KiB). 후처리 서비스의 요청 본문 한도(call-summary의
 # MAX_BODY_BYTES)와 같은 값이다. 그 서비스는 Content-Length가 한도를 넘으면 본문을 읽기 전에 413으로
 # 답하므로, 큰 본문을 보내는 쪽은 그 413 대신 본문을 쓰는 도중의 전송 오류를 볼 수 있다(그러면 위 표에서
@@ -194,7 +215,9 @@ class SummaryClient:
         입력: ChatService.transcript의 messages. 보내는 본문은
             {"domain": DOMAIN, "turns": summary_turns(messages)}이고, 다시 보내지 않는다.
         출력: {"record", "needs_confirmation", "model", "attempts", "request_id"} — 그쪽 200 답의 그
-            칸들. record는 JSON 객체여야 하고, 다른 칸은 그쪽이 준 값 그대로이며 없으면 None이다.
+            칸들이고 값은 그쪽이 준 그대로다. 다섯 칸이 모두 있고 형이 맞으며(record는 객체,
+            needs_confirmation은 목록, model·request_id는 글, attempts는 정수) 겹침이 MAX_REPLY_DEPTH단
+            이하이고 JSON으로 다시 쓸 수 있는 값일 때만 돌려준다(파일 머리의 '답의 꼴').
         SummaryError: 보내지 못했거나 그쪽이 실패했거나 그 답을 쓸 수 없을 때(status는 파일 머리의
             '상태 코드').
         ValueError: 대화의 꼴이 틀렸거나(summary_turns) 글을 UTF-8로 쓸 수 없을 때(짝 없는
@@ -242,10 +265,14 @@ class SummaryClient:
             received += chunk
             if self._over_time(started):
                 raise SummaryError(504, _TIMED_OUT)
+        # 본문을 다 받은 뒤에도 한 번 더 본다: 끝 조각 뒤에 따라오는 마무리 부분을 받는 동안에도 시간이 간다.
+        if self._over_time(started):
+            raise SummaryError(504, _TIMED_OUT)
         reply = _json_object(bytes(received))
-        if reply is None or not isinstance(reply.get("record"), dict):
+        picked = None if reply is None else _usable_slots(reply)
+        if picked is None:
             raise SummaryError(502, _UNEXPECTED)
-        return {key: reply.get(key) for key in _RETURNED}
+        return picked
 
     # 요청을 시작한 때부터 잰 시간이 timeout_s를 넘었는가(같으면 넘지 않았다).
     def _over_time(self, started: float) -> bool:
@@ -275,6 +302,61 @@ def _declared_size(response: httpx.Response) -> int:
     if not (value.isascii() and value.isdigit()):
         return 0
     return int(value) if len(value) <= 20 else MAX_REPLY_BYTES + 1
+
+
+# 그쪽 답(JSON 객체)에서 돌려줄 다섯 칸을 골라, 이 서비스가 감사 로그에 저장하고 응답으로 다시 내보내도 안전한
+# 값이면 그 다섯 칸을, 아니면 None을 돌려준다(latency_s 같은 다른 칸은 버린다). 믿음의 경계는 이 클라이언트다:
+# 그쪽 서비스가 고장 났거나 그 주소를 다른 프로세스가 가로채도, 이 검사를 지난 값만 안쪽(저장, 응답, 관리
+# 화면)으로 들어간다. 칸의 내용은 해석하지 않고 꼴만 본다. 차례대로:
+# 1) 형: record는 객체, needs_confirmation은 목록, model·request_id는 글, attempts는 정수다. 후처리 서비스의
+#    응답 모델(call-summary의 SummarizeResponse)은 다섯 칸을 늘 이 형으로 낸다. 참·거짓은 정수로 치지 않는다
+#    (파이썬에서 bool은 int의 하위 형이라 isinstance만 보면 JSON의 true가 정수로 통과한다).
+# 2) 겹침 깊이: MAX_REPLY_DEPTH단 이하(그 상수의 주석). 3)보다 먼저 본다: 너무 깊은 값을 json.dumps에 먼저
+#    주면 그 검사가 RecursionError로 터진다.
+# 3) JSON으로 다시 쓸 수 있는 값: json.dumps(allow_nan=False)로 쓰고 UTF-8로 인코딩해 본다. NaN·Infinity는
+#    JSON 표준에 없는 값이다(json.loads는 1e999 같은 너무 큰 수도 inf로 읽는다). 짝 없는 서로게이트("\ud800",
+#    글 안이나 객체의 키에 있는 것)는 UTF-8로 쓸 수 없어 응답으로 내보내는 직렬화가 실패한다.
+#    ensure_ascii=False로 쓰는 것은 서로게이트가 이스케이프 글자로 숨지 않고 인코딩에서 걸리게 하려는 것이다.
+#    그런 값은 ValueError(인코딩 오류도 그 하위 형)로 걸린다. NUL(\u0000)이 든 글은 JSON으로 그대로 쓸 수
+#    있어 거절하지 않는다.
+def _usable_slots(reply: dict[str, Any]) -> dict[str, Any] | None:
+    picked = {key: reply.get(key) for key in _RETURNED}
+    attempts = picked["attempts"]
+    shaped = (
+        isinstance(picked["record"], dict)
+        and isinstance(picked["needs_confirmation"], list)
+        and isinstance(picked["model"], str)
+        and isinstance(attempts, int)
+        and not isinstance(attempts, bool)
+        and isinstance(picked["request_id"], str)
+    )
+    if not shaped or _nesting_depth(picked) > MAX_REPLY_DEPTH:
+        return None
+    try:
+        json.dumps(picked, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except ValueError:
+        return None
+    return picked
+
+
+# value의 겹침 깊이: 객체·목록 하나를 1단으로 세어 가장 깊은 곳의 단 수다(글·수·참거짓·null뿐이면 0, 빈 객체나
+# 빈 목록은 1). 재귀하지 않고 아직 세지 않은 객체·목록을 쌓아 두고 반복문으로 센다: 깊게 겹친 값이 이 검사
+# 자체를 RecursionError로 터뜨리지 않게 하려는 것이다(json.loads는 파이썬 재귀 한도 근처까지 깊은 값도
+# 읽는다).
+def _nesting_depth(value: Any) -> int:
+    deepest = 0
+    pending = [(value, 1)]  # (아직 세지 않은 값, 그 값이 놓인 단)
+    while pending:
+        item, level = pending.pop()
+        if isinstance(item, dict):
+            children = item.values()
+        elif isinstance(item, list):
+            children = item
+        else:
+            continue
+        deepest = max(deepest, level)
+        pending.extend((child, level + 1) for child in children if isinstance(child, dict | list))
+    return deepest
 
 
 # 받은 바이트를 JSON 객체로 읽는다. JSON이 아니거나(글로 풀 수 없는 바이트 포함) 객체가 아니면 None이다.
