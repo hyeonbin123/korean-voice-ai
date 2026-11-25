@@ -1,0 +1,50 @@
+# 같은 발화 인식 비교 도구(asr-compare)의 프로젝트 설정.
+#
+# 이 폴더는 저장소 루트와 따로 자기 환경(.venv)과 잠금(uv.lock)을 가진다. 저장소 루트에는 pyproject.toml과
+# uv.lock을 두지 않는다: 루트에서 올라가며 설정을 찾는 uv와 ruff가 구성 요소의 환경을 바꾸지 않게 하려는 것이다.
+# 이 도구는 구성 요소들이 이미 커밋해 둔 리포트 파일을 읽기만 하고 모델을 올리지도, 새로 디코딩하지도 않는다.
+# 그래서 실행 의존성이 없다(표준 라이브러리만 쓴다). torch 같은 모델 라이브러리도, 구성 요소가 채점에 쓰는
+# jiwer 같은 패키지도 이 환경에 들어 있지 않고, 구성 요소의 환경과 섞이지 않는다.
+
+[project]
+name = "asr-compare"
+version = "0.1.0"
+description = "Re-score the stored hypotheses of several Korean ASR systems on the same FLEURS test utterances with one scoring rule (no new decoding)"
+requires-python = ">=3.11"
+# 표준 라이브러리만 쓴다: 파일 읽기는 json·hashlib, 글자 단위 편집 거리와 다시 뽑기(부트스트랩)는 직접 짠 코드다.
+dependencies = []
+
+[project.scripts]
+# 명령줄 진입점: `asr-compare` 명령이 asr_compare.cli의 main을 부른다.
+asr-compare = "asr_compare.cli:main"
+
+[dependency-groups]
+# 시험과 린트. uv sync는 dev 그룹을 기본으로 함께 설치한다.
+dev = ["pytest>=8.2", "ruff>=0.6"]
+
+[tool.uv]
+# 이 폴더를 다룰 uv의 가장 낮은 판. uv.lock을 만든 판(0.13.1)보다 낮은 uv가 잠금 파일을 읽거나 다시 쓰지
+# 못하게 한다. 하한만 둔다: `~=0.13.1`처럼 위를 막으면 개발 PC의 uv를 올리는 순간 이 폴더의 모든 uv 명령이
+# 멈춘다.
+required-version = ">=0.13.1"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# src 배치: 설치되는 패키지는 src/asr_compare다. 이 폴더에 .py 파일이 하나도 없는 채로 uv sync를 하면 편집 가능
+# 설치가 비어 버려 `--no-sync` 실행이 asr_compare를 찾지 못한다(나중에 파일을 만들어도 그대로이고
+# `uv sync --reinstall-package asr-compare`를 해야 고쳐진다). 그래서 __init__.py를 가장 먼저 둔다.
+packages = ["src/asr_compare"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# 구성 요소들과 같은 기준: 줄 길이 110, 파이썬 3.11, 규칙 E·F·I·UP·B.
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
