@@ -25,11 +25,12 @@ support-agent와 call-summary에는 모델 없이 도는 오프라인 앱이 있
 3. 상담 에이전트: 받아 적은 고객의 말에 도구를 호출해 업무를 처리하고 답한다. support-agent가 맡는다.
 4. 상담 후처리: 끝난 통화의 전사를 요약, 문의 유형, 처리 결과를 담은 기록(JSON)으로 바꾼다. call-summary가 맡는다.
 
-이 순서는 개념이고, 다섯 구성 요소를 처음부터 끝까지 이은 하나의 서버나 프로그램은 없다. 이 저장소에서 구성 요소 사이를 실제 코드로 잇는 곳은 둘이다.
+이 순서는 개념이고, 다섯 구성 요소를 처음부터 끝까지 이은 하나의 서버나 프로그램은 없다. 이 저장소에서 구성 요소 사이를 실제 코드로 잇는 곳은 셋이다.
 
 - 통화 한 건 배선 시연(`e2e/`): support-agent의 오프라인 앱에 고객 발화를 HTTP로 보내고, 관리 API(`GET /api/admin/sessions/{id}`)로 읽은 대화를 call-summary의 오프라인 앱 `POST /summarize`에 넘겨 상담 후처리 기록을 받는다. 두 앱이 모델 없이 도는 오프라인 판이라 GPU가 필요 없다. call-summary 쪽이 늘 같은 기록을 돌려주므로 요약 품질을 재는 것이 아니라 두 서비스가 이어지는지만 보는 시연이다.
   - 흐름·HTTP 계약·실행 명령은 [`e2e/README.md`](../e2e/README.md)에, 두 앱을 실제로 띄워 돌린 결과는 [예시 리포트](../e2e/examples/shop-cancel/call-report.md)에 있다.
 - 아래 [구성 요소 사이 의존](#구성-요소-사이-의존)의 파일 의존 네 군데.
+- 같은 발화 인식 비교(`evaluation/asr/`): whisper-ko-ft, stt-scratch, voice-translator가 커밋해 둔 발화별 가설(리포트 파일)을 `evaluation/asr/`의 명령줄 도구가 같은 발화끼리 짝지어 한 가지 규칙으로 다시 채점한다. 구성 요소의 코드는 가져다 쓰지 않고 파일만 읽으며, 새로 디코딩하지 않아 GPU가 필요 없다. 규칙과 결과는 [`docs/asr-comparison.md`](asr-comparison.md)에, 쓰는 법은 [`evaluation/asr/README.md`](../evaluation/asr/README.md)에 있다.
 
 ## 구성 요소 사이 의존
 
@@ -56,4 +57,4 @@ uv run --no-project tools/check_cross_deps.py --local    # 가상환경과 모�
 ## 코드로 잇지 않은 관계
 
 - voice-translator에서 support-agent로 이어진 설계 계보. support-agent의 음성 계층이 쓰는 MeloTTS는 voice-translator에서 합성한 음성을 다시 인식한 오류를 재서 한국어용으로 고른 것이고, Windows에서 MeloTTS를 불러오기 전에 필요한 우회 세 가지도 voice-translator에서 가져왔다. support-agent는 voice-translator의 코드를 부르지 않는다. 근거는 support-agent의 [`speech.py` 4행](../support-agent/src/support_agent/voice/speech.py#L4)과 [174행](../support-agent/src/support_agent/voice/speech.py#L174), [`experiments.md` 344행](../support-agent/docs/experiments.md#L344)이다.
-- stt-scratch와 whisper-ko-ft의 같은 채점 정규화. stt-scratch의 주지표 CER_ns는 whisper-ko-ft와 같은 규칙으로 정규화해 재서 두 구성 요소의 수치를 나란히 놓을 수 있다. 규칙은 stt-scratch가 [`text.py`의 `normalize_score`](../stt-scratch/src/stt_scratch/text.py#L68)에 따로 구현했고 whisper-ko-ft의 코드를 가져다 쓰지 않는다. 두 수치를 견주는 문장은 stt-scratch의 [README 25행](../stt-scratch/README.md#L25)에 있다.
+- stt-scratch와 whisper-ko-ft의 같은 채점 정규화. stt-scratch의 주지표 CER_ns는 whisper-ko-ft와 같은 규칙으로 정규화해 재서 두 구성 요소의 수치를 나란히 놓을 수 있다. 규칙은 stt-scratch가 [`text.py`의 `normalize_score`](../stt-scratch/src/stt_scratch/text.py#L68)에 따로 구현했고 whisper-ko-ft의 코드를 가져다 쓰지 않는다. 두 수치를 견주는 문장은 stt-scratch의 [README 25행](../stt-scratch/README.md#L25)에 있다. 세 구성 요소(whisper-ko-ft, stt-scratch, voice-translator)의 정규화 규칙(정규식)이 글자까지 같은지는 [`evaluation/asr`의 시험](../evaluation/asr/tests/test_scoring_rule.py)이 본다.

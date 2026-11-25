@@ -17,7 +17,7 @@
 - '로컬 환경에 더하는 그룹'은 학습·측정·서비스를 로컬에서 돌릴 때 `uv sync --frozen` 뒤에 `--group <이름>`으로 붙이는 의존성 그룹이다. 시험·린트 도구(pytest, ruff 등)를 담은 `dev`는 uv가 따로 붙이지 않아도 설치하는 기본 그룹이라 이 열에 적지 않았다. voice-translator 백엔드의 `eval`과 `tts`는 함께 설치할 수 없다(아래).
 - 기본 포트는 compose 파일이나 명령줄 옵션의 기본값이다. voice-translator와 support-agent의 compose는 환경 변수로 호스트 포트를 바꿀 수 있다.
 - voice-translator와 call-summary의 compose 파일에는 프로젝트 `name`이 없어, compose 프로젝트 이름이 그 폴더 이름이 된다. 같은 이름의 폴더에서 compose를 돌리면 같은 프로젝트로 묶인다.
-- 통화 한 건 시연(`e2e/`)도 자기 `pyproject.toml`과 `uv.lock`을 가진다. 설치와 실행은 [`e2e/README.md`](../e2e/README.md)에 있다.
+- 통화 한 건 시연(`e2e/`)과 같은 발화 인식 비교 도구(`evaluation/asr/`)도 각자 자기 `pyproject.toml`과 `uv.lock`을 가진다. 설치와 실행은 [`e2e/README.md`](../e2e/README.md)와 [`evaluation/asr/README.md`](../evaluation/asr/README.md)에 있다.
 
 ## 하나의 잠금으로 묶지 않는 이유
 

@@ -87,4 +87,4 @@ git clone -c core.autocrlf=false https://github.com/hyeonbin123/korean-voice-ai
 
 ## 문서
 
-[구조와 연결](docs/architecture.md) · [측정 원칙](docs/measurement.md) · [모델 선택](docs/model-choices.md) · [환경](docs/environments.md) · [이력](docs/history.md) · [고지 모음](docs/notices.md)(저장소 자체의 `LICENSE` 파일은 아직 없다)
+[구조와 연결](docs/architecture.md) · [측정 원칙](docs/measurement.md) · [같은 발화 인식 비교](docs/asr-comparison.md) · [모델 선택](docs/model-choices.md) · [환경](docs/environments.md) · [이력](docs/history.md) · [고지 모음](docs/notices.md)(저장소 자체의 `LICENSE` 파일은 아직 없다)
