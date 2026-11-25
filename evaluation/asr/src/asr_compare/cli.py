@@ -9,7 +9,10 @@
             `<sha256>  <저장소 뿌리 기준 경로>` 한 줄을 경로 순으로 찍고 0으로 끝난다(재료 고정 목록의 내용).
     run     시작할 때 재료가 고정 목록과 같은지 견주고(아래 '재료 고정'), 같으면 check와 같은 관문(검증과
             기록값 재현)을 지나, 통과하면 채점해서 `--out` 폴더에 결과 파일 둘(`fleurs-ko-test.json`,
-            `fleurs-ko-test.md`)을 쓴다. 어느 쪽에서든 걸리면 줄을 찍고 아무 파일도 만들지 않는다.
+            `fleurs-ko-test.md`)을 쓴다. 어느 쪽에서든 걸리면 줄을 찍고 아무 파일도 만들지 않는다. 쓸 파일이
+            읽은 재료와 같은 파일이면(`--out`을 재료가 든 폴더로 준 경우다. whisper-ko-ft의 재료도 이름이
+            `fleurs-ko-test.json`이다) 쓰기 전에 표준 오류에 한 줄을 찍고 2로 멈춘다. 둘 가운데 하나만
+            겹쳐도 둘 다 쓰지 않는다.
     verify  run과 같이 고정 목록과 견주고 같은 관문을 지난 뒤, 저장소의 `evaluation/asr/results/` 아래 결과
             파일 둘이 지금 재료에서 다시 만든 글과 글자까지 같은지 견준다. 재료나 관문에 걸리면 견주지 않는다.
             결과 파일의 줄 끝이 CRLF여도(줄바꿈 변환을 켠 채 받은 복제본) LF로 보고 견준다.
@@ -32,8 +35,9 @@
 종료 코드
     0 = 통과, 1 = 어긋남(재료가 고정 목록과 다르거나 검증에 걸렸거나 기록값이 재현되지 않았거나 결과 파일이
     다시 만든 것과 다름), 2 = 읽지 못함(재료·결과 파일·고정 목록이 없거나 형식이 틀림, 저장소 폴더가 아님,
-    결과를 쓰지 못함)이거나 잘못된 사용. 읽기 오류(`SourceError`)와 위 경우만 잡고, 그 밖의 예외는 잡지
-    않는다: 버그는 흔적(추적 출력)과 함께 실패해야 하고, 실패했는데 0으로 끝나는 길이 없어야 한다.
+    결과를 쓰지 못함, 쓸 결과 파일이 읽은 재료와 같은 파일임)이거나 잘못된 사용. 읽기 오류(`SourceError`)와
+    위 경우만 잡고, 그 밖의 예외는 잡지 않는다: 버그는 흔적(추적 출력)과 함께 실패해야 하고, 실패했는데
+    0으로 끝나는 길이 없어야 한다.
 
 출력
     표준 출력·오류는 시작할 때 UTF-8과 LF 줄 끝으로 다시 연다(한국어 Windows의 파이썬은 파이프나 파일로 나가는
@@ -46,6 +50,7 @@
 
 import argparse
 import itertools
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -101,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
             "종료 코드: 0 = 통과, "
             "1 = 어긋남(짝짓기 검증에 걸렸거나 기록값이 재현되지 않았거나 결과 파일이 다시 만든 것과 다름), "
             "2 = 읽지 못함(재료나 결과 파일이 없거나 형식이 틀림, 저장소 폴더가 아님, "
-            "결과를 쓰지 못함)이거나 잘못된 사용."
+            "결과를 쓰지 못함, 쓸 결과 파일이 읽은 재료와 같은 파일임)이거나 잘못된 사용."
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="{check,run,verify}")
@@ -137,7 +142,9 @@ def build_parser() -> argparse.ArgumentParser:
             "다르면 다른 재료마다 한 줄을 찍고 종료 코드 1로 멈춥니다(고정 목록이 없거나 꼴이 틀리면 2). "
             "같으면 check와 같은 관문(짝짓기 검증과 기록값 재현)을 지나고, 통과하면 채점해서 --out 폴더에 "
             "fleurs-ko-test.json과 fleurs-ko-test.md를 씁니다. "
-            "어느 쪽이든 걸리면 줄을 찍고 아무 파일도 만들지 않습니다."
+            "어느 쪽이든 걸리면 줄을 찍고 아무 파일도 만들지 않습니다. "
+            "쓸 파일이 읽은 재료와 같은 파일이면(--out을 재료가 든 폴더로 준 경우) "
+            "쓰기 전에 한 줄을 찍고 종료 코드 2로 멈춥니다."
         ),
     )
     run.add_argument("--repo", type=Path, default=DEFAULT_REPO, help=repo_help)
@@ -145,7 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--out",
         required=True,
         type=Path,
-        help="결과 파일을 쓸 폴더(작업 폴더 기준 상대 경로 가능; 없으면 부모까지 만듦)",
+        help=(
+            "결과 파일을 쓸 폴더(작업 폴더 기준 상대 경로 가능; 없으면 부모까지 만듦). "
+            "쓸 파일이 읽은 재료와 같은 파일이 되는 폴더는 거절합니다"
+        ),
     )
     run.set_defaults(handler=_run)
 
@@ -221,9 +231,8 @@ def _read_pinned(repo: Path) -> dict[str, str]:
 
     줄 끝의 CRLF는 LF로 보고 읽는다(줄바꿈 변환을 켠 채 받은 복제본). 이 파일은 `check --print-inputs`의 출력
     그대로여야 해서 엄격하게 읽는다: UTF-8이 아니거나 BOM이 붙었거나, 줄이 `<sha256>  <경로>`(소문자 16진수
-                                                                                      64자,
-    공백 둘)가 아니거나, 빈 줄이 끼었거나, 같은 경로가 두 번 나오거나, 적힌 재료가 하나도 없으면 읽지 못한
-    것이다. 값이 재료와 맞는지는 여기서 보지 않는다(`_changed_inputs`).
+    64자, 공백 둘)가 아니거나, 빈 줄이 끼었거나, 같은 경로가 두 번 나오거나, 적힌 재료가 하나도 없으면 읽지
+    못한 것이다. 값이 재료와 맞는지는 여기서 보지 않는다(`_changed_inputs`).
     """
     name = PINNED_INPUTS.as_posix()
     try:
@@ -281,6 +290,32 @@ def _changed_inputs(loaded: sources.Loaded, pinned: dict[str, str]) -> bool:
     return bool(lines)
 
 
+def _place(path: Path) -> str:
+    """파일의 자리를 서로 견줄 수 있는 글자열로 풀어낸다: 심볼릭 링크와 `..`를 풀고 절대 경로로 만든다.
+
+    윈도우에서는 대소문자도 맞춘다(`os.path.normcase`). `os.path.realpath`는 엄격하지 않은 기본 모드에서 풀 수
+    있는 데까지만 풀고 나머지는 그대로 붙이므로, 아직 없는 파일(쓸 결과 파일)의 자리도 오류 없이 풀린다.
+    """
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _overwritten_input(repo: Path, loaded: sources.Loaded, targets: list[Path]) -> str | None:
+    """쓸 파일 가운데 읽은 재료와 같은 파일이 있으면 그 재료의 경로(뿌리 기준)를, 없으면 None을 돌려준다.
+
+    `run`의 `--out`을 whisper-ko-ft의 리포트가 든 폴더(`whisper-ko-ft/reports/<묶음>`)로 주면, 쓸 결과
+    파일 `fleurs-ko-test.json`이 같은 이름의 재료 파일과 같은 파일이 되어 재료를 결과로 덮어쓴다. 폴더를
+    어떻게 적었는지(절대 경로, `..`가 낀 경로, 작업 폴더 기준 상대 경로, 심볼릭 링크)와 상관없이 풀어낸
+    자리로 견주므로 같은 파일이면 걸린다. 같은 파일이 아닌 한, 재료가 든 폴더나 저장소 안의 폴더에 쓰는
+    것은 막지 않는다.
+    """
+    inputs = {_place(repo / path): path for path, _ in loaded.inputs}
+    for target in targets:
+        place = _place(target)
+        if place in inputs:
+            return inputs[place]
+    return None
+
+
 def _check(args: argparse.Namespace) -> int:
     loaded = sources.load_repository(args.repo)
     if args.print_inputs:
@@ -310,13 +345,20 @@ def _run(args: argparse.Namespace) -> int:
         report.RESULT_JSON: report.render_json(result),
         report.RESULT_MARKDOWN: report.render_markdown(result),
     }
+    paths = [args.out / name for name in texts]
+    # 쓰기 전에, 쓸 파일이 읽은 재료와 같은 파일이 아닌지 본다. 같으면 재료를 결과로 덮어쓰게 되므로 폴더도
+    # 만들지 않고 아무것도 쓰지 않는다(둘 가운데 하나만 겹쳐도 둘 다 쓰지 않는다).
+    overwritten = _overwritten_input(args.repo, loaded, paths)
+    if overwritten is not None:
+        print(
+            f"결과 파일이 읽은 재료를 덮어쓰게 된다(다른 --out 폴더를 줘야 한다): {overwritten}",
+            file=sys.stderr,
+        )
+        return 2
     try:
         args.out.mkdir(parents=True, exist_ok=True)
-        paths = []
-        for name, text in texts.items():
-            path = args.out / name
+        for path, text in zip(paths, texts.values(), strict=True):
             path.write_text(text, encoding="utf-8", newline="\n")
-            paths.append(path)
     except OSError as error:
         print(
             f"결과 파일을 쓰지 못했다({error.strerror or type(error).__name__}): {args.out.as_posix()}",

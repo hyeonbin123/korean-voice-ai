@@ -27,7 +27,7 @@ def test_the_pattern_is_the_shared_scoring_rule():
         # 영어 축약형의 작은따옴표, 숫자와 단위, 쉼표·느낌표가 모두 사라지고 소문자가 된다.
         ("It's 15m, OK!", "its15mok"),
         # 한국어에서 작은따옴표는 인용 부호라 공백이 되고, 공백은 모두 지운다.
-        ("다리 밑 '수직' 간격", "다리밑수직간격"),
+        ("책상 위 '빨간' 연필", "책상위빨간연필"),
         ("ABC가", "abc가"),
         ("15,000원", "15000원"),
         # 밑줄은 \w에 들지만 따로 공백으로 바꾼다.
@@ -55,7 +55,7 @@ def test_normalize_does_not_compose_hangul():
     assert score.normalize(composed) == composed
 
 
-@pytest.mark.parametrize("text", ["It's 15m, OK!", "다리 밑 '수직' 간격", "a_b  c'd", "Córdoba."])
+@pytest.mark.parametrize("text", ["It's 15m, OK!", "책상 위 '빨간' 연필", "a_b  c'd", "Córdoba."])
 def test_normalize_is_idempotent(text):
     once = score.normalize(text)
     assert score.normalize(once) == once

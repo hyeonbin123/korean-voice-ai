@@ -12,6 +12,13 @@
     전체 글자 오류율은 2/16 = 0.125와 4/16 = 0.25, 차이는 -0.125다. 앞이 적은 발화는 행 0과 2, 많은 발화는
     행 1, 같은 발화는 행 3이다. 한글 전용은 행 0과 2이고, 거기서는 편집 수가 0, 0 대 1, 2라서 0.0 대 0.375,
     차이는 -0.375이며 앞이 적은 발화 둘이다.
+
+정답 글자 수가 행마다 다른 고정물(`UNEVEN_*`, 다섯 행)
+    위 고정물은 글자 수가 모든 행에서 같아서, 구간의 분모(다시 뽑기마다 뽑힌 발화의 글자 수 합)를 고정하지
+    못한다. 이 고정물의 정규화한 정답 글자 수는 6, 2, 7, 3, 8(합 26)이다. 공통 정답 묶음의 편집 수는 0, 1, 2,
+    0, 2(합 5), 다른 묶음은 1, 0, 2, 1, 4(합 8)다. 한글 전용은 행 0, 2, 3(글자 수 6, 7, 3으로 합 16, 편집 수
+    0, 2, 0 대 1, 2, 1)이고 행 1과 4에는 라틴 문자나 숫자가 있다. 앞이 적은 발화는 행 0, 3, 4, 많은 발화는
+    행 1, 같은 발화는 행 2이고, 한글 전용에서는 적은 발화가 행 0과 3, 같은 발화가 행 2다.
 """
 
 import json
@@ -194,6 +201,95 @@ def test_the_default_pairs_are_the_three_named_comparisons():
         ("vad", "voice-turbo", "voice-turbo-vad"),
         ("both", "whisper-large-v3-turbo", "voice-turbo-vad"),
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# build: 정답 글자 수가 행마다 다르다
+# ---------------------------------------------------------------------------------------------
+
+# 위의 고정물은 정규화한 정답 글자 수가 모든 행에서 4라서, 다시 뽑기마다 '뽑힌 발화의 글자 수 합'으로 나누는
+# 것과 '범위 전체의 글자 수 합'으로 나누는 것이 같은 값이다. 한글 전용 범위의 글자 수를 행 번호가 아니라
+# 목록의 위치로 잡아도 같다. 실제 재료는 글자 수가 행마다 다르므로, 두 가지를 가르는 고정물을 따로 둔다.
+UNEVEN_REFERENCES = ["가나다라마바", "Ab", "다라마바사아자", "차카타", "타파하 3 나다라마"]
+UNEVEN_LENGTHS = [6, 2, 7, 3, 8]
+UNEVEN_HANGUL = (True, False, True, True, False)
+UNEVEN_HANGUL_ROWS = (0, 2, 3)
+# 가설은 정답의 끝 글자를 지운 것이라, 지운 글자 수가 곧 편집 수다. 행 1은 "ab"에서 "b"를 지웠다.
+UNEVEN_COMMON_HYPOTHESES = ["가나다라마바", "A", "다라마바사", "차카타", "타파하 3 나다"]
+UNEVEN_COMMON_EDITS = [0, 1, 2, 0, 2]
+UNEVEN_OTHER_HYPOTHESES = ["가나다라마", "ab", "다라마바사", "차카", "타파하 3"]
+UNEVEN_OTHER_EDITS = [1, 0, 2, 1, 4]
+
+
+def build_uneven() -> dict:
+    systems = [
+        system(COMMON, "whisper-ko-ft", UNEVEN_REFERENCES, UNEVEN_COMMON_HYPOTHESES),
+        system(OTHER, "voice-translator", UNEVEN_REFERENCES, UNEVEN_OTHER_HYPOTHESES),
+    ]
+    return build_small(systems, hangul=UNEVEN_HANGUL)
+
+
+def test_build_counts_by_hand_when_the_reference_lengths_differ():
+    result = build_uneven()
+    common, other = result["systems"]
+    assert (common["all"]["edits"], common["all"]["length"], common["all"]["cer"]) == (5, 26, 5 / 26)
+    assert (other["all"]["edits"], other["all"]["length"], other["all"]["cer"]) == (8, 26, 8 / 26)
+    keys = ("edits", "length", "cer")
+    assert tuple(common["hangul_only"][key] for key in keys) == (2, 16, 2 / 16)
+    assert tuple(other["hangul_only"][key] for key in keys) == (4, 16, 4 / 16)
+    pair = result["pairs"][0]
+    assert pair["all"]["difference"] == 5 / 26 - 8 / 26
+    assert (pair["all"]["fewer_edits"], pair["all"]["more_edits"], pair["all"]["same"]) == (3, 1, 1)
+    assert pair["hangul_only"]["difference"] == 2 / 16 - 4 / 16
+    hangul_pair = pair["hangul_only"]
+    assert (hangul_pair["fewer_edits"], hangul_pair["more_edits"], hangul_pair["same"]) == (2, 0, 1)
+
+
+def test_intervals_divide_by_the_lengths_of_the_drawn_utterances():
+    # 구간의 값 하나는 (뽑힌 발화의 편집 수 합) ÷ (뽑힌 발화의 정답 글자 수 합)이다. 글자 수가 행마다 다르면
+    # 나누는 수가 다시 뽑기마다 달라진다. 같은 다시 뽑기 번호로 따로 계산해 견준다.
+    result = build_uneven()
+    common, other = result["systems"]
+    pair = result["pairs"][0]
+    scopes = {
+        "all": (score.resample_indices(5), UNEVEN_LENGTHS, UNEVEN_COMMON_EDITS, UNEVEN_OTHER_EDITS),
+        # 한글 전용: 행 0, 2, 3을 행 번호 순으로 늘어놓은 목록의 위치를 뽑는다.
+        # 글자 수는 그 행의 것이다(6, 7, 3).
+        "hangul_only": (
+            score.resample_indices(3),
+            [UNEVEN_LENGTHS[row] for row in UNEVEN_HANGUL_ROWS],
+            [UNEVEN_COMMON_EDITS[row] for row in UNEVEN_HANGUL_ROWS],
+            [UNEVEN_OTHER_EDITS[row] for row in UNEVEN_HANGUL_ROWS],
+        ),
+    }
+    for scope, (indices, lengths, common_edits, other_edits) in scopes.items():
+        common_ratios = resampled_ratios(common_edits, lengths, indices)
+        other_ratios = resampled_ratios(other_edits, lengths, indices)
+        assert common[scope]["interval"] == list(score.interval(common_ratios)), scope
+        assert other[scope]["interval"] == list(score.interval(other_ratios)), scope
+        differences = [a - b for a, b in zip(common_ratios, other_ratios, strict=True)]
+        assert pair[scope]["interval"] == list(score.interval(differences)), scope
+
+
+def test_the_uneven_fixture_tells_the_wrong_denominators_apart():
+    # 위 시험이 아무것도 고정하지 못하는 일이 없게, 이 고정물에서 틀린 분모가 다른 구간을 낸다는 것을
+    # 확인한다. 틀린 식은 둘이다: 뽑힌 발화가 아니라 범위 전체의 글자 수 합으로 나눈다, 한글 전용의 글자 수를
+    # 행 번호가 아니라 목록의 위치(행 0, 1, 2의 것)로 잡는다.
+    hangul_lengths = [UNEVEN_LENGTHS[row] for row in UNEVEN_HANGUL_ROWS]
+    assert sum(UNEVEN_LENGTHS[: len(hangul_lengths)]) != sum(hangul_lengths)
+    all_indices = score.resample_indices(5)
+    right = resampled_ratios(UNEVEN_COMMON_EDITS, UNEVEN_LENGTHS, all_indices)
+    by_total = [
+        sum(UNEVEN_COMMON_EDITS[i] for i in resample) / sum(UNEVEN_LENGTHS) for resample in all_indices
+    ]
+    assert score.interval(by_total) != score.interval(right)
+    hangul_edits = [UNEVEN_COMMON_EDITS[row] for row in UNEVEN_HANGUL_ROWS]
+    hangul_indices = score.resample_indices(3)
+    right = resampled_ratios(hangul_edits, hangul_lengths, hangul_indices)
+    by_total = [sum(hangul_edits[i] for i in resample) / sum(hangul_lengths) for resample in hangul_indices]
+    by_position = resampled_ratios(hangul_edits, UNEVEN_LENGTHS[: len(hangul_lengths)], hangul_indices)
+    assert score.interval(by_total) != score.interval(right)
+    assert score.interval(by_position) != score.interval(right)
 
 
 # ---------------------------------------------------------------------------------------------

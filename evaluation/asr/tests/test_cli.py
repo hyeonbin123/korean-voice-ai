@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from asr_compare import cli, recorded, sources
+from asr_compare import cli, recorded, report, sources
 
 JSON_NAME = "fleurs-ko-test.json"
 MARKDOWN_NAME = "fleurs-ko-test.md"
@@ -780,6 +780,82 @@ def test_run_reports_an_output_path_that_cannot_be_written(capsys, full_reposito
     assert out.splitlines()[0] == FINAL_LINE
 
 
+OVERWRITTEN_MATERIAL = "whisper-ko-ft/reports/turbo-n/fleurs-ko-test.json"
+OVERWRITE_REFUSAL = (
+    f"결과 파일이 읽은 재료를 덮어쓰게 된다(다른 --out 폴더를 줘야 한다): {OVERWRITTEN_MATERIAL}"
+)
+
+
+@pytest.mark.parametrize("how", ["absolute", "with-dot-dot", "relative"])
+def test_run_refuses_to_overwrite_an_input_file(capsys, full_repository, copy_repository, monkeypatch, how):
+    # whisper-ko-ft의 재료 파일도 이름이 `fleurs-ko-test.json`이라서, `--out`을 재료가 든 폴더로 주면 결과
+    # 파일이 재료를 덮어쓰게 된다. 쓰기 전에 알아채고 아무것도 쓰지 않는다(재료의 바이트도, 둘째 결과 파일도
+    # 그대로다). 같은 폴더를 어떻게 적어도 풀어낸 경로로 견주므로 걸린다: 절대 경로, `..`가 낀 경로, 작업
+    # 폴더 기준 상대 경로.
+    root = copy_repository(full_repository)
+    reports = root / "whisper-ko-ft" / "reports"
+    given = {
+        "absolute": str(reports / "turbo-n"),
+        "with-dot-dot": str(reports / "small-a" / ".." / "turbo-n"),
+        "relative": "whisper-ko-ft/reports/turbo-n",
+    }[how]
+    monkeypatch.chdir(root)
+    before = snapshot(root)
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", given)
+    assert code == 2
+    assert err.splitlines() == [OVERWRITE_REFUSAL]
+    # 관문은 통과했으므로 요약 줄은 나오지만 `쓴 파일:` 줄은 없다.
+    assert out == FINAL_LINE + "\n"
+    assert snapshot(root) == before
+
+
+def test_run_refuses_when_only_one_of_the_two_result_files_would_overwrite_an_input(
+    capsys, full_repository, copy_repository, monkeypatch
+):
+    # 둘 가운데 하나만 재료와 겹쳐도 둘 다 쓰지 않는다. 실제 이름으로는 재료와 겹칠 수 있는 것이 JSON뿐이라,
+    # 결과 파일의 이름을 바꿔 둘째 파일만 겹치게 한다(첫째 파일이 먼저 쓰이지 않아야 한다).
+    root = copy_repository(full_repository)
+    monkeypatch.setattr(report, "RESULT_JSON", "first.json")
+    monkeypatch.setattr(report, "RESULT_MARKDOWN", "fleurs-ko-test.json")
+    before = snapshot(root)
+    folder = root / "whisper-ko-ft" / "reports" / "turbo-n"
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(folder))
+    assert code == 2
+    assert err.splitlines() == [OVERWRITE_REFUSAL]
+    assert snapshot(root) == before
+
+
+def test_run_writes_next_to_inputs_without_overwriting_them(capsys, full_repository, copy_repository):
+    # 재료가 든 폴더라고 해서 거절하지는 않는다. 쓸 파일이 재료와 같은 파일일 때만 거절한다.
+    root = copy_repository(full_repository)
+    before = snapshot(root)
+    code, _, err = invoke(
+        capsys, "run", "--repo", str(root), "--out", str(root / "stt-scratch" / "reports" / "final")
+    )
+    assert (code, err) == (0, "")
+    after = snapshot(root)
+    assert sorted(set(after) - set(before)) == [
+        f"stt-scratch/reports/final/{JSON_NAME}",
+        f"stt-scratch/reports/final/{MARKDOWN_NAME}",
+    ]
+    assert {path: after[path] for path in before} == before
+
+
+def test_run_can_write_the_results_folder_of_the_repository_that_verify_reads(
+    capsys, full_repository, copy_repository, monkeypatch
+):
+    # 쓰는 법의 흐름 그대로다: `evaluation/asr`에서 `run --out results`를 하면 저장소 안의 결과 폴더가
+    # 채워지고, 이어서 `verify`가 통과한다. 저장소 안이라고 거절하지 않는다.
+    root = copy_repository(full_repository)
+    monkeypatch.chdir(root / "evaluation" / "asr")
+    code, _, err = invoke(capsys, "run", "--repo", str(root), "--out", "results")
+    assert (code, err) == (0, "")
+    assert sorted(path.name for path in results_folder(root).iterdir()) == [JSON_NAME, MARKDOWN_NAME]
+    code, out, err = invoke(capsys, "verify", "--repo", str(root))
+    assert (code, err) == (0, "")
+    assert "같다" in out
+
+
 # ---------------------------------------------------------------------------------------------
 # 처음부터 끝까지, verify
 # ---------------------------------------------------------------------------------------------
@@ -848,6 +924,42 @@ def test_verify_does_not_ignore_a_byte_order_mark_in_a_result_file(
     code, out, err = invoke(capsys, "verify", "--repo", str(root))
     assert (code, err) == (1, "")
     assert out.splitlines() == [f"{JSON_NAME}: 1번째 줄부터 다르다"]
+
+
+@pytest.mark.parametrize("name", [JSON_NAME, MARKDOWN_NAME])
+def test_verify_with_a_result_file_that_is_not_utf8_is_an_error(
+    capsys, full_repository, full_results, copy_repository, name
+):
+    # 결과 파일을 읽지 못했는데 통과로 끝나면 안 된다. UTF-8로 풀 수 없는 바이트는 2로 알리고, 어느 파일인지와
+    # 오류의 종류를 표준 오류에 한 줄로 쓴다. 표준 출력에는 아무것도 없다(같다는 줄도 없다).
+    out_dir, _ = full_results
+    root = copy_repository(full_repository)
+    folder = put_results(root, out_dir)
+    (folder / name).write_bytes(b"\xff\xfe\x00broken")
+    code, out, err = invoke(capsys, "verify", "--repo", str(root))
+    assert (code, out) == (2, "")
+    assert err.splitlines() == [f"결과 파일을 읽지 못했다: {name} (UnicodeDecodeError)"]
+
+
+def test_verify_with_a_result_file_that_cannot_be_read_is_an_error(
+    capsys, full_repository, full_results, copy_repository, monkeypatch
+):
+    # 파일은 있는데 읽기가 운영체제 오류로 끝나는 경우(읽을 권한이 없는 파일 따위)다. 시험에서 그런 파일을
+    # 만들기 어려워서, 결과 파일 하나를 읽을 때만 PermissionError가 나게 한다. 재료를 읽는 일은 그대로 둔다.
+    out_dir, _ = full_results
+    root = copy_repository(full_repository)
+    unreadable = put_results(root, out_dir) / JSON_NAME
+    read_bytes = Path.read_bytes
+
+    def read_or_fail(self):
+        if self == unreadable:
+            raise PermissionError(13, "Permission denied")
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_or_fail)
+    code, out, err = invoke(capsys, "verify", "--repo", str(root))
+    assert (code, out) == (2, "")
+    assert err.splitlines() == [f"결과 파일을 읽지 못했다: {JSON_NAME} (PermissionError)"]
 
 
 def test_verify_does_not_compare_when_a_recorded_value_is_not_reproduced(
