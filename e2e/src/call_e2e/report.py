@@ -18,10 +18,17 @@ def build_report(script: CallScript, script_sha256: str, result: dict, checks: l
 
     result는 flow.run_call의 결과다. 그 함수가 HTTP 응답에서 세션·요청·감사 식별자와 시간을 제외한다.
     결과와 검사는 깊게 복사하므로 리포트를 표시용으로 바꿔도 원래 실행 결과에 영향을 주지 않는다.
+
+    result에 서비스 연결 확인(`service_link`)이 있을 때만 리포트에도 같은 이름의 묶음이 `call_summary` 다음,
+    `checks` 앞에 더해진다. 없으면 키 자체가 없어 인자를 주지 않은 실행의 리포트는 연결 확인이 생기기 전과
+    같다. 묶음은 검사가 아니므로 `checks`에 들어가지 않고 검사 개수도 바꾸지 않는다. 다만 연결이 어긋났는데
+    통과로 보이는 리포트를 만들지 않으려고, 묶음이 있으면 `ok`는 검사가 모두 통과하고 그 묶음의 status가
+    `matched`일 때만 true다.
     """
     support = result["support_agent"]
     summary = result["call_summary"]
-    return {
+    link = result.get("service_link")
+    report = {
         "report": "call-e2e/1",
         "wiring_only": True,
         "notice": WIRING_NOTICE,
@@ -47,9 +54,14 @@ def build_report(script: CallScript, script_sha256: str, result: dict, checks: l
         "call_summary": deepcopy(
             {k: summary[k] for k in ("request", "model", "attempts", "record", "needs_confirmation")}
         ),
-        "checks": [{"name": c["name"], "ok": c["ok"], "detail": c["detail"]} for c in checks],
-        "ok": all(c["ok"] for c in checks),
     }
+    if link is not None:
+        # 묶음의 키는 status, audit_kind, (어긋났을 때) differs뿐이고 이 차례로 쓴다.
+        keys = ("status", "audit_kind", "differs")
+        report["service_link"] = deepcopy({k: link[k] for k in keys if k in link})
+    report["checks"] = [{"name": c["name"], "ok": c["ok"], "detail": c["detail"]} for c in checks]
+    report["ok"] = all(c["ok"] for c in checks) and (link is None or link["status"] == "matched")
+    return report
 
 
 def _cell(value: object) -> str:
@@ -62,6 +74,23 @@ def _row(*values: object) -> str:
     return "| " + " | ".join(_cell(v) for v in values) + " |"
 
 
+def _service_link_line(link: dict) -> str:
+    """서비스 연결 확인의 결과를 머리 목록에 넣을 한 줄(`- `로 시작)로 쓴다.
+
+    맞으면 무엇이 맞았는지를, 어긋나면 어느 칸이 다른지와 감사 로그의 마지막 종류를 적는다. 다른 칸이 없는데
+    어긋난 것은 감사 로그만 다른 경우다. 종류가 없으면(감사 로그가 비어 있음) `없음`이다. 서버가 준 글이
+    들어가므로 표 칸과 같은 규칙으로 줄바꿈과 파이프를 이스케이프해 한 줄을 깨지 않게 한다.
+    """
+    kind = "없음" if link["audit_kind"] is None else _cell(link["audit_kind"])
+    if link["status"] == "matched":
+        return (
+            "- 서비스 연결 확인: 일치 — 상담 서비스가 직접 후처리 서비스를 불러 만든 기록이 아래 기록과 "
+            f"같고, 감사 로그의 마지막 종류가 {kind}"
+        )
+    differs = ", ".join(_cell(name) for name in link.get("differs", [])) or "없음"
+    return f"- 서비스 연결 확인: 어긋남 — 다른 칸: {differs}; 감사 로그의 마지막 종류: {kind}"
+
+
 def render_markdown(report: dict) -> str:
     """리포트의 상담 턴·후처리 기록·번호 확인·검사를 네 절의 Markdown으로 렌더링한다.
 
@@ -69,9 +98,13 @@ def render_markdown(report: dict) -> str:
     여기서 보정하지 않는다. 모든 표 칸은 파이프와 줄바꿈을 이스케이프하며 끝에 LF 하나를 붙인다.
     표가 아닌 줄은 목록(`- `)으로 쓴다. Markdown은 빈 줄 없이 이어진 보통 줄을 한 문단으로 붙여 보여
     주기 때문이다.
+
+    리포트에 서비스 연결 확인(`service_link`)이 있으면 머리 목록의 `- 검사:` 줄 바로 다음에 그 결과를 한 줄
+    더한다. 절 제목은 넷 그대로이고 검사 표에도 들어가지 않는다(검사가 아니다). 없으면 한 줄도 더하지 않는다.
     """
     script, support, summary = report["script"], report["support_agent"], report["call_summary"]
     checks = report["checks"]
+    link = report.get("service_link")
     record = summary["record"]
     follow_up = record["follow_up"]
     lines = [
@@ -81,6 +114,7 @@ def render_markdown(report: dict) -> str:
         "",
         f"- 대본: {_cell(script['call_id'])} / 업종: {_cell(script['domain'])} / SHA-256: {script['sha256']}",
         f"- 검사: {sum(c['ok'] for c in checks)}/{len(checks)} 통과",
+        *([_service_link_line(link)] if link is not None else []),
         "",
         "## 상담 (support-agent)",
         "",

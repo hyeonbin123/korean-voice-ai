@@ -169,6 +169,10 @@
       }
     ]
   },
+  "service_link": {
+    "status": "matched",
+    "audit_kind": "summary_created"
+  },
   "checks": [
     {
       "name": "turns_completed",

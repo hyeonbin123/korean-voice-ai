@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from call_e2e.clients import (
+    CREATE_SUMMARY_TIMEOUT_S,
     CallSummaryClient,
     StepError,
     SupportAgentClient,
@@ -53,6 +54,18 @@ ADMIN_DETAIL = {
         "pending_approvals": [],
     },
     "audit": [{"id": 1, "at": "2026-01-01T00:00:00", "kind": "session_started", "payload": {}}],
+}
+
+# 상담 서비스의 관리자 끝점 POST /api/admin/sessions/{id}/summary의 201 응답 꼴(support-agent
+# `src/support_agent/service/core.py`의 create_summary가 돌려주는 값).
+LINKED_ANSWER = {
+    "session_id": "s-1",
+    "summary": {
+        "record": {"category": "배송", "resolution": "해결", "entities": [], "summary": "고정 응답"},
+        "needs_confirmation": [],
+        "model": "offline:canned",
+        "attempts": 1,
+    },
 }
 
 
@@ -355,6 +368,112 @@ def test_unusable_admin_tokens_are_refused_without_echoing_them(token):
         assert token.strip() not in str(info.value)
 
 
+# ---------------------------------------------------------------- 서비스 연결 확인: create_summary
+
+
+def test_create_summary_posts_to_the_admin_summary_path_with_the_token():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(201, json=LINKED_ANSWER)
+
+    client = support_client(handler)
+    assert client.create_summary("s-1") == LINKED_ANSWER
+    assert client.create_summary("s-1", by="reviewer") == LINKED_ANSWER
+    assert [(r.method, r.url.path) for r in seen] == [("POST", "/api/admin/sessions/s-1/summary")] * 2
+    assert {r.url.host for r in seen} == {"support.test"}
+    # 담당자 이름 칸 `by`의 기본값은 e2e다. 관리자 토큰은 이 관리자 끝점에 헤더로 간다.
+    assert [json.loads(r.content) for r in seen] == [{"by": "e2e"}, {"by": "reviewer"}]
+    assert [r.headers.get("x-admin-token") for r in seen] == [TOKEN, TOKEN]
+
+
+def test_create_summary_quotes_the_session_id_in_the_path():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(201, json=LINKED_ANSWER)
+
+    support_client(handler).create_summary("a/b c?x#y")
+    assert [r.url.raw_path for r in seen] == [b"/api/admin/sessions/a%2Fb%20c%3Fx%23y/summary"]
+
+
+def test_create_summary_waits_longer_than_the_support_agent_waits_for_the_summary_service():
+    # 상담 서비스는 후처리 서비스를 기다리는 시간의 상한이 기본 120초다(support-agent 설정 summary_timeout_s의
+    # 기본값). 이 요청은 그 기다림을 통째로 품으므로 클라이언트가 먼저 끊지 않게 그보다 길어야 한다. 생성자의
+    # 기본 시간 제한(60초)은 이 요청에만 비켜 가고, 다른 요청에는 그대로다(기본값 시험이 따로 고정한다).
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(201, json=LINKED_ANSWER)
+
+    support_client(handler).create_summary("s-1")
+    assert CREATE_SUMMARY_TIMEOUT_S > 120
+    assert [set(timeout.values()) for timeout in seen] == [{CREATE_SUMMARY_TIMEOUT_S}]
+
+
+@pytest.mark.parametrize(
+    ("response", "status"),
+    [
+        (httpx.Response(401, json={"detail": "wrong admin token"}), 401),
+        (httpx.Response(404, json={"detail": "no such session"}), 404),
+        (httpx.Response(409, json={"detail": "this session has no conversation to summarize"}), 409),
+        (httpx.Response(422, json={"detail": "the summary service rejected this conversation (422)"}), 422),
+        (httpx.Response(429, json={"detail": "the summary service is busy, try again"}), 429),
+        (httpx.Response(501, json={"detail": "the summary link is disabled"}), 501),
+        (httpx.Response(502, json={"detail": "the summary service is unreachable"}), 502),
+        (httpx.Response(503, json={"detail": "the admin API is disabled"}), 503),
+        (httpx.Response(504, json={"detail": "the summary service timed out"}), 504),
+        (httpx.Response(200, json=LINKED_ANSWER), 200),
+        (httpx.Response(201, content=b"not json"), 201),
+        (httpx.Response(201, json=["summary"]), 201),
+        (httpx.Response(201, json={"session_id": "s-1"}), 201),
+    ],
+    ids=[
+        "wrong_token",
+        "no_such_session",
+        "empty_conversation",
+        "summary_service_rejected",
+        "busy",
+        "link_disabled",
+        "unreachable",
+        "admin_disabled",
+        "timed_out",
+        "not_201",
+        "not_json",
+        "not_an_object",
+        "no_summary",
+    ],
+)
+def test_create_summary_reports_failures_and_incomplete_answers(response, status):
+    client = support_client(lambda request: response)
+    with pytest.raises(StepError) as info:
+        client.create_summary("s-1")
+    assert info.value.step == "create_summary"
+    assert info.value.status == status
+
+
+def test_create_summary_failure_carries_the_reason_the_server_gave():
+    # 상담 서비스가 후처리 연결이 꺼진 채 떠 있으면 501과 함께 까닭(켜는 설정 이름)을 준다. 오류 글만 보고
+    # 무엇을 고칠지 알 수 있어야 하므로 본문 앞부분이 그대로 StepError에 실린다.
+    body = {"detail": "the summary link is disabled (SUPPORT_AGENT_SUMMARY_URL is not set)"}
+    client = support_client(lambda request: httpx.Response(501, json=body))
+    with pytest.raises(StepError) as info:
+        client.create_summary("s-1")
+    assert "SUPPORT_AGENT_SUMMARY_URL" in info.value.detail
+    assert "SUPPORT_AGENT_SUMMARY_URL" in str(info.value)
+
+
+def test_create_summary_keeps_the_admin_token_out_of_errors():
+    client = support_client(lambda request: httpx.Response(401, json={"detail": "wrong admin token"}))
+    with pytest.raises(StepError) as info:
+        client.create_summary("s-1")
+    shown = " ".join([str(info.value), repr(info.value), info.value.detail, repr(client), str(client)])
+    assert TOKEN not in shown
+
+
 # ---------------------------------------------------------------- call-summary 클라이언트
 
 
@@ -476,6 +595,9 @@ def test_failures_without_an_answer_become_step_errors(exc_type, message, detail
     with pytest.raises(StepError) as info:
         summary_client(raising(exc_type, message)).summarize("shop", turns)
     assert (info.value.step, info.value.status, info.value.detail) == ("summarize", None, detail)
+    with pytest.raises(StepError) as info:
+        support_client(raising(exc_type, message)).create_summary("s-1")
+    assert (info.value.step, info.value.status, info.value.detail) == ("create_summary", None, detail)
 
 
 @pytest.mark.parametrize(

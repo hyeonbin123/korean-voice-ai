@@ -47,6 +47,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=30.0,
         help="두 앱이 준비될 때까지 기다리는 최대 시간(초, 0 이상) (기본: %(default)s)",
     )
+    parser.add_argument(
+        "--service-link",
+        action="store_true",
+        help=(
+            "서비스 연결 확인을 더한다(기본: 끔). 통화 한 건을 마친 뒤 상담 앱의 관리자 끝점 "
+            "POST /api/admin/sessions/{id}/summary를 불러, 상담 앱이 스스로 후처리 앱을 불러 만든 "
+            "기록이 이 시연이 직접 받은 기록(record·needs_confirmation·model·attempts)과 같은지, "
+            "그 일이 감사 로그의 마지막 행(summary_created)으로 남았는지 본다. 다르면 리포트의 ok가 "
+            "false가 되고 종료 코드는 1이다. 상담 앱을 SUPPORT_AGENT_SUMMARY_URL(같은 후처리 앱의 "
+            "주소)로 띄워야 한다. 그러지 않으면 상담 앱이 501로 답해 종료 코드 2다. 두 앱이 모델 없는 "
+            "오프라인 앱일 때만 뜻이 있다: 답이 정해져 있어 두 번 받은 기록이 같다. 진짜 모델이면 두 "
+            "번의 답이 달라 어긋남으로 나온다. 상담 앱이 후처리 앱에 보내는 업종은 늘 shop이라, "
+            "대본의 업종이 shop이 아니면 직접 보낸 요청과 업종이 달라 같은 기록을 기대할 수 없다"
+        ),
+    )
     return parser
 
 
@@ -73,6 +88,12 @@ def main(argv: list[str] | None = None, *, transport: httpx.BaseTransport | None
 
     준비 확인은 별도의 짧은 제한 시간 클라이언트로 수행한다. 모든 클라이언트는 실행 끝까지 열어 공유된 시험
     transport가 조기에 닫히지 않게 한다. HTTP 오류의 본문에도 토큰이 있을 수 있어 stderr 출력 직전에 가린다.
+
+    `--service-link`를 주면 서비스 연결 확인을 더한다. 리포트에 `service_link` 묶음이 생기고, 표준 출력의
+    `검사 N/N 통과` 줄 다음에 `서비스 연결 확인: 일치` 또는 `서비스 연결 확인: 어긋남` 한 줄이 더해진다.
+    어긋나면 검사가 모두 통과해도 리포트의 `ok`가 false라 반환값이 1이다. 그 확인이 부르는 끝점이
+    실패하면(후처리 연결이 꺼진 상담 앱의 501 포함) 다른 단계의 실패처럼 2다. 인자를 주지 않으면 출력과
+    요청이 이전과 같다.
     """
     try:
         args = build_parser().parse_args(argv)
@@ -102,7 +123,7 @@ def main(argv: list[str] | None = None, *, transport: httpx.BaseTransport | None
             stack.callback(summary_probe.close)
             if not wait_until_ready([support_probe, summary_probe], args.wait):
                 raise ValueError("준비 확인 실패: 제한 시간 안에 두 서비스가 준비되지 않았다")
-            result = run_call(script, support, summary)
+            result = run_call(script, support, summary, service_link=args.service_link)
         checks = check_expectations(script, result)
         report = build_report(script, digest, result, checks)
         paths = write_report(report, args.out)
@@ -115,4 +136,6 @@ def main(argv: list[str] | None = None, *, transport: httpx.BaseTransport | None
     for path in paths:
         print(f"리포트: {path}")
     print(f"검사 {sum(c['ok'] for c in checks)}/{len(checks)} 통과")
+    if "service_link" in report:
+        print("서비스 연결 확인: " + ("일치" if report["service_link"]["status"] == "matched" else "어긋남"))
     return 0 if report["ok"] else 1

@@ -2,10 +2,24 @@
 
 상담 서비스의 고객 이벤트와 관리자 감사 로그는 목적이 다르다. 턴의 도구 결과는 SSE에서, 실제 실행한 도구의
 인자와 차례는 감사 로그에서 읽는다. 상담 전사는 관리자 조회 결과 그대로 후처리 서비스에 전달한다.
+
+`run_call(..., service_link=True)`는 위 흐름이 끝난 뒤 선택 확인 하나를 더한다(서비스 연결 확인). 상담
+서비스의 관리자 끝점을 불러 상담 서비스가 스스로 후처리 서비스를 불러 만든 기록을 받고, 그것이 시연이 직접
+받은 기록과 같은지, 그 일이 감사 로그의 마지막 행으로 남았는지 본다. 다섯 검사에 여섯째로 더하지 않고 결과에
+`service_link` 묶음으로 따로 담는다. 검사는 대본이 정한 기대와 견주는 것이고, 이 확인은 두 서비스가 서로를
+부르는 길이 맞게 이어졌는지 보는 것이라 판정의 기준이 다르기 때문이다. 인자를 켜지 않으면 보내는 요청도
+결과도 이전과 같다.
 """
 
 from .clients import CallSummaryClient, SupportAgentClient
 from .script import CallScript
+
+# 서비스 연결 확인이 직접 받은 기록과 견주는 칸. 이 차례가 리포트에 적는 `differs`의 차례다.
+LINK_FIELDS = ("record", "needs_confirmation", "model", "attempts")
+# 상담 서비스가 후처리 기록을 만들면 감사 로그에 남기는 행의 종류(support-agent의
+# `ChatService.create_summary`, src/support_agent/service/core.py). 연결이 맞게 이어졌다면 연결 확인이 끝난 뒤
+# 감사 로그의 마지막 행이 이 종류여야 한다.
+LINK_AUDIT_KIND = "summary_created"
 
 
 def _object(value: object, label: str) -> dict:
@@ -98,67 +112,124 @@ def tool_calls_from_audit(audit: list[dict]) -> list[dict]:
     return calls
 
 
-def _summary_result(response: dict, request: dict) -> dict:
-    """후처리 응답의 공개 기록을 검증하고 요청 id·지연 시간 없이 고정된 구조로 옮긴다."""
-    record = _object(response.get("record"), "summarize.record")
-    follow_up = _object(record.get("follow_up"), "summarize.record.follow_up")
+def _summary_fields(response: dict, step: str) -> dict:
+    """후처리 기록의 네 칸(model, attempts, record, needs_confirmation)을 검증하고 고정된 구조로 옮긴다.
+
+    response는 후처리 서비스의 200 응답이거나, 상담 서비스가 그 서비스를 불러 받아 돌려준 201 응답의
+    `summary`다. 두 응답은 같은 네 칸을 같은 꼴로 가진다. 그래서 직접 받은 기록과 상담 서비스를 거쳐 받은
+    기록을 같은 함수로 같은 규칙에 따라 정리해야 둘을 견준 '같다'가 뜻이 있다(한쪽만 정리하면 정리 방식의
+    차이가 기록의 차이로 보인다). 요청 id·지연 시간처럼 실행마다 달라지거나 리포트에 싣지 않는 칸은 옮기지
+    않는다. step은 오류 글 앞에 붙는 이름(`summarize`, `create_summary.summary`)으로, 어느 응답이 계약을
+    어겼는지 알게 한다. 계약을 어기면 단계 이름이 든 ValueError다.
+    """
+    record = _object(response.get("record"), f"{step}.record")
+    follow_up = _object(record.get("follow_up"), f"{step}.record.follow_up")
     if not isinstance(follow_up.get("required"), bool):
-        raise ValueError("summarize.record.follow_up.required: true 또는 false가 필요하다")
+        raise ValueError(f"{step}.record.follow_up.required: true 또는 false가 필요하다")
     if type(response.get("attempts")) is not int:
-        raise ValueError("summarize.attempts: 정수가 필요하다")
+        raise ValueError(f"{step}.attempts: 정수가 필요하다")
     entities = []
-    for entity in _list(record.get("entities"), "summarize.record.entities"):
-        entity = _object(entity, "summarize.entity")
+    for entity in _list(record.get("entities"), f"{step}.record.entities"):
+        entity = _object(entity, f"{step}.entity")
         entities.append(
             {
-                "type": _text(entity.get("type"), "summarize.entity.type"),
-                "value": _text(entity.get("value"), "summarize.entity.value"),
+                "type": _text(entity.get("type"), f"{step}.entity.type"),
+                "value": _text(entity.get("value"), f"{step}.entity.value"),
             }
         )
     flags = []
-    for flag in _list(response.get("needs_confirmation"), "summarize.needs_confirmation"):
-        flag = _object(flag, "summarize.flag")
+    for flag in _list(response.get("needs_confirmation"), f"{step}.needs_confirmation"):
+        flag = _object(flag, f"{step}.flag")
         flags.append(
             {
-                "type": _text(flag.get("type"), "summarize.flag.type"),
-                "value": _text(flag.get("value"), "summarize.flag.value"),
+                "type": _text(flag.get("type"), f"{step}.flag.type"),
+                "value": _text(flag.get("value"), f"{step}.flag.value"),
                 "reasons": [
-                    _text(r, "summarize.flag.reason")
-                    for r in _list(flag.get("reasons"), "summarize.flag.reasons")
+                    _text(r, f"{step}.flag.reason")
+                    for r in _list(flag.get("reasons"), f"{step}.flag.reasons")
                 ],
             }
         )
     return {
-        "request": request,
-        "model": _text(response.get("model"), "summarize.model"),
+        "model": _text(response.get("model"), f"{step}.model"),
         "attempts": response["attempts"],
         "record": {
-            "category": _text(record.get("category"), "summarize.record.category"),
-            "resolution": _text(record.get("resolution"), "summarize.record.resolution"),
+            "category": _text(record.get("category"), f"{step}.record.category"),
+            "resolution": _text(record.get("resolution"), f"{step}.record.resolution"),
             "entities": entities,
             "actions_taken": [
-                _text(a, "summarize.record.action")
-                for a in _list(record.get("actions_taken"), "summarize.record.actions_taken")
+                _text(a, f"{step}.record.action")
+                for a in _list(record.get("actions_taken"), f"{step}.record.actions_taken")
             ],
             "follow_up": {
                 "required": follow_up["required"],
                 "codes": [
-                    _text(c, "summarize.record.code")
-                    for c in _list(follow_up.get("codes"), "summarize.record.codes")
+                    _text(c, f"{step}.record.code")
+                    for c in _list(follow_up.get("codes"), f"{step}.record.codes")
                 ],
             },
-            "summary": _text(record.get("summary"), "summarize.record.summary"),
+            "summary": _text(record.get("summary"), f"{step}.record.summary"),
         },
         "needs_confirmation": flags,
     }
 
 
-def run_call(script: CallScript, support: SupportAgentClient, summary: CallSummaryClient) -> dict:
+def _summary_result(response: dict, request: dict) -> dict:
+    """후처리 응답의 공개 기록을 검증하고 요청 id·지연 시간 없이 고정된 구조로 옮긴다."""
+    return {"request": request, **_summary_fields(response, "summarize")}
+
+
+def last_audit_kind(audit: list[dict]) -> str | None:
+    """감사 로그의 마지막 행의 종류(`kind`)를 돌려준다. 행이 하나도 없으면 None.
+
+    감사 로그는 추가만 하고 기록한 차례대로 읽히므로(관리자 조회가 행 번호 순으로 준다) 마지막 행이 가장
+    나중에 일어난 일이다. 목록이 아니거나, 마지막 행이 객체가 아니거나, 종류가 글이 아니면 ValueError다.
+    """
+    rows = _list(audit, "audit")
+    if not rows:
+        return None
+    return _text(_object(rows[-1], "audit.row").get("kind"), "audit.kind")
+
+
+def _service_link(support: SupportAgentClient, session_id: str, direct: dict) -> dict:
+    """상담 서비스가 후처리 서비스를 직접 불러 만든 기록을 시연이 직접 받은 기록과 견준다.
+
+    순서: 상담 서비스의 관리자 끝점을 불러 기록을 만들게 한다(`create_summary`) → 받은 기록을 직접 받은 것과
+    같은 규칙으로 정리한다 → 세션을 다시 읽어 감사 로그의 마지막 행의 종류를 본다. direct는
+    `_summary_result`가 정리한 직접 받은 기록이다.
+
+    견주는 것은 `LINK_FIELDS`의 네 칸이다. 요청 id는 요청마다 새로 생기는 값이라 견주지 않는다. 네 칸이
+    모두 같고 감사 로그의 마지막 행이 `LINK_AUDIT_KIND`일 때만 `matched`다. 어긋나면 `mismatched`에 다른
+    칸의 이름을 `LINK_FIELDS` 차례로 `differs`에 적는다(네 칸이 같은데 감사 로그만 다르면 빈 목록). 세션
+    번호·요청 번호·시각은 넣지 않는다. 같은 입력이면 같은 리포트여야 하기 때문이다.
+    HTTP 실패는 StepError를 그대로 전달하고, 상담 서비스의 답이 계약을 어기면 ValueError다.
+    """
+    answer = support.create_summary(session_id)
+    step = "create_summary.summary"
+    linked = _summary_fields(_object(answer.get("summary"), step), step)
+    audit_kind = last_audit_kind(support.session_detail(session_id)["audit"])
+    differs = [name for name in LINK_FIELDS if linked[name] != direct[name]]
+    if not differs and audit_kind == LINK_AUDIT_KIND:
+        return {"status": "matched", "audit_kind": audit_kind}
+    return {"status": "mismatched", "audit_kind": audit_kind, "differs": differs}
+
+
+def run_call(
+    script: CallScript,
+    support: SupportAgentClient,
+    summary: CallSummaryClient,
+    *,
+    service_link: bool = False,
+) -> dict:
     """세션 생성 → 발화별 SSE → 관리자 전사·감사 조회 → 후처리 요청을 동기로 실행한다.
 
     턴 끝 상태가 open이 아니거나 end가 없으면 다음 발화를 보내지 않는다. 부분 통화도 조회·후처리해 검사
     실패 리포트로 남길 수 있다. HTTP 실패는 클라이언트의 StepError를 그대로 전달한다. 중첩 응답 계약을 어기면
     단계 이름이 든 ValueError로 알리고, 실행마다 달라지는 식별자와 시간은 결과에 넣지 않는다.
+
+    service_link: True이면 후처리 요청까지 끝낸 뒤에 서비스 연결 확인을 더하고 결과에 `service_link` 묶음을
+    담는다(`_service_link`). 앞 단계의 요청과 결과는 이 인자와 상관없이 같다. 기본은 False이고, 그러면 새
+    끝점을 부르지 않으며 결과에도 `service_link`가 없다.
     """
     session_id = support.new_session()
     turns = []
@@ -204,7 +275,10 @@ def run_call(script: CallScript, support: SupportAgentClient, summary: CallSumma
         ],
     }
     response = summary.summarize(script.domain, request["turns"])
-    return {"support_agent": support_result, "call_summary": _summary_result(response, request)}
+    result = {"support_agent": support_result, "call_summary": _summary_result(response, request)}
+    if service_link:
+        result["service_link"] = _service_link(support, session_id, result["call_summary"])
+    return result
 
 
 def _calls_text(calls: tuple[tuple[str, bool], ...]) -> str:

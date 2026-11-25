@@ -30,6 +30,12 @@ class FakeServices:
 
     end_statuses는 턴 끝 상태, tools는 턴별 도구 결과 목록이다. 감사 로그의 도구 인자는 SSE에 없으므로 따로
     audit에 기록한다. health_status와 failures로 준비 실패·HTTP 단계 실패를 재현할 수 있다.
+
+    상담 서비스의 관리자 끝점 `POST /api/admin/sessions/{id}/summary`(서비스 연결 확인이 부른다)도 흉내 낸다.
+    실제 서비스는 후처리 서비스를 직접 불러 기록을 만들고 감사 로그에 `summary_created` 행을 남긴다. 이 대역은
+    후처리 대역과 같은 고정 기록을 돌려주고 감사 로그에 행을 더한다. 두 값으로 어긋남을 재현한다:
+    linked_overrides는 201 답의 `summary` 칸을 덮어쓰고(다른 기록·모델·시도 횟수·번호 확인 표시),
+    linked_audit_kind는 그 호출이 감사 로그에 남기는 행의 종류다(None이면 행을 남기지 않는다).
     """
 
     def __init__(self, *, end_statuses=None, tools=None, health_status=200, session_id="s-1"):
@@ -57,8 +63,28 @@ class FakeServices:
         self.audit = [{"id": 1, "at": "2026-01-01", "kind": "session_started", "payload": {}}]
         self.pending_approvals: list[dict] = []
         self.model = "offline:canned"
+        self.linked_overrides: dict = {}
+        self.linked_audit_kind = "summary_created"
         self.turn = 0
         self.transport = httpx.MockTransport(self._handle)
+
+    def canned_summary(self) -> dict:
+        """후처리 서비스(대역)가 늘 주는 고정 기록의 네 칸. 호출마다 새 객체라 시험이 고쳐도 번지지 않는다."""
+        return {
+            "model": self.model,
+            "attempts": 1,
+            "record": {
+                "category": "주문 취소",
+                "resolution": "해결",
+                "entities": [{"type": "주문번호", "value": "D1234567"}],
+                "actions_taken": [],
+                "follow_up": {"required": False, "codes": []},
+                "summary": "오프라인 고정 답입니다.",
+            },
+            "needs_confirmation": [
+                {"type": "주문번호", "value": "D1234567", "reasons": ["not_in_transcript"]}
+            ],
+        }
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         """공개 끝점의 상태·본문을 돌려준다. 정의하지 않은 요청은 즉시 시험 실패로 드러낸다."""
@@ -116,22 +142,29 @@ class FakeServices:
         if route == ("POST", "/summarize"):
             return httpx.Response(
                 200,
-                json={
-                    "request_id": self.request_id,
-                    "latency_s": self.latency_s,
-                    "model": self.model,
-                    "attempts": 1,
-                    "record": {
-                        "category": "주문 취소",
-                        "resolution": "해결",
-                        "entities": [{"type": "주문번호", "value": "D1234567"}],
-                        "actions_taken": [],
-                        "follow_up": {"required": False, "codes": []},
-                        "summary": "오프라인 고정 답입니다.",
-                    },
-                    "needs_confirmation": [
-                        {"type": "주문번호", "value": "D1234567", "reasons": ["not_in_transcript"]}
-                    ],
-                },
+                json={"request_id": self.request_id, "latency_s": self.latency_s, **self.canned_summary()},
             )
+        if route == ("POST", f"/api/admin/sessions/{self.session_id}/summary"):
+            if request.headers.get("X-Admin-Token") != TOKEN:
+                return httpx.Response(401, json={"detail": "wrong admin token"})
+            made = {**self.canned_summary(), **self.linked_overrides}
+            # 실제 서비스가 감사 로그에 남기는 칸(support-agent `src/support_agent/service/core.py`의
+            # create_summary)을 그대로 따른다. linked_audit_kind가 None이면 201을 주고도 행을 남기지
+            # 않는 서비스를 흉내 낸다.
+            if self.linked_audit_kind is not None:
+                self.audit.append(
+                    {
+                        "id": len(self.audit) + 1,
+                        "at": "2026-01-01",
+                        "kind": self.linked_audit_kind,
+                        "payload": {
+                            "by": json.loads(request.content)["by"],
+                            "session_status": self.end_statuses[self.turn - 1],
+                            "turns": len(self.messages),
+                            **deepcopy(made),
+                            "request_id": "linked-request-variable",
+                        },
+                    }
+                )
+            return httpx.Response(201, json={"session_id": self.session_id, "summary": made})
         raise AssertionError(f"정의하지 않은 요청: {route}")

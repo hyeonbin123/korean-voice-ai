@@ -10,6 +10,11 @@
     POST /api/sessions                    201 {"session_id", "status", "messages", "pending_approvals"}
     POST /api/sessions/{id}/messages      200 text/event-stream (요청 본문 {"text": 고객 발화})
     GET  /api/admin/sessions/{id}         200 {"transcript": {...}, "audit": [...]} (헤더 X-Admin-Token)
+    POST /api/admin/sessions/{id}/summary 201 {"session_id", "summary": {"record", "needs_confirmation",
+                                          "model", "attempts"}} (헤더 X-Admin-Token,
+                                          요청 본문 {"by": 담당자 이름}). 상담 서비스가 스스로 후처리
+                                          서비스를 불러 만든 기록이다. 서비스 연결 확인(`--service-link`)
+                                          에서만 부른다.
 
   call-summary (call-summary/src/call_summary/service.py)
     GET  /health                          200
@@ -35,11 +40,21 @@ DETAIL_CHARS = 500
 # support-agent 관리자 API가 인증에 읽는 헤더(service/app.py의 admin 의존성).
 ADMIN_TOKEN_HEADER = "X-Admin-Token"
 
+# `SupportAgentClient.create_summary` 요청 하나에 쓰는 시간 제한(초). 이 요청 안에서 상담 서비스가 후처리
+# 서비스를 부르고 그 답을 기다리는데, 상담 서비스가 그 답을 기다리는 시간의 상한은 설정 `summary_timeout_s`의
+# 기본값 120초다(support-agent/src/support_agent/service/settings.py). 이 클라이언트의 기본 시간 제한(60초)을
+# 그대로 쓰면 상담 서비스가 아직 기다리는 중에 이쪽이 먼저 끊어, 느린 후처리 서비스 앞에서 상담 서비스가
+# 주는 분명한 오류(504)를 받지 못하고 '응답 없음'만 보게 된다. 그래서 120초보다 길게 잡는다(상한까지
+# 기다린 뒤 오류로 답할 시간을 더했다). 상담 서비스의 설정을 120초보다 크게 바꿨다면 이 값도 함께 키워야
+# 한다. 모델 없는 오프라인 앱에서는 요청이 곧 끝나므로 이 값에 닿지 않는다.
+CREATE_SUMMARY_TIMEOUT_S = 150.0
+
 
 class StepError(RuntimeError):
     """시연의 한 단계(HTTP 요청 하나)가 기대와 다르게 끝났다.
 
-    step: 실패한 단계 이름. 메서드 이름과 같다: `new_session`, `say`, `session_detail`, `summarize`.
+    step: 실패한 단계 이름. 메서드 이름과 같다: `new_session`, `say`, `session_detail`, `summarize`,
+        `create_summary`(서비스 연결 확인).
     status: HTTP 상태 코드. 응답을 받지 못한 실패(연결 거절, 시간 초과, 중간에 끊김)는 None이다.
     detail: 응답 본문의 앞 500자. 응답이 없으면 예외 종류와 메시지. 관리자 토큰은 어떤 경우에도 담지 않는다.
     """
@@ -223,15 +238,16 @@ def _check_admin_token(token: str) -> None:
 
 
 class SupportAgentClient(_ServiceClient):
-    """support-agent 오프라인 앱의 고객 쪽 끝점과 관리자 조회 끝점을 부르는 클라이언트.
+    """support-agent 오프라인 앱의 고객 쪽 끝점과 관리자 끝점(조회, 후처리 기록 만들기)을 부르는 클라이언트.
 
     base_url: 앱 주소 (예: http://127.0.0.1:18062).
-    admin_token: 관리자 API용 토큰. 관리자 조회(`session_detail`) 요청에만 `X-Admin-Token` 헤더로 보내고,
-        고객 쪽 요청에는 붙이지 않는다. 오류 글·`repr`·`StepError`에 넣지 않으며, HTTP 헤더 값으로 쓸 수 없는
-        꼴이면 만들 때 ValueError로 거절한다(값은 메시지에 적지 않는다).
+    admin_token: 관리자 API용 토큰. 관리자 끝점(`session_detail`, `create_summary`) 요청에만 `X-Admin-Token`
+        헤더로 보내고, 고객 쪽 요청에는 붙이지 않는다. 오류 글·`repr`·`StepError`에 넣지 않으며, HTTP 헤더
+        값으로 쓸 수 없는 꼴이면 만들 때 ValueError로 거절한다(값은 메시지에 적지 않는다).
     transport: 시험에서 httpx.MockTransport를 넣는 자리. None이면 실제 네트워크.
     timeout_s: 요청 하나에 쓰는 시간 제한(초), 기본 60초. httpx의 제한이라 연결·쓰기·읽기 각각에 적용되고,
-        읽기는 응답 조각이 도착하는 사이를 기다리는 시간이다.
+        읽기는 응답 조각이 도착하는 사이를 기다리는 시간이다. 다만 `create_summary`는 이 값 대신 더 긴 고정
+        상한(`CREATE_SUMMARY_TIMEOUT_S`)을 쓴다.
     """
 
     def __init__(
@@ -301,6 +317,40 @@ class SupportAgentClient(_ServiceClient):
             message = f"응답에 transcript 또는 audit이 없다: {_head(response)}"
             raise StepError("session_detail", response.status_code, message)
         return detail
+
+    def create_summary(self, session_id: str, *, by: str = "e2e") -> dict:
+        """상담 서비스가 스스로 후처리 서비스를 불러 한 세션의 상담 후처리 기록을 만들게 한다 (POST, 201).
+
+        POST /api/admin/sessions/{id}/summary. 요청 본문은 {"by": by}이고 `by`는 감사 로그에 남는 담당자
+        이름이다. 관리자 토큰을 `X-Admin-Token` 헤더로 보낸다. 상담 서비스는 그 세션의 고객이 본 대화를 읽어
+        후처리 서비스(call-summary)의 `POST /summarize`로 보내고, 받은 기록을 감사 로그에 `summary_created`
+        행으로 남긴 뒤 돌려준다(support-agent/src/support_agent/service/core.py의 create_summary). 이 요청
+        하나가 후처리 서비스의 응답을 기다리는 시간까지 품으므로, 시간 제한은 생성자의 기본값 대신 더 긴
+        `CREATE_SUMMARY_TIMEOUT_S`를 쓴다.
+
+        출력: 서버가 준 JSON 객체 그대로 {"session_id", "summary": {"record", "needs_confirmation",
+        "model", "attempts"}}. 칸 안의 꼴은 이 메서드가 풀어 보지 않는다(부르는 쪽이 정리하며 검사한다).
+        StepError(step="create_summary"): 201이 아니거나(401 토큰 틀림, 404 없는 세션, 409 대화가 빔,
+        422 후처리 서비스가 그 대화를 받지 않음, 429 붐빔, 501 후처리 연결이 꺼진 상담 서비스, 502·504
+        후처리 서비스 실패, 503 관리자 토큰 미설정), 응답이 JSON 객체가 아니거나, `summary`가 없을 때.
+        오류 글에는 서버가 준 본문 앞부분이 실려, 후처리 연결이 꺼진 경우 켜는 설정 이름
+        (`SUPPORT_AGENT_SUMMARY_URL`)을 그대로 읽을 수 있다.
+        """
+        path = f"/api/admin/sessions/{quote(session_id, safe='')}/summary"
+        response = self._call(
+            "create_summary",
+            "POST",
+            path,
+            json={"by": by},
+            headers={ADMIN_TOKEN_HEADER: self._admin_token},
+            timeout=CREATE_SUMMARY_TIMEOUT_S,
+        )
+        _require_status("create_summary", response, 201)
+        answer = _json_object("create_summary", response)
+        if "summary" not in answer:
+            message = f"응답에 summary가 없다: {_head(response)}"
+            raise StepError("create_summary", response.status_code, message)
+        return answer
 
 
 # ---------------------------------------------------------------- call-summary

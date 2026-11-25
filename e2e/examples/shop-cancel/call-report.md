@@ -4,6 +4,7 @@
 
 - 대본: shop-cancel / 업종: shop / SHA-256: 478bc3bb7acc079b8a755f1e981eeddf295a46fc8d84aa5c28fac953c65432e3
 - 검사: 5/5 통과
+- 서비스 연결 확인: 일치 — 상담 서비스가 직접 후처리 서비스를 불러 만든 기록이 아래 기록과 같고, 감사 로그의 마지막 종류가 summary_created
 
 ## 상담 (support-agent)
 

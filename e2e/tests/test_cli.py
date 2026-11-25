@@ -6,7 +6,10 @@ import httpx
 import pytest
 from fakes import SCRIPT_PATH, SUMMARY_URL, SUPPORT_URL, TOKEN, FakeServices
 
-from call_e2e.cli import main
+from call_e2e.cli import build_parser, main
+
+# 서비스 연결 확인이 부르는 상담 서비스의 관리자 끝점(대역의 세션 번호는 s-1).
+LINK_ROUTE = ("POST", "/api/admin/sessions/s-1/summary")
 
 
 def arguments(tmp_path):
@@ -21,6 +24,15 @@ def arguments(tmp_path):
         "--summary-url",
         SUMMARY_URL,
     ]
+
+
+def link_arguments(tmp_path):
+    """`arguments`에 서비스 연결 확인을 켜는 인자를 더한다."""
+    return [*arguments(tmp_path), "--service-link"]
+
+
+def read_json(tmp_path):
+    return json.loads((tmp_path / "report" / "call-report.json").read_text(encoding="utf-8"))
 
 
 def test_cli_returns_0_and_writes_both_files(tmp_path, monkeypatch, capsys):
@@ -148,3 +160,122 @@ def test_cli_reports_malformed_summary_as_execution_failure(tmp_path, monkeypatc
     assert main(arguments(tmp_path), transport=httpx.MockTransport(handler)) == 2
     assert "summarize.record.follow_up" in capsys.readouterr().err
     assert not (tmp_path / "report").exists()
+
+
+# ---------------------------------------------------------------- --service-link
+
+
+def test_service_link_is_off_by_default_and_documented_in_the_help(capsys):
+    required = ["--script", "script.json", "--out", "out"]
+    assert build_parser().parse_args(required).service_link is False
+    assert build_parser().parse_args([*required, "--service-link"]).service_link is True
+    assert main(["--help"]) == 0
+    # 도움말은 줄을 접어 보여 주므로 공백을 하나로 모아 읽는다.
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "--service-link" in help_text
+    # 상담 앱을 후처리 앱의 주소로 띄워야 한다는 것, 오프라인 앱일 때만 뜻이 있다는 것이 도움말에 있다.
+    assert "SUPPORT_AGENT_SUMMARY_URL" in help_text
+    assert "오프라인" in help_text
+
+
+def test_without_the_flag_the_output_and_the_requests_stay_as_they_were(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    assert main(arguments(tmp_path), transport=fake.transport) == 0
+    lines = capsys.readouterr().out.splitlines()
+    report_dir = tmp_path / "report"
+    assert lines == [
+        f"리포트: {report_dir / 'call-report.json'}",
+        f"리포트: {report_dir / 'call-report.md'}",
+        "검사 5/5 통과",
+    ]
+    assert not any(request.url.path.endswith("/summary") for request in fake.requests)
+    assert "service_link" not in read_json(tmp_path)
+    assert "서비스 연결 확인" not in (report_dir / "call-report.md").read_text(encoding="utf-8")
+
+
+def test_service_link_match_returns_0_and_adds_one_line(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 0
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[-2:] == ["검사 5/5 통과", "서비스 연결 확인: 일치"]
+    assert captured.err == ""
+    report = read_json(tmp_path)
+    assert report["service_link"] == {"status": "matched", "audit_kind": "summary_created"}
+    assert report["ok"] is True
+    markdown = (tmp_path / "report" / "call-report.md").read_text(encoding="utf-8")
+    assert "- 서비스 연결 확인: 일치" in markdown
+    assert [(r.method, r.url.path) for r in fake.requests].count(LINK_ROUTE) == 1
+
+
+def test_service_link_mismatch_returns_1_and_marks_the_report_not_ok(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    fake.linked_overrides = {"record": {**fake.canned_summary()["record"], "summary": "다른 요약입니다."}}
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 1
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[-2:] == ["검사 5/5 통과", "서비스 연결 확인: 어긋남"]
+    assert captured.err == ""
+    report = read_json(tmp_path)
+    assert report["ok"] is False
+    assert report["service_link"]["status"] == "mismatched"
+    assert report["service_link"]["differs"] == ["record"]
+    assert all(check["ok"] for check in report["checks"])
+    markdown = (tmp_path / "report" / "call-report.md").read_text(encoding="utf-8")
+    assert "- 서비스 연결 확인: 어긋남" in markdown
+
+
+def test_service_link_disabled_support_app_returns_2_and_says_why(tmp_path, monkeypatch, capsys):
+    # 후처리 연결이 꺼진 채 뜬 상담 앱은 501과 까닭을 준다. 오류 글만 보고 켜는 설정을 알 수 있어야 하고,
+    # 실행하지 못한 것이므로 리포트는 쓰지 않는다.
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    detail = "the summary link is disabled (SUPPORT_AGENT_SUMMARY_URL is not set)"
+    fake.failures[LINK_ROUTE] = (501, json.dumps({"detail": detail}))
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 2
+    error = capsys.readouterr().err
+    assert all(word in error for word in ["create_summary", "501", "SUPPORT_AGENT_SUMMARY_URL"])
+    assert not (tmp_path / "report").exists()
+
+
+@pytest.mark.parametrize("status", [401, 404, 409, 422, 429, 502, 504])
+def test_service_link_http_failures_return_2(tmp_path, monkeypatch, capsys, status):
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    fake.failures[LINK_ROUTE] = (status, "explained failure")
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 2
+    error = capsys.readouterr().err
+    assert all(word in error for word in ["create_summary", str(status), "explained failure"])
+    assert not (tmp_path / "report").exists()
+
+
+def test_service_link_never_prints_the_admin_token(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    fake.failures[LINK_ROUTE] = (401, "denied " + TOKEN)
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 2
+    output = capsys.readouterr()
+    assert TOKEN not in output.out + output.err
+    assert not (tmp_path / "report").exists()
+
+
+def test_service_link_reports_a_malformed_linked_answer_as_execution_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    fake.linked_overrides = {"record": "글"}
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 2
+    assert "create_summary.summary.record" in capsys.readouterr().err
+    assert not (tmp_path / "report").exists()
+
+
+def test_service_link_request_uses_the_long_wait_and_the_other_requests_keep_theirs(tmp_path, monkeypatch):
+    # 연결 확인 요청은 상담 서비스가 후처리 서비스를 기다리는 시간(기본 120초)보다 길게 기다리고, 발화 요청은
+    # 기본 60초 그대로다.
+    monkeypatch.setenv("E2E_ADMIN_TOKEN", TOKEN)
+    fake = FakeServices()
+    assert main(link_arguments(tmp_path), transport=fake.transport) == 0
+    link = next(r for r in fake.requests if r.url.path.endswith("/summary"))
+    say = next(r for r in fake.requests if r.url.path.endswith("/messages"))
+    assert link.extensions["timeout"]["read"] > 120
+    assert say.extensions["timeout"]["read"] == 60

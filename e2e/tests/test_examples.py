@@ -1,10 +1,11 @@
 """저장소에 넣어 둔 예시 리포트(examples/shop-cancel/)와 이 폴더의 README를 확인한다.
 
-예시 리포트는 두 오프라인 앱을 실제로 띄우고 calls/shop-cancel.json을 돌려 나온
-call-report.json·call-report.md를 그대로 복사한 것이다. CI는 같은 일을 다시 해서 새로 나온 리포트가
-이 예시와 바이트까지 같은지 `diff`로 본다. 이 파일의 시험은 앱 없이 돌며, 예시가 대본이나 렌더링 코드와
-어긋난 것을 CI의 실제 실행보다 먼저 잡는다: 대본을 고치고 예시를 다시 만들지 않았거나,
-render_markdown을 고치고 예시 Markdown을 다시 만들지 않은 경우다.
+예시 리포트는 두 오프라인 앱을 실제로 띄우고(상담 앱은 후처리 앱의 주소를 알고 뜬다) calls/shop-cancel.json을
+`--service-link`와 함께 돌려 나온 call-report.json·call-report.md를 그대로 복사한 것이다. CI는 같은 일을
+다시 해서 새로 나온 리포트가 이 예시와 바이트까지 같은지 `diff`로 본다. 이 파일의 시험은 앱 없이 돌며,
+예시가 대본이나 렌더링 코드와 어긋난 것을 CI의 실제 실행보다 먼저 잡는다: 대본을 고치고 예시를 다시 만들지
+않았거나, render_markdown을 고치고 예시 Markdown을 다시 만들지 않은 경우다. 예시를 CLI로 다시 만들어 견주는
+시험은 두지 않는다: 시험의 가짜 서비스가 주는 답은 실제 오프라인 앱의 답과 달라 바이트까지 같게 만들 수 없다.
 
 파일은 read_text가 아니라 바이트로 읽는다. read_text는 CRLF를 LF로 바꿔 읽어서, Windows에서 줄바꿈을
 바꿔 받은 복제본(git의 core.autocrlf=true)에서도 통과해 버린다. CI가 견주는 것은 바이트이므로 시험도
@@ -23,7 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from call_e2e.report import render_markdown
+from call_e2e.report import build_report, render_markdown
+from call_e2e.script import load_script
 
 # 이 파일은 <e2e>/tests/test_examples.py에 있다. parents[0] = tests, parents[1] = e2e 폴더.
 E2E_DIR = Path(__file__).resolve().parents[1]
@@ -95,6 +97,49 @@ def test_example_matches_the_call_script():
     assert report["script"]["sha256"] == hashlib.sha256(SHOP_CANCEL.read_bytes()).hexdigest()
 
 
+def test_example_has_a_matched_service_link():
+    # 예시는 `--service-link`를 주고 만든 것이다(CI가 같은 인자로 다시 만들어 견준다). 연결 확인 묶음은
+    # 후처리 기록(call_summary)과 검사 사이에 있고, 맞게 이어졌으므로 리포트는 통과다.
+    report = json.loads(EXAMPLE_JSON.read_bytes().decode("utf-8"))
+    assert report["service_link"] == {"status": "matched", "audit_kind": "summary_created"}
+    keys = list(report)
+    assert keys.index("call_summary") + 1 == keys.index("service_link") == keys.index("checks") - 1
+    assert len(report["checks"]) == 5
+    assert report["ok"] is True
+
+
+def rebuilt_report(example, *, with_link):
+    """예시 JSON의 데이터를 흐름 결과(`run_call`이 주는 꼴)로 되돌려 `build_report`에 다시 넣는다."""
+    result = {"support_agent": example["support_agent"], "call_summary": example["call_summary"]}
+    if with_link:
+        result["service_link"] = example["service_link"]
+    return build_report(load_script(SHOP_CANCEL), example["script"]["sha256"], result, example["checks"])
+
+
+def test_building_the_report_from_the_examples_own_data_gives_the_example():
+    example_text = EXAMPLE_JSON.read_bytes().decode("utf-8")
+    example = json.loads(example_text)
+    # 연결 확인이 든 결과로 만들면 예시와 같다. 키 순서와 글자까지 같아야 CI의 바이트 비교가 맞는다.
+    with_link = rebuilt_report(example, with_link=True)
+    assert json.dumps(with_link, ensure_ascii=False, indent=2) + "\n" == example_text
+    # 인자를 주지 않은 실행의 결과로 만들면 예시에서 `service_link`만 뺀 것이다(키 하나만 없고 순서는 그대로).
+    without_link = rebuilt_report(example, with_link=False)
+    expected = {key: value for key, value in example.items() if key != "service_link"}
+    assert without_link == expected
+    assert list(without_link) == list(expected)
+
+
+def test_example_without_the_service_link_renders_the_same_minus_its_line():
+    # 연결 확인 묶음만 뺀 예시 JSON을 그리면, 연결 확인 줄만 뺀 예시 Markdown과 같다. 인자를 주지 않은 실행의
+    # 리포트가 연결 확인이 생기기 전과 같은 꼴이라는 것을 예시로 보인다.
+    report = json.loads(EXAMPLE_JSON.read_bytes().decode("utf-8"))
+    plain = {key: value for key, value in report.items() if key != "service_link"}
+    lines = EXAMPLE_MD.read_bytes().decode("utf-8").split("\n")
+    link_lines = [line for line in lines if line.startswith("- 서비스 연결 확인: ")]
+    assert len(link_lines) == 1
+    assert render_markdown(plain).split("\n") == [line for line in lines if line not in link_lines]
+
+
 def test_readme_local_commands_avoid_service_ports():
     # `## 로컬에서 돌리기` 절의 코드 울타리 안 명령은 18062·18072만 쓰고 서비스 기본 포트를 쓰지 않는다.
     # ':18062'는 ':8062'를 품지 않으므로(콜론 바로 뒤가 1) 두 검사가 서로 섞이지 않는다.
@@ -108,6 +153,16 @@ def test_readme_local_commands_avoid_service_ports():
     # 포트를 실제로 잡는 것은 uvicorn에 주는 `--port` 값이다. 주소만 보면 그 값이 서비스 기본 포트로
     # 바뀌어도 모르고 지나가므로, 그 값이 18062·18072 차례인지 따로 본다.
     assert re.findall(r"'--port'\s*,\s*'(\d+)'", code) == ["18062", "18072"]
+
+
+def test_readme_local_command_links_the_two_apps():
+    # 예시는 `--service-link`로 만든 것이라, 예시를 다시 만드는 이 명령도 같은 인자를 준다. 그 확인이 뜻이
+    # 있으려면 상담 앱이 후처리 앱의 주소(18072)를 알고 떠야 한다.
+    blocks = section_code_blocks(README.read_bytes().decode("utf-8"), "## 로컬에서 돌리기")
+    assert blocks, "README에 '## 로컬에서 돌리기' 절이 없거나 그 절에 코드 울타리가 없다"
+    code = "\n".join(blocks)
+    assert "$env:SUPPORT_AGENT_SUMMARY_URL = 'http://127.0.0.1:18072'" in code
+    assert "call-e2e --script calls/shop-cancel.json --service-link " in code
 
 
 # 위 도우미가 절과 울타리를 바르게 가르는지 고정한다. 도우미가 울타리를 빠뜨리면 README 시험의

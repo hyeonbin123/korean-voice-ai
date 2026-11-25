@@ -7,15 +7,36 @@ import pytest
 from fakes import GREETING, SUMMARY_URL, SUPPORT_URL, TOKEN, FakeServices, sample_script
 
 from call_e2e.clients import CallSummaryClient, SupportAgentClient
-from call_e2e.flow import check_expectations, run_call, summary_turns, tool_calls_from_audit
+from call_e2e.flow import (
+    check_expectations,
+    last_audit_kind,
+    run_call,
+    summary_turns,
+    tool_calls_from_audit,
+)
+
+# 통화 한 건의 기본 요청 차례: 세션 열기, 발화 셋, 대화·감사 로그 읽기, 후처리 서비스 직접 부르기.
+BASE_REQUESTS = [
+    ("POST", "/api/sessions"),
+    *[("POST", "/api/sessions/s-1/messages")] * 3,
+    ("GET", "/api/admin/sessions/s-1"),
+    ("POST", "/summarize"),
+]
+# 서비스 연결 확인이 그 뒤에 더하는 요청: 상담 서비스가 후처리 서비스를 부르게 하고, 감사 로그를 다시 읽는다.
+LINK_REQUESTS = [("POST", "/api/admin/sessions/s-1/summary"), ("GET", "/api/admin/sessions/s-1")]
 
 
-def run_fake(fake):
-    """실제 클라이언트 둘을 대역에 연결해 실행하고, 실패해도 연결을 닫는다."""
+def run_fake(fake, *, service_link=False):
+    """실제 클라이언트 둘을 대역에 연결해 실행하고, 실패해도 연결을 닫는다.
+
+    service_link를 주지 않으면 서비스 연결 확인 인자 없이, 예전과 같은 꼴(`run_call(대본, 상담, 후처리)`)로
+    부른다. 인자를 쓰지 않는 호출이 그대로 되는지도 이 도우미를 쓰는 모든 시험이 함께 보게 하려는 것이다.
+    """
     support = SupportAgentClient(SUPPORT_URL, TOKEN, transport=fake.transport)
     summary = CallSummaryClient(SUMMARY_URL, transport=fake.transport)
+    options = {"service_link": True} if service_link else {}
     try:
-        return run_call(sample_script(), support, summary)
+        return run_call(sample_script(), support, summary, **options)
     finally:
         support.close()
         summary.close()
@@ -122,3 +143,137 @@ def test_each_expectation_fails_independently(name):
     else:
         result["call_summary"]["model"] = "different:model"
     assert [c["name"] for c in check_expectations(sample_script(), result) if not c["ok"]] == [name]
+
+
+# ---------------------------------------------------------------- 서비스 연결 확인(service_link)
+
+
+def different_values(fake):
+    """연결 확인이 견주는 네 칸마다, 대역의 고정 기록과 다르면서 꼴은 맞는 값."""
+    return {
+        "record": {**fake.canned_summary()["record"], "summary": "다른 요약입니다."},
+        "needs_confirmation": [],
+        "model": "different:model",
+        "attempts": 2,
+    }
+
+
+def test_service_link_matches_the_direct_summary():
+    fake = FakeServices()
+    result = run_fake(fake, service_link=True)
+    # 앞 단계의 요청은 그대로이고, 연결 확인의 요청 둘이 그 끝에 붙는다.
+    assert [(r.method, r.url.path) for r in fake.requests] == BASE_REQUESTS + LINK_REQUESTS
+    link_request = fake.requests[len(BASE_REQUESTS)]
+    assert json.loads(link_request.content) == {"by": "e2e"}
+    assert link_request.headers["X-Admin-Token"] == TOKEN
+    assert result["service_link"] == {"status": "matched", "audit_kind": "summary_created"}
+    # 연결 확인은 검사를 하나 더하지 않는다: 검사는 여전히 다섯이고 모두 통과한다.
+    assert len(check_expectations(sample_script(), result)) == 5
+    assert all(c["ok"] for c in check_expectations(sample_script(), result))
+    # 직접 받은 기록과 앞 단계의 결과는 인자가 없을 때와 같다.
+    assert result["call_summary"] == run_fake(FakeServices())["call_summary"]
+
+
+def test_without_the_flag_nothing_changes():
+    fake = FakeServices()
+    result = run_fake(fake)
+    assert [(r.method, r.url.path) for r in fake.requests] == BASE_REQUESTS
+    assert not any(r.url.path.endswith("/summary") for r in fake.requests)
+    assert "service_link" not in result
+    assert list(result) == ["support_agent", "call_summary"]
+    # 인자를 명시적으로 끄는 것도 같다.
+    explicit = FakeServices()
+    support = SupportAgentClient(SUPPORT_URL, TOKEN, transport=explicit.transport)
+    summary = CallSummaryClient(SUMMARY_URL, transport=explicit.transport)
+    try:
+        assert run_call(sample_script(), support, summary, service_link=False) == result
+    finally:
+        support.close()
+        summary.close()
+    assert [(r.method, r.url.path) for r in explicit.requests] == BASE_REQUESTS
+
+
+@pytest.mark.parametrize("field", ["record", "needs_confirmation", "model", "attempts"])
+def test_service_link_names_the_field_that_differs(field):
+    fake = FakeServices()
+    fake.linked_overrides = {field: different_values(fake)[field]}
+    result = run_fake(fake, service_link=True)
+    assert result["service_link"] == {
+        "status": "mismatched",
+        "audit_kind": "summary_created",
+        "differs": [field],
+    }
+
+
+def test_service_link_lists_every_differing_field_in_a_fixed_order():
+    fake = FakeServices()
+    # 덮어쓰는 차례와 상관없이 리포트의 차례는 record, needs_confirmation, model, attempts로 고정이다.
+    fake.linked_overrides = dict(reversed(different_values(fake).items()))
+    result = run_fake(fake, service_link=True)
+    assert result["service_link"]["differs"] == ["record", "needs_confirmation", "model", "attempts"]
+
+
+@pytest.mark.parametrize("kind", ["summary_failed", "tool_call", None], ids=["failed", "other_row", "no_row"])
+def test_service_link_with_equal_fields_still_needs_the_summary_created_row(kind):
+    # 네 칸이 같아도 감사 로그의 마지막 행이 summary_created가 아니면(기록이 실패로 남았거나, 201인데 행이
+    # 없거나) 연결은 맞게 이어진 것이 아니다. differs는 비어 있다.
+    fake = FakeServices()
+    fake.linked_audit_kind = kind
+    result = run_fake(fake, service_link=True)["service_link"]
+    last_kind = kind if kind is not None else "tool_call"  # 행이 없으면 마지막은 상담 중 도구 호출 행이다
+    assert result == {"status": "mismatched", "audit_kind": last_kind, "differs": []}
+
+
+def test_service_link_compares_both_sides_after_the_same_shaping():
+    # 직접 받은 기록과 연결로 받은 기록은 같은 함수로 같은 꼴로 정리한 뒤 견준다. 리포트에 나오지 않는 칸이
+    # 한쪽에만 더 있다고 다른 기록이 되지는 않는다.
+    fake = FakeServices()
+    fake.linked_overrides = {"record": {**fake.canned_summary()["record"], "internal": "not in the report"}}
+    assert run_fake(fake, service_link=True)["service_link"]["status"] == "matched"
+
+
+def test_service_link_runs_after_a_call_that_stopped_early():
+    # 세션이 상담원에게 넘어가(handoff) 발화를 다 보내지 못한 부분 통화도, 그 대화에 대한 연결 확인은
+    # 같은 방식으로 한다. 직접 받은 기록과 연결로 받은 기록이 같은 대화로 만들어지기 때문이다.
+    fake = FakeServices(end_statuses=["open", "handoff", "open"])
+    result = run_fake(fake, service_link=True)
+    assert result["support_agent"]["unsent_turns"] == 1
+    assert result["service_link"] == {"status": "matched", "audit_kind": "summary_created"}
+
+
+@pytest.mark.parametrize(
+    ("override", "label"),
+    [
+        ({"record": "글"}, "create_summary.summary.record"),
+        ({"record": {"follow_up": None}}, "create_summary.summary.record.follow_up"),
+        ({"needs_confirmation": None}, "create_summary.summary.needs_confirmation"),
+        ({"model": 3}, "create_summary.summary.model"),
+        ({"attempts": "1"}, "create_summary.summary.attempts"),
+        ({"attempts": True}, "create_summary.summary.attempts"),
+    ],
+    ids=["record", "follow_up", "needs_confirmation", "model", "attempts", "attempts_bool"],
+)
+def test_service_link_rejects_a_linked_answer_that_breaks_the_contract(override, label):
+    # 상담 서비스의 답이 계약을 어기면 어긋남이 아니라 실행 불가(ValueError)다. 오류 글에는 단계 이름
+    # (create_summary)과 어느 칸인지가 들어 있다.
+    fake = FakeServices()
+    fake.linked_overrides = override
+    with pytest.raises(ValueError, match=label) as info:
+        run_fake(fake, service_link=True)
+    assert "create_summary" in str(info.value)
+
+
+def test_service_link_rejects_a_summary_that_is_not_an_object():
+    fake = FakeServices()
+    body = json.dumps({"session_id": "s-1", "summary": ["record"]})
+    fake.failures[("POST", "/api/admin/sessions/s-1/summary")] = (201, body)
+    with pytest.raises(ValueError, match=r"create_summary\.summary"):
+        run_fake(fake, service_link=True)
+
+
+def test_last_audit_kind_reads_the_kind_of_the_last_row():
+    assert last_audit_kind([{"kind": "session_started"}, {"kind": "summary_created"}]) == "summary_created"
+    assert last_audit_kind([]) is None
+    for broken in ({"kind": "summary_created"}, [1], [{"kind": 7}], [{"payload": {}}]):
+        with pytest.raises(ValueError):
+            last_audit_kind(broken)

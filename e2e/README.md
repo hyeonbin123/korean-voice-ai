@@ -12,9 +12,11 @@
 - `transcript_matches_script`: 대화에 남은 고객 말이 대본의 발화와 차례대로 같다.
 - `summary_model`: 후처리 응답의 `model`이 대본의 기대(`offline:canned`)와 같다.
 
-예시 리포트는 [`examples/shop-cancel/call-report.md`](examples/shop-cancel/call-report.md)다(같은 내용의 JSON은 [`call-report.json`](examples/shop-cancel/call-report.json)). 두 앱을 실제로 띄워 이 대본을 돌린 결과를 그대로 넣은 것이고, CI가 main에 push할 때와 pull request마다 다시 돌려 바이트까지 같은지 본다.
+선택 인자 `--service-link`(기본은 꺼짐)를 주면 위 흐름 끝에 확인 하나를 더한다. 상담 서비스의 관리자 끝점 `POST /api/admin/sessions/{id}/summary`를 불러 상담 서비스가 스스로 후처리 서비스에 대화를 보내 받은 기록을 만들게 하고, 그 기록의 `record`·`needs_confirmation`·`model`·`attempts` 네 칸이 위에서 시연이 직접 받은 기록과 같은지, 그 일이 감사 로그에 남았는지(세션을 다시 읽어 로그의 마지막 행의 종류가 `summary_created`인지) 본다. 이것은 위 검사 다섯 개에 들지 않는 따로 둔 확인이다. 리포트에는 `service_link` 묶음(JSON)과 머리 목록의 한 줄(Markdown)이 더해지고, 어긋나면 검사가 모두 통과해도 리포트의 `ok`가 `false`이며 종료 코드가 1이다. 인자를 주지 않으면 리포트와 표준 출력, 보내는 요청이 이 확인이 생기기 전과 같다.
 
-리포트에는 실행마다 달라지는 값(세션 id, 요청 id, 걸린 시간, 감사 로그 행의 id와 시각)을 넣지 않는다. 명령줄 `call-e2e`([`src/call_e2e/cli.py`](src/call_e2e/cli.py))의 종료 코드는 0 = 리포트를 썼고 검사가 모두 통과, 1 = 리포트를 썼지만 검사가 실패, 2 = 돌리지 못함(대본 오류, 관리자 토큰 없음, 제한 시간 안에 두 앱이 준비되지 않음, HTTP 요청 실패나 응답 형식 오류)이다.
+예시 리포트는 [`examples/shop-cancel/call-report.md`](examples/shop-cancel/call-report.md)다(같은 내용의 JSON은 [`call-report.json`](examples/shop-cancel/call-report.json)). 두 앱을 실제로 띄워 이 대본을 `--service-link`와 함께 돌린 결과를 그대로 넣은 것이고, CI가 main에 push할 때와 pull request마다 다시 돌려 바이트까지 같은지 본다.
+
+리포트에는 실행마다 달라지는 값(세션 id, 요청 id, 걸린 시간, 감사 로그 행의 id와 시각)을 넣지 않는다. 명령줄 `call-e2e`([`src/call_e2e/cli.py`](src/call_e2e/cli.py))의 종료 코드는 0 = 리포트를 썼고 검사가 모두 통과(`--service-link`를 줬다면 서비스 연결 확인도 일치), 1 = 리포트를 썼지만 검사가 실패했거나 서비스 연결 확인이 어긋남, 2 = 돌리지 못함(대본 오류, 관리자 토큰 없음, 제한 시간 안에 두 앱이 준비되지 않음, HTTP 요청 실패나 응답 형식 오류. `--service-link`가 부르는 끝점의 실패도 여기에 든다)이다.
 
 ## 배선 시연이지 품질 측정이 아니다
 
@@ -22,24 +24,27 @@
 - call-summary 쪽 기록은 업종마다 늘 같은 고정 답(`CannedProvider`, [`service.py`](../call-summary/src/call_summary/service.py))이다. 고정 답에 든 주문 번호는 이 대본의 통화에 나오지 않으므로 '확인이 필요한 번호'에 그 번호 하나가 `not_in_transcript`로 표시된다. 요약 품질과는 상관없다.
 - 그래서 이 시연이 보여 주는 것은 두 서비스가 아래 HTTP 계약대로 이어지는지뿐이다: 대본의 고객 말이 상담 세션에 들어가고, 그 대화가 후처리 요청으로 넘어가고, 두 응답이 리포트로 남는지. 모델을 올리지 않으므로 GPU가 필요 없다.
 - 두 구성 요소의 품질 수치와 그 조건은 각 구성 요소의 README([support-agent](../support-agent/README.md), [call-summary](../call-summary/README.md))에 있다.
+- `--service-link`가 보여 주는 것은 두 실제 앱 사이의 HTTP 계약 하나다: 상담 서비스가 스스로 후처리 서비스를 불러 같은 기록을 받고, 그 일을 감사 로그에 남긴다. 보여 주지 않는 것은 요약의 품질, 진짜 모델에서의 동작, 느리거나 죽은 후처리 서비스 앞에서의 동작이다(마지막 것은 상담 서비스의 [단위 시험](../support-agent/tests/test_summary_link.py)이 본다). 두 앱이 모델 없는 오프라인 앱이라 답이 정해져 있어서 두 번 받은 기록이 같다. 진짜 모델이면 같은 대화에도 답이 달라 이 확인은 어긋남으로 나온다.
 
 ## 흐름과 HTTP 계약
 
-대본 → support-agent 메시지(SSE) → 관리 API로 대화·감사 로그 → call-summary `/summarize` → 리포트
+대본 → support-agent 메시지(SSE) → 관리 API로 대화·감사 로그 → call-summary `/summarize` → 리포트. `--service-link`를 주면 리포트를 쓰기 전에, 관리 API로 support-agent가 스스로 call-summary를 부르게 하는 확인(아래 6번)이 하나 더 든다.
 
 1. 두 앱이 준비될 때까지 기다린다. support-agent의 `GET /healthz`와 call-summary의 `GET /health`가 둘 다 200을 줄 때까지 `--wait` 초(기본 30초)까지 다시 묻는다.
 2. `POST /api/sessions`로 상담 세션을 연다. 새 세션의 대화에는 상담원의 고정 인사말 한 줄이 이미 들어 있다.
 3. 고객 발화마다 `POST /api/sessions/{id}/messages`를 보내고 SSE 응답을 끝까지 읽는다. 턴에 `end` 이벤트가 없거나 그 세션 상태가 `open`이 아니면 남은 발화를 보내지 않는다.
 4. 관리 API `GET /api/admin/sessions/{id}`로 고객이 본 대화와 감사 로그를 읽는다. 부른 도구의 이름·인자·성공 여부는 감사 로그의 `tool_call` 행에서 가져온다.
 5. 그 대화의 `customer`·`agent`를 `고객`·`상담원`으로 바꿔 call-summary의 `POST /summarize`에 보낸다(업종은 대본에 적은 것, 이 대본은 `shop`).
-6. 두 응답으로 리포트를 쓰고 검사 다섯 개를 판정한다.
+6. (`--service-link`를 줄 때만) 관리 API `POST /api/admin/sessions/{id}/summary`로 support-agent가 스스로 call-summary의 `POST /summarize`를 부르게 한다. 받은 기록을 5번에서 직접 받은 기록과 같은 규칙으로 정리해 네 칸(`record`, `needs_confirmation`, `model`, `attempts`)을 견주고, 세션을 다시 읽어 감사 로그의 마지막 행의 종류가 `summary_created`인지 본다. 둘 다 맞으면 `matched`, 아니면 `mismatched`이고 다른 칸의 이름을 리포트에 적는다.
+7. 응답들로 리포트를 쓰고 검사 다섯 개를 판정한다.
 
 | 끝점 | 요청 | 응답 | 근거 |
 |---|---|---|---|
-| support-agent `GET /healthz` | — | 200 | [`app.py`](../support-agent/src/support_agent/service/app.py#L280) |
-| support-agent `POST /api/sessions` | 본문 없음 | 201 `{"session_id", "status", "messages", "pending_approvals"}` | [`app.py`](../support-agent/src/support_agent/service/app.py#L294), [`core.py`](../support-agent/src/support_agent/service/core.py) |
-| support-agent `POST /api/sessions/{id}/messages` | `{"text": 고객 발화}`. 서버 한도(기본 1,000자)를 넘으면 422 | 200 `text/event-stream`. 이벤트마다 `event: <이름>` 줄, `data: <JSON>` 줄, 빈 줄. 차례는 `status` → 도구마다 `tool`과 `tool_result`(사람 승인이 필요한 환불이면 `approval`도) → `error`(있을 때) → `reply` → `end`. 없는 세션 404, 닫힌 세션 409, 동시에 도는 턴이 한도에 닿으면 503 | [`app.py`](../support-agent/src/support_agent/service/app.py#L390), [`core.py`](../support-agent/src/support_agent/service/core.py) |
-| support-agent `GET /api/admin/sessions/{id}` | 헤더 `X-Admin-Token` | 200 `{"transcript": {"session_id", "status", "messages", "pending_approvals"}, "audit": [{"id", "at", "kind", "payload"}]}`. 관리자 토큰이 설정되지 않았으면 503, 틀리면 401 | [`app.py`](../support-agent/src/support_agent/service/app.py#L530), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| support-agent `GET /healthz` | — | 200 | [`app.py`](../support-agent/src/support_agent/service/app.py#L314) |
+| support-agent `POST /api/sessions` | 본문 없음 | 201 `{"session_id", "status", "messages", "pending_approvals"}` | [`app.py`](../support-agent/src/support_agent/service/app.py#L329), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| support-agent `POST /api/sessions/{id}/messages` | `{"text": 고객 발화}`. 서버 한도(기본 1,000자)를 넘으면 422 | 200 `text/event-stream`. 이벤트마다 `event: <이름>` 줄, `data: <JSON>` 줄, 빈 줄. 차례는 `status` → 도구마다 `tool`과 `tool_result`(사람 승인이 필요한 환불이면 `approval`도) → `error`(있을 때) → `reply` → `end`. 없는 세션 404, 닫힌 세션 409, 동시에 도는 턴이 한도에 닿으면 503 | [`app.py`](../support-agent/src/support_agent/service/app.py#L425), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| support-agent `GET /api/admin/sessions/{id}` | 헤더 `X-Admin-Token` | 200 `{"transcript": {"session_id", "status", "messages", "pending_approvals"}, "audit": [{"id", "at", "kind", "payload"}]}`. 관리자 토큰이 설정되지 않았으면 503, 틀리면 401 | [`app.py`](../support-agent/src/support_agent/service/app.py#L565), [`core.py`](../support-agent/src/support_agent/service/core.py) |
+| support-agent `POST /api/admin/sessions/{id}/summary` | 헤더 `X-Admin-Token`, 본문 `{"by": 담당자 이름}`(이 시연은 `e2e`). `--service-link`를 줄 때만 부른다 | 201 `{"session_id", "summary": {"record", "needs_confirmation", "model", "attempts"}}`. 상담 서비스가 스스로 후처리 서비스의 `POST /summarize`를 불러 만든 기록이고, 감사 로그에 `summary_created` 행이 남는다. 관리자 토큰이 설정되지 않았으면 503, 틀리면 401, 후처리 연결이 꺼져 있으면(`SUPPORT_AGENT_SUMMARY_URL`이 없음) 501, 없는 세션 404, 대화가 비면 409, 후처리 서비스가 그 대화를 받지 않으면 422, 붐비면 429, 후처리 서비스가 실패하거나 제때 답하지 않으면 502·504 | [`app.py`](../support-agent/src/support_agent/service/app.py#L596), [`core.py`](../support-agent/src/support_agent/service/core.py), [`summary.py`](../support-agent/src/support_agent/service/summary.py) |
 | call-summary `GET /health` | — | 200 | [`service.py`](../call-summary/src/call_summary/service.py#L813) |
 | call-summary `POST /summarize` | `{"domain", "turns": [{"speaker": "상담원" 또는 "고객", "text"}]}`. 업종은 shop·telecom·parcel·card, 발화 1~200개, 발화당 2,000자, 이어 붙인 전사 4,000자까지 | 200 `{"request_id", "record", "needs_confirmation", "model", "attempts", "latency_s"}`. 모르는 업종 422, 너무 길면 413, 기록을 거절하면 502, 붐비면 503 | [`service.py`](../call-summary/src/call_summary/service.py#L912) |
 
@@ -57,7 +62,7 @@ if (-not (Test-Path call-summary\.venv)) { uv sync --frozen --no-dev --directory
 if (-not (Test-Path e2e\.venv)) { uv sync --frozen --directory e2e }
 ```
 
-시연: 아래 덩어리를 한 번에 붙여 넣는다. 두 앱을 포트 18062·18072에 띄우고, 통화 한 건을 돌리고, 두 앱을 멈춘다. 리포트는 `e2e/out/report-1/`에 생긴다(`e2e/out/`은 git이 무시한다). 출력의 끝 두 줄은 `검사 5/5 통과`와 `exit 0`이다.
+시연: 아래 덩어리를 한 번에 붙여 넣는다. 두 앱을 포트 18062·18072에 띄우고(상담 앱은 후처리 앱의 주소를 `SUPPORT_AGENT_SUMMARY_URL`로 받는다), 통화 한 건을 서비스 연결 확인과 함께 돌리고, 두 앱을 멈춘다. 리포트는 `e2e/out/report-1/`에 생긴다(`e2e/out/`은 git이 무시한다). 출력의 끝 석 줄은 `검사 5/5 통과`, `서비스 연결 확인: 일치`, `exit 0`이다.
 
 ```powershell
 $out = 'out/report-1'
@@ -67,11 +72,12 @@ $env:E2E_ADMIN_TOKEN = $token; $env:SUPPORT_AGENT_ADMIN_TOKEN = $token
 New-Item -ItemType Directory -Force e2e\out | Out-Null
 $db = ((Resolve-Path e2e\out).Path + "\support-$(Get-Date -Format yyyyMMdd-HHmmss).db") -replace '\\', '/'
 $env:SUPPORT_AGENT_DATABASE_URL = "sqlite:///$db"
+$env:SUPPORT_AGENT_SUMMARY_URL = 'http://127.0.0.1:18072'
 $sa = Start-Process -PassThru -WindowStyle Hidden -WorkingDirectory support-agent -FilePath (Resolve-Path support-agent\.venv\Scripts\python.exe) -ArgumentList '-m','uvicorn','support_agent.service.offline:create_offline_app','--factory','--host','127.0.0.1','--port','18062' -RedirectStandardOutput e2e\out\support-agent.out.log -RedirectStandardError e2e\out\support-agent.err.log
 $cs = Start-Process -PassThru -WindowStyle Hidden -WorkingDirectory call-summary -FilePath (Resolve-Path call-summary\.venv\Scripts\python.exe) -ArgumentList '-m','uvicorn','call_summary.service:create_offline_app','--factory','--host','127.0.0.1','--port','18072' -RedirectStandardOutput e2e\out\call-summary.out.log -RedirectStandardError e2e\out\call-summary.err.log
 "$($sa.Id) $($cs.Id)" | Set-Content -Encoding ascii e2e\out\pids.txt
 try {
-  uv run --directory e2e --frozen --no-sync call-e2e --script calls/shop-cancel.json --support-url http://127.0.0.1:18062 --summary-url http://127.0.0.1:18072 --wait 180 --out $out
+  uv run --directory e2e --frozen --no-sync call-e2e --script calls/shop-cancel.json --service-link --support-url http://127.0.0.1:18062 --summary-url http://127.0.0.1:18072 --wait 180 --out $out
   $code = $LASTEXITCODE
 } finally {
   Stop-Process -Id $sa.Id, $cs.Id -ErrorAction SilentlyContinue
@@ -82,7 +88,8 @@ try {
 - 포트는 서비스 기본값(support-agent 8062, call-summary 8072)이 아니라 18062·18072만 쓴다. 그 PC에 두 서비스가 Docker Compose로 떠 있으면 기본 포트로 돌린 시연은 오프라인 앱이 아니라 진짜 서비스와 이야기하는데, support-agent `/healthz`의 `model`은 설정값이라 응답만 보고는 오프라인 앱인지 알 수 없다.
 - `$env:PYTHONUTF8 = '1'`은 파이썬이 표준 출력과 두 앱의 로그(`e2e/out/*.log`)를 UTF-8로 쓰게 한다. Windows의 파이썬은 출력이 파일이나 파이프면 시스템 코드 페이지(한국어 Windows는 cp949)로 써서 한글이 깨질 수 있다.
 - 관리자 토큰은 실행마다 새로 만드는 임시 값이고 화면이나 파일에 찍지 않는다. support-agent는 `SUPPORT_AGENT_ADMIN_TOKEN`으로, `call-e2e`는 `E2E_ADMIN_TOKEN`으로 같은 값을 읽는다.
-- 덩어리가 정한 환경 변수 넷(`PYTHONUTF8`, `E2E_ADMIN_TOKEN`, `SUPPORT_AGENT_ADMIN_TOKEN`, `SUPPORT_AGENT_DATABASE_URL`)은 그 PowerShell 창에 남는다. 그 창에서 support-agent 서비스를 따로 띄우면 이 값을 읽으므로, 다른 일은 새 창에서 한다.
+- `SUPPORT_AGENT_SUMMARY_URL`은 상담 앱이 후처리 앱을 부를 주소다. 상담 앱은 이 주소를 설정으로만 받고, 관리 API가 불릴 때 그 주소로 대화를 보낸다. 상담 앱이 뜰 때는 그 주소에 연결하지 않으므로 후처리 앱이 늦게 떠도 된다. 이 값 없이 띄운 상담 앱에 `--service-link`를 주면 상담 앱이 501로 답하고 시연은 종료 코드 2로 끝난다. 오류 글에 켜는 설정 이름이 적혀 있다.
+- 덩어리가 정한 환경 변수 다섯(`PYTHONUTF8`, `E2E_ADMIN_TOKEN`, `SUPPORT_AGENT_ADMIN_TOKEN`, `SUPPORT_AGENT_DATABASE_URL`, `SUPPORT_AGENT_SUMMARY_URL`)은 그 PowerShell 창에 남는다. 그 창에서 support-agent 서비스를 따로 띄우면 이 값을 읽으므로(후처리 서비스 주소도 18072로 정해져 있다), 다른 일은 새 창에서 한다.
 - support-agent의 DB는 실행마다 `e2e/out/` 안의 새 SQLite 파일이다. 앞 실행이 주문 O-90005를 이미 취소한 DB를 다시 쓰면 결과가 달라진다. 지난 파일은 지우지 않고 남겨 둔다.
 - 두 앱은 각 서비스 폴더 `.venv`의 파이썬으로 직접 띄우고, `Start-Process`가 준 프로세스 번호로 멈춘다. 그 번호는 `e2e/out/pids.txt`에도 적는다. 덩어리가 중간에 끊기면 그 두 번호를 `Stop-Process -Id <번호>`로 멈춘 뒤, 아래 명령이 아무것도 보여 주지 않는지 확인한다.
 
@@ -104,8 +111,8 @@ Copy-Item e2e\out\report-1\call-report.* e2e\examples\shop-cancel\
 
 1. 두 서비스를 기본 의존성만으로 설치하고(`uv sync --frozen --no-dev`, 두 서비스의 Docker 이미지와 같은 설치 범위), 이 폴더를 설치한다(`uv sync --frozen`).
 2. 이 폴더의 린트(`ruff check`, `ruff format --check`)와 시험(`pytest`)을 돌린다. 시험은 앱 없이 가짜 서비스로 돌고, 예시 리포트가 대본과 렌더링 코드에 맞는지도 본다.
-3. 임시 관리자 토큰을 만들어 로그에서 가리고, 두 오프라인 앱을 기본 포트 8062·8072에 띄운다. CI 러너는 매번 새것이라 그 포트에 다른 서비스가 없다.
-4. `call-e2e`로 통화 한 건을 돌리고, 새로 나온 리포트가 [`examples/shop-cancel/`](examples/shop-cancel/)과 바이트까지 같은지 `diff -u`로 본다.
+3. 임시 관리자 토큰을 만들어 로그에서 가리고, 두 오프라인 앱을 기본 포트 8062·8072에 띄운다. 상담 앱에는 후처리 앱의 주소(`SUPPORT_AGENT_SUMMARY_URL`, 8072)도 준다. 상담 앱은 관리 API가 불릴 때 그 주소에 연결하므로 두 앱을 띄우는 차례는 상관없다. CI 러너는 매번 새것이라 그 포트에 다른 서비스가 없다.
+4. `call-e2e --service-link`로 통화 한 건을 돌리고(상담 앱이 후처리 앱을 직접 불러 만든 기록의 확인 포함), 새로 나온 리포트가 [`examples/shop-cancel/`](examples/shop-cancel/)과 바이트까지 같은지 `diff -u`로 본다.
 5. 성공·실패와 상관없이 리포트를 작업 요약에, 두 앱의 로그를 작업 로그에 남긴다.
 
 ## 한계
@@ -114,4 +121,5 @@ Copy-Item e2e\out\report-1\call-report.* e2e\examples\shop-cancel\
 - 두 구성 요소의 주문 번호 꼴이 다르다. support-agent는 `O-`와 숫자 다섯 자리([`offline.py` 41행](../support-agent/src/support_agent/service/offline.py#L41)), call-summary의 쇼핑몰 업종은 `D`와 숫자 일곱 자리([`domains.py` 231행](../call-summary/src/call_summary/domains.py#L231))다. 그래서 예시 리포트에서도 상담 도구가 다룬 번호와 후처리 기록의 번호가 다르다. 실모델로 잇기 전에 두 쪽의 업종 정의를 맞춰야 한다.
 - support-agent 서비스의 기본 한도 안에서만 돈다: 세션당 40턴, 메시지당 1,000자([`settings.py`](../support-agent/src/support_agent/service/settings.py)). 대본을 읽을 때 이 한도를 넘는 발화 수와 길이는 거절한다.
 - 서비스 코드는 바꾸지 않고 HTTP로만 잇는다. 그래서 서비스 응답의 꼴이 바뀌면 이 폴더의 클라이언트와 시험을 함께 고쳐야 한다.
+- 서비스 연결 확인(`--service-link`)은 두 앱이 모델 없는 오프라인 앱이고 상담 앱이 후처리 앱의 주소로 떠 있을 때만 뜻이 있다. 상담 앱이 후처리 앱에 보내는 업종은 늘 `shop`이라([`summary.py`](../support-agent/src/support_agent/service/summary.py)의 `DOMAIN`), 대본의 업종이 `shop`이 아니면 시연이 직접 보낸 요청과 업종이 달라 두 기록이 같기를 기대할 수 없다.
 - 같은 입력이면 같은 바이트라는 것은 두 앱을 새로 띄우고 support-agent를 새 DB로 시작한 처음 상태에서 같은 대본을 돌릴 때만 성립한다(그래서 실행마다 새 DB 파일을 쓴다). 사람 승인이 걸리는 통화라면 승인 번호(`AP-1` 같은 일련번호)가 리포트에 남는데, 이것도 처음 상태가 같아야 같다.
