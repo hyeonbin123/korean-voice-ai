@@ -3,12 +3,15 @@
 명령줄은 언제나 실제 크기의 기본값(382발화, 한글 전용 257, 알려진 정답 차이 행 23·57)으로 검증하므로, 이
 파일의 시험은 실제 크기의 합성 저장소(`conftest.py`의 `full_repository`)를 쓴다. 그 폴더는 시험 묶음
 전체에서 한 번만 만들고, 고치는 시험은 복사해서 고친다. 점수를 매기는 `run`도 한 번만 돌려(`full_results`)
-여러 시험이 그 결과를 나눠 쓴다.
+여러 시험이 그 결과를 나눠 쓴다. 그 합성 저장소는 재료의 sha256을 적은 고정 목록(`inputs.sha256`)도 자기
+재료로 만들어 두므로, `run`과 `verify`가 끝까지 돈다. 재료를 일부러 바꾸는 시험은 목록을 그대로 두어 `run`과
+`verify`가 멈추는 것을 보거나, 목록을 다시 만들어(`repin`) 그 뒤의 검증을 본다.
 
 실제 저장소로는 시험하지 않는다.
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -72,6 +75,37 @@ def put_results(repository: Path, source: Path, *, crlf: bool = False) -> Path:
         data = (source / name).read_bytes()
         (folder / name).write_bytes(data.replace(b"\n", b"\r\n") if crlf else data)
     return folder
+
+
+PINNED_NAME = "evaluation/asr/inputs.sha256"
+SUMMARY_OF_ONE_CHANGED_INPUT = "재료 1개가 고정 목록(evaluation/asr/inputs.sha256)과 다르다"
+
+
+def pinned_path(repository: Path) -> Path:
+    return repository / PINNED_NAME
+
+
+def digest_of(path: Path) -> str:
+    """파일의 sha256. 줄 끝의 CRLF는 LF로 바꾼 바이트에서 센다(구현의 `digest`와 따로 적은 같은 정의다)."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def repin(repository: Path) -> None:
+    """고정 목록을 지금 재료의 sha256으로 다시 쓴다(재료를 일부러 바꾼 시험이 목록 대조는 통과하게 한다)."""
+    path = pinned_path(repository)
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        name = line.split("  ", 1)[1]
+        lines.append(f"{digest_of(repository / name)}  {name}")
+    path.write_text("".join(line + "\n" for line in lines), encoding="utf-8", newline="\n")
+
+
+def change_one_character(path: Path) -> None:
+    """리포트의 `model` 값 글자 하나를 바꾼다. 읽는 값은 그대로이고 파일의 sha256만 달라진다."""
+    text = path.read_text(encoding="utf-8")
+    assert '"model": "synthetic"' in text
+    changed = text.replace('"model": "synthetic"', '"model": "synthetid"', 1)
+    path.write_text(changed, encoding="utf-8", newline="\n")
 
 
 @pytest.fixture(scope="session")
@@ -451,8 +485,230 @@ def test_a_system_with_nothing_recorded_to_reproduce_is_a_program_error(monkeypa
 
 
 # ---------------------------------------------------------------------------------------------
+# check --print-inputs와 재료 고정 목록(inputs.sha256)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_check_help_names_the_print_inputs_option(capsys):
+    code, out, err = invoke(capsys, "check", "--help")
+    assert (code, err) == (0, "")
+    assert "--print-inputs" in out
+
+
+def test_print_inputs_prints_one_line_per_material_in_path_order(capsys, full_repository):
+    code, out, err = invoke(capsys, "check", "--print-inputs", "--repo", str(full_repository.root))
+    assert (code, err) == (0, "")
+    assert out == "".join(line + "\n" for line in full_repository.pinned_lines())
+    paths = [line.split("  ", 1)[1] for line in out.splitlines()]
+    assert len(paths) == 19 and paths == sorted(paths)
+    assert all(len(line.split("  ", 1)[0]) == 64 for line in out.splitlines())
+
+
+def test_print_inputs_gives_the_same_values_whatever_the_checkout_line_endings(
+    capsys, full_repository, full_repository_crlf
+):
+    # 줄 끝의 CR을 뗀 바이트로 세므로, 줄바꿈 변환을 켠 채 받은 복제본에서도 같은 목록이 나온다.
+    lf = invoke(capsys, "check", "--print-inputs", "--repo", str(full_repository.root))
+    crlf = invoke(capsys, "check", "--print-inputs", "--repo", str(full_repository_crlf.root))
+    assert lf[0] == 0
+    assert lf == crlf
+
+
+def test_print_inputs_does_not_verify_or_reproduce(capsys, full_repository, copy_repository):
+    # 짝짓기 검증에 걸릴 재료도 목록에는 그대로 오른다. 검증 줄, 재현 줄, 요약 줄은 찍지 않는다.
+    root = copy_repository(full_repository)
+    break_sentences(root, 5)
+    code, out, err = invoke(capsys, "check", "--print-inputs", "--repo", str(root))
+    assert (code, err) == (0, "")
+    lines = out.splitlines()
+    assert len(lines) == 19
+    changed = sources.SYSTEMS[1].path
+    assert [line for line in lines if line not in full_repository.pinned_lines()] == [
+        f"{digest_of(root / changed)}  {changed}"
+    ]
+
+
+def test_print_inputs_reports_a_missing_material_as_unreadable(capsys, full_repository, copy_repository):
+    root = copy_repository(full_repository)
+    missing = sources.SYSTEMS[2].path
+    (root / missing).unlink()
+    code, out, err = invoke(capsys, "check", "--print-inputs", "--repo", str(root))
+    assert (code, out) == (2, "")
+    assert err.splitlines() == [f"{missing}: 파일이 없다"]
+
+
+def test_check_does_not_need_the_pinned_list(capsys, full_repository, copy_repository):
+    # 고정 목록은 `check --print-inputs`가 만드는 것이다. 목록이 없거나 재료와 달라도 check는 돈다.
+    root = copy_repository(full_repository)
+    pinned_path(root).unlink()
+    assert invoke(capsys, "check", "--repo", str(root))[0] == 0
+    assert invoke(capsys, "check", "--print-inputs", "--repo", str(root))[0] == 0
+    pinned_path(root).write_text("not a list\n", encoding="utf-8", newline="\n")
+    assert invoke(capsys, "check", "--repo", str(root))[0] == 0
+
+
+# ---------------------------------------------------------------------------------------------
 # run
 # ---------------------------------------------------------------------------------------------
+
+
+def test_run_refuses_inputs_that_changed_after_the_rules(capsys, full_repository, copy_repository, tmp_path):
+    # 재료 파일의 글자 하나만 달라도 run은 1로 멈추고 결과 파일을 하나도 만들지 않는다.
+    root = copy_repository(full_repository)
+    material = sources.SYSTEMS[1].path
+    change_one_character(root / material)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(out_dir))
+    assert (code, err) == (1, "")
+    pinned = dict(full_repository.pinned_entries)[material]
+    assert out.splitlines() == [
+        f"{material}: 값이 다르다(고정 {pinned}, 지금 {digest_of(root / material)})",
+        SUMMARY_OF_ONE_CHANGED_INPUT,
+    ]
+    assert list(out_dir.iterdir()) == []
+
+
+def test_run_without_the_pinned_list_is_an_error(capsys, full_repository, copy_repository, tmp_path):
+    root = copy_repository(full_repository)
+    pinned_path(root).unlink()
+    out_dir = tmp_path / "out"
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(out_dir))
+    assert (code, out) == (2, "")
+    assert err.splitlines() == [f"{PINNED_NAME}: 파일이 없다"]
+    assert not out_dir.exists()
+
+
+def test_run_names_every_input_that_differs_from_the_pinned_list(
+    capsys, full_repository, copy_repository, tmp_path
+):
+    # 다른 곳이 세 가지다: 값이 다름, 목록에 없음, 재료에 없음. 경로 순으로 한 줄씩 찍고 끝 줄에 개수를
+    # 적는다.
+    root = copy_repository(full_repository)
+    entries = dict(full_repository.pinned_entries)
+    changed, dropped = sources.SYSTEMS[1].path, sources.SYSTEMS[5].path
+    stale = "whisper-ko-ft/reports/gone/fleurs-ko-test.json"
+    change_one_character(root / changed)
+    lines = [line for line in full_repository.pinned_lines() if not line.endswith("  " + dropped)]
+    lines.append("a" * 64 + "  " + stale)
+    pinned_path(root).write_text("".join(line + "\n" for line in lines), encoding="utf-8", newline="\n")
+    out_dir = tmp_path / "out"
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(out_dir))
+    assert (code, err) == (1, "")
+    expected = sorted(
+        [
+            (changed, f"{changed}: 값이 다르다(고정 {entries[changed]}, 지금 {digest_of(root / changed)})"),
+            (dropped, f"{dropped}: 고정 목록에 없다(지금 {entries[dropped]})"),
+            (stale, f"{stale}: 지금 재료에 없다(고정 {'a' * 64})"),
+        ]
+    )
+    assert out.splitlines() == [
+        *(line for _, line in expected),
+        "재료 3개가 고정 목록(evaluation/asr/inputs.sha256)과 다르다",
+    ]
+    assert not out_dir.exists()
+
+
+def test_run_compares_with_the_pinned_list_before_the_verification(
+    capsys, full_repository, copy_repository, tmp_path
+):
+    # 재료가 고정 목록과 다르면 짝짓기 검증보다 먼저 멈춘다: 검증 줄도 검증의 요약 줄도 나오지 않는다.
+    root = copy_repository(full_repository)
+    break_sentences(root, 3)
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(tmp_path / "out"))
+    assert (code, err) == (1, "")
+    assert "문장 번호" not in out and "어긋남 3개" not in out
+    assert out.splitlines()[-1] == SUMMARY_OF_ONE_CHANGED_INPUT
+
+
+def test_run_accepts_a_list_made_by_print_inputs(capsys, full_repository, copy_repository, tmp_path):
+    # 재료를 바꾸면 run이 멈추고, `check --print-inputs`의 출력을 목록으로 삼으면 그 재료로 돈다.
+    root = copy_repository(full_repository)
+    change_one_character(root / sources.SYSTEMS[1].path)
+    assert invoke(capsys, "run", "--repo", str(root), "--out", str(tmp_path / "refused"))[0] == 1
+    code, out, err = invoke(capsys, "check", "--print-inputs", "--repo", str(root))
+    assert (code, err) == (0, "")
+    pinned_path(root).write_bytes(out.encode("utf-8"))
+    code, _, err = invoke(capsys, "run", "--repo", str(root), "--out", str(tmp_path / "out"))
+    assert (code, err) == (0, "")
+    assert sorted(p.name for p in (tmp_path / "out").iterdir()) == [JSON_NAME, MARKDOWN_NAME]
+
+
+def test_a_pinned_list_with_crlf_line_endings_is_accepted(capsys, full_repository, copy_repository, tmp_path):
+    # 줄바꿈 변환을 켠 채 받은 복제본에서는 목록의 줄 끝도 CRLF로 들어온다.
+    root = copy_repository(full_repository)
+    path = pinned_path(root)
+    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    code, _, err = invoke(capsys, "run", "--repo", str(root), "--out", str(tmp_path / "out"))
+    assert (code, err) == (0, "")
+
+
+MALFORMED_LISTS = (
+    "empty-file",
+    "one-space-between-the-fields",
+    "digest-too-short",
+    "digest-in-capitals",
+    "blank-line-between-entries",
+    "byte-order-mark",
+    "same-path-twice",
+)
+
+
+def malformed_lists(good: list[str]) -> dict[str, tuple[bytes, str]]:
+    """꼴이 깨진 고정 목록 몇 가지: 이름 -> (파일 내용, 오류 메시지가 `<경로>: `에 이어 가져야 하는 글)."""
+
+    def joined(lines: list[str]) -> bytes:
+        return "".join(line + "\n" for line in lines).encode("utf-8")
+
+    def not_a_line(number: int) -> str:
+        return f"{number}번째 줄이 '<sha256>  <경로>' 꼴이 아니다"
+
+    first = good[0]
+    return {
+        "empty-file": (b"", "적힌 재료가 하나도 없다"),
+        "one-space-between-the-fields": (
+            joined([*good[:2], good[2].replace("  ", " ", 1), *good[3:]]),
+            not_a_line(3),
+        ),
+        "digest-too-short": (joined([first[1:], *good[1:]]), not_a_line(1)),
+        "digest-in-capitals": (joined([first[:64].upper() + first[64:], *good[1:]]), not_a_line(1)),
+        "blank-line-between-entries": (joined([first, "", *good[1:]]), not_a_line(2)),
+        "byte-order-mark": (b"\xef\xbb\xbf" + joined(good), not_a_line(1)),
+        "same-path-twice": (
+            joined([*good, first]),
+            f"{len(good) + 1}번째 줄: 경로 '{first.split('  ', 1)[1]}'가 두 번 나온다",
+        ),
+    }
+
+
+@pytest.mark.parametrize("name", MALFORMED_LISTS)
+def test_run_rejects_a_malformed_pinned_list(capsys, full_repository, copy_repository, tmp_path, name):
+    root = copy_repository(full_repository)
+    content, reason = malformed_lists(full_repository.pinned_lines())[name]
+    pinned_path(root).write_bytes(content)
+    out_dir = tmp_path / "out"
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(out_dir))
+    assert (code, out) == (2, "")
+    assert err.splitlines() == [f"{PINNED_NAME}: {reason}"]
+    assert not out_dir.exists()
+
+
+def test_run_rejects_a_pinned_list_that_is_not_utf8(capsys, full_repository, copy_repository, tmp_path):
+    root = copy_repository(full_repository)
+    pinned_path(root).write_bytes(b"\xff\xfe" + b"x" * 10)
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(tmp_path / "out"))
+    assert (code, out) == (2, "")
+    assert len(err.splitlines()) == 1 and err.startswith(f"{PINNED_NAME}: UTF-8로 읽을 수 없다")
+
+
+def test_run_reports_a_pinned_list_that_cannot_be_read(capsys, full_repository, copy_repository, tmp_path):
+    # 목록 자리에 파일이 아닌 것(폴더)이 있다.
+    root = copy_repository(full_repository)
+    pinned_path(root).unlink()
+    pinned_path(root).mkdir()
+    code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(tmp_path / "out"))
+    assert (code, out) == (2, "")
+    assert len(err.splitlines()) == 1 and err.startswith(f"{PINNED_NAME}: 파일을 읽지 못했다(")
 
 
 def test_run_writes_both_result_files(full_results):
@@ -480,6 +736,7 @@ def test_run_writes_both_result_files(full_results):
 def test_run_writes_nothing_when_the_join_fails(capsys, full_repository, copy_repository, tmp_path):
     root = copy_repository(full_repository)
     break_sentences(root, 3)
+    repin(root)  # 고정 목록 대조는 통과하고 짝짓기 검증에서 멈추게 한다
     out_dir = tmp_path / "must-not-exist"
     code, out, err = invoke(capsys, "run", "--repo", str(root), "--out", str(out_dir))
     assert (code, err) == (1, "")
@@ -613,11 +870,54 @@ def test_verify_does_not_compare_when_a_recorded_value_is_not_reproduced(
     assert "같다" not in out
 
 
+def test_verify_refuses_inputs_that_changed_after_the_rules(
+    capsys, full_repository, full_results, copy_repository
+):
+    # 재료가 고정 목록과 다르면 결과를 다시 만들어 견주기 전에 1로 멈춘다. 결과가 다른 까닭이 재료인지
+    # 코드인지 출력에서 가를 수 있게 하려는 것이다(결과 파일 줄은 나오지 않는다).
+    out_dir, _ = full_results
+    root = copy_repository(full_repository)
+    put_results(root, out_dir)
+    material = sources.SYSTEMS[1].path
+    change_one_character(root / material)
+    code, out, err = invoke(capsys, "verify", "--repo", str(root))
+    assert (code, err) == (1, "")
+    pinned = dict(full_repository.pinned_entries)[material]
+    assert out.splitlines() == [
+        f"{material}: 값이 다르다(고정 {pinned}, 지금 {digest_of(root / material)})",
+        SUMMARY_OF_ONE_CHANGED_INPUT,
+    ]
+
+
+def test_verify_compares_with_the_pinned_list_before_the_verification(
+    capsys, full_repository, full_results, copy_repository
+):
+    # run과 같은 차례다. 재료가 고정 목록과 다르면 짝짓기 검증보다 먼저 멈춘다.
+    out_dir, _ = full_results
+    root = copy_repository(full_repository)
+    put_results(root, out_dir)
+    break_sentences(root, 3)
+    code, out, err = invoke(capsys, "verify", "--repo", str(root))
+    assert (code, err) == (1, "")
+    assert "문장 번호" not in out and "어긋남 3개" not in out
+    assert out.splitlines()[-1] == SUMMARY_OF_ONE_CHANGED_INPUT
+
+
+def test_verify_without_the_pinned_list_is_an_error(capsys, full_repository, full_results, copy_repository):
+    out_dir, _ = full_results
+    root = copy_repository(full_repository)
+    put_results(root, out_dir)
+    pinned_path(root).unlink()
+    code, out, err = invoke(capsys, "verify", "--repo", str(root))
+    assert (code, out) == (2, "")
+    assert err.splitlines() == [f"{PINNED_NAME}: 파일이 없다"]
+
+
 def test_verify_notices_when_a_material_file_changed_after_the_results_were_made(
     capsys, full_repository, full_results, copy_repository
 ):
-    # 재료의 sha256이 결과 파일에 들어 있어서, 짝짓기 검증을 통과하는 작은 변경(읽지 않는 키)도 결과가
-    # 낡았다고 알린다.
+    # 고정 목록을 새 재료에 맞게 다시 만들었어도 결과 파일은 옛 재료로 만든 것이다. 재료의 sha256이 결과
+    # 파일에 들어 있어서, 짝짓기 검증을 통과하는 작은 변경(읽지 않는 키)도 결과가 낡았다고 알린다.
     out_dir, _ = full_results
     root = copy_repository(full_repository)
     put_results(root, out_dir)
@@ -625,6 +925,9 @@ def test_verify_notices_when_a_material_file_changed_after_the_results_were_made
     document = json.loads(path.read_text(encoding="utf-8"))
     document[0]["variant"] = "changed after the results were made"
     path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    code, printed, err = invoke(capsys, "check", "--print-inputs", "--repo", str(root))
+    assert (code, err) == (0, "")
+    pinned_path(root).write_bytes(printed.encode("utf-8"))
     code, out, err = invoke(capsys, "verify", "--repo", str(root))
     assert (code, err) == (1, "")
     assert [line.split(":")[0] for line in out.splitlines()] == [JSON_NAME]
@@ -637,6 +940,7 @@ def test_verify_reports_mismatches_of_the_materials_instead_of_comparing(
     root = copy_repository(full_repository)
     put_results(root, out_dir)
     break_sentences(root, 2)
+    repin(root)  # 고정 목록 대조는 통과하고 짝짓기 검증에서 멈추게 한다
     code, out, err = invoke(capsys, "verify", "--repo", str(root))
     assert (code, err) == (1, "")
     assert out.splitlines()[-1] == "묶음 14개, 발화 382개(한글 전용 257개), 어긋남 2개"
@@ -706,6 +1010,30 @@ def test_output_is_utf8_when_piped(full_repository, tmp_path):
     )
     assert helped.returncode == 0
     assert "종료 코드" in helped.stdout.decode("utf-8")
+
+
+def test_printed_inputs_have_lf_line_endings(full_repository, tmp_path):
+    # 이 출력은 파일로 받아 고정 목록이 된다. 윈도우의 파이썬은 줄 끝을 CRLF로 바꿔 쓰므로, 표준 출력을 LF로
+    # 다시 열지 않으면 목록의 줄 끝이 CRLF가 된다. 받은 바이트에 CR이 없고 줄마다 LF로 끝나야 한다.
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "asr_compare.cli",
+            "check",
+            "--print-inputs",
+            "--repo",
+            str(full_repository.root),
+        ],
+        capture_output=True,
+        env=child_environment(),
+        cwd=tmp_path,
+        check=False,
+    )
+    assert done.returncode == 0
+    assert done.stdout == "".join(line + "\n" for line in full_repository.pinned_lines()).encode("utf-8")
+    assert b"\r" not in done.stdout
+    assert done.stderr == b""
 
 
 def test_output_has_no_carriage_returns_even_where_the_platform_would_add_them(full_repository, tmp_path):

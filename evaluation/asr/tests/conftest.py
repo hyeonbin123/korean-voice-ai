@@ -34,6 +34,7 @@
     않게 한다).
 """
 
+import hashlib
 import json
 import random
 import re
@@ -71,6 +72,8 @@ TWIN_OF = {
     "qwen3-asr-1.7b-qn-s050-fixed": "qwen3-asr-1.7b-qn-s050",
 }
 STT_MANIFEST = "stt-scratch/manifests/test_fleurs.jsonl"
+# 재료의 sha256을 적어 두는 파일(저장소 뿌리 기준). 구현의 이름을 가져다 쓰지 않고 따로 적는다.
+PINNED_INPUTS = "evaluation/asr/inputs.sha256"
 STT_FILES = {
     "stt-scratch-full": "stt-scratch/reports/final/test_fleurs-full.hyps.jsonl",
     "stt-scratch-streaming": "stt-scratch/reports/final/test_fleurs-streaming.hyps.jsonl",
@@ -235,6 +238,8 @@ class Synthetic:
     counts_cache: dict[str, list[tuple[int, int]]] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )
+    # 재료 열아홉 개의 (경로, sha256), 경로 순. `write_repository`가 채운다. 고정 목록 파일의 내용과 같다.
+    pinned_entries: list[tuple[str, str]] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def stored_texts(self, key: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """묶음의 리포트 파일에 저장된 (정답, 가설) 글. 구성 요소마다 저장하는 꼴이 다르다."""
@@ -244,6 +249,10 @@ class Synthetic:
         if key in STT_FILES:
             return self.stt_references, hypotheses
         return self.references, hypotheses
+
+    def pinned_lines(self) -> list[str]:
+        """고정 목록(`inputs.sha256`)의 줄: `<sha256>  <뿌리 기준 경로>`, 경로 순. 줄 끝은 뺀 글이다."""
+        return [f"{digest}  {path}" for path, digest in self.pinned_entries]
 
     def stored_counts(self, key: str) -> list[tuple[int, int]]:
         """묶음의 리포트에 저장된 글로 발화마다 센 (편집 수, 정규화한 정답 글자 수).
@@ -309,6 +318,7 @@ def write_repository(
     seed: int = 0,
     line_endings: str = "real",
     stt_order: str = "id",
+    pinned: bool = False,
 ) -> Synthetic:
     """root 아래에 재료 파일 열아홉 개를 실제와 같은 폴더 구조·꼴로 만들고 정답표를 돌려준다.
 
@@ -321,6 +331,10 @@ def write_repository(
     stt_order             stt-scratch 파일 안의 줄 차례: "id"(실제와 같은 id 글자 사전순), "row"(행 번호
                           순), "reversed"(id 글자 사전순의 거꾸로). 가설 파일에만 적용하고 매니페스트는
                           언제나 id 순이다.
+    pinned                참이면 재료의 sha256을 적어 두는 파일(`evaluation/asr/inputs.sha256`)도 만든다. 그
+                          파일은 재료가 아니라서, 재료 파일 열아홉 개만 있기를 기대하는 시험은
+                          기본값(거짓)을 쓴다. 명령줄의 `run`·`verify`는 이 파일이 있어야 돌므로 그 시험의
+                          고정물은 참으로 만든다.
     """
     if line_endings not in {"real", "lf", "crlf"}:
         raise ValueError(f"line_endings는 real·lf·crlf 가운데 하나여야 한다: {line_endings}")
@@ -425,6 +439,24 @@ def write_repository(
             for row in hyps_order
         ]
         write_text(root / path, jsonl(rows), crlf=hyps_crlf)
+
+    # 재료 고정 목록: 위에서 쓴 재료 열아홉 개를 경로 순으로 적는다(한 줄에 sha256, 공백 둘, 경로). sha256은
+    # 줄 끝의 CRLF를 LF로 바꾼 바이트에서 센다(구현의 `digest`를 쓰지 않고 정의를 따로 적는다). 파일은 다른
+    # 재료 파일과 같은 줄 끝으로 쓴다.
+    material_paths = [
+        *VOICE_FILES.values(),
+        *(f"whisper-ko-ft/reports/{name}/fleurs-ko-test.json" for name in [*WHISPER_REPORTS, *TWIN_OF]),
+        STT_MANIFEST,
+        *STT_FILES.values(),
+    ]
+    entries = sorted(
+        (path, hashlib.sha256((root / path).read_bytes().replace(b"\r\n", b"\n")).hexdigest())
+        for path in material_paths
+    )
+    synthetic.pinned_entries.extend(entries)
+    if pinned:
+        text = "".join(line + "\n" for line in synthetic.pinned_lines())
+        write_text(root / PINNED_INPUTS, text, crlf=all_crlf)
     return synthetic
 
 
@@ -454,7 +486,7 @@ def full_repository(tmp_path_factory) -> Synthetic:
     실제처럼 stt-scratch 가설 파일만 CRLF다.
     이 폴더는 고치지 않는다. 고치는 시험은 `copy_repository`로 복사해서 고친다.
     """
-    return write_repository(tmp_path_factory.mktemp("full") / "repo", **FULL_SIZE)
+    return write_repository(tmp_path_factory.mktemp("full") / "repo", pinned=True, **FULL_SIZE)
 
 
 @pytest.fixture(scope="session")
@@ -463,7 +495,9 @@ def full_repository_crlf(tmp_path_factory) -> Synthetic:
 
     줄바꿈 변환을 켠 채 받은 복제본을 흉내 낸다.
     """
-    return write_repository(tmp_path_factory.mktemp("full-crlf") / "repo", line_endings="crlf", **FULL_SIZE)
+    return write_repository(
+        tmp_path_factory.mktemp("full-crlf") / "repo", line_endings="crlf", pinned=True, **FULL_SIZE
+    )
 
 
 @pytest.fixture
