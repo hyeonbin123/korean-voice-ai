@@ -1,18 +1,29 @@
 """같은 발화 인식 비교의 명령줄: `asr-compare check | run | verify`.
 
 세 명령이 하는 일
-    check   저장소의 재료 열아홉 개를 읽고 짝짓기 검증 여덟 가지(`join.verify`)를 돌린다. 어긋남 줄을 모두
-            찍고 끝 줄에 `묶음 N개, 발화 N개(한글 전용 N개), 어긋남 M개`를 쓴다. 아무것도 쓰지 않는다.
-    run     check와 같은 검증이 통과하면 채점해서 `--out` 폴더에 결과 파일 둘(`fleurs-ko-test.json`,
-            `fleurs-ko-test.md`)을 쓴다. 검증이 실패하면 어긋남 줄을 쓰고 아무 파일도 만들지 않는다.
-    verify  저장소의 `evaluation/asr/results/` 아래 결과 파일 둘이, 지금 재료에서 다시 만든 글과 글자까지
-            같은지 견준다. 결과 파일의 줄 끝이 CRLF여도(줄바꿈 변환을 켠 채 받은 복제본) LF로 보고 견준다.
+    check   저장소의 재료 열아홉 개를 읽고 짝짓기 검증 여덟 가지(`join.verify`)를 돌린다. 검증이 통과하면
+            이어서 구성 요소가 이미 기록한 값을 저장된 가설에서 다시 세어(`recorded`) 묶음마다 한 줄씩
+            찍는다. 어긋남 줄을 모두 찍고 끝 줄에 `묶음 N개, 발화 N개(한글 전용 N개), 어긋남 M개`를 쓴다.
+            M은 검증의 어긋남 줄 수와 재현이 다른 묶음 수의 합이다. 아무것도 쓰지 않는다. 묶음을 서로 견주는
+            값은 만들지 않는다.
+    run     check와 같은 관문(검증과 기록값 재현)이 통과하면 채점해서 `--out` 폴더에 결과 파일 둘
+            (`fleurs-ko-test.json`, `fleurs-ko-test.md`)을 쓴다. 관문에 걸리면 check와 같은 줄을 찍고 아무
+            파일도 만들지 않는다.
+    verify  같은 관문을 지난 뒤, 저장소의 `evaluation/asr/results/` 아래 결과 파일 둘이 지금 재료에서 다시
+            만든 글과 글자까지 같은지 견준다. 관문에 걸리면 견주지 않는다. 결과 파일의 줄 끝이
+            CRLF여도(줄바꿈 변환을 켠 채 받은 복제본) LF로 보고 견준다.
+
+한 관문
+    세 명령은 `_pass_gate` 하나를 지난다. 재현이 다른데 결과 파일을 쓰거나 견주는 길이 따로 생기지 않게
+    하려는 것이다. 관문은 읽기, 짝짓기 검증, 그리고 검증이 통과했을 때만 기록값 재현을 한다(행을 믿을 수
+    없으면 센 값도 믿을 수 없다). 찍는 것은 명령마다 다르다: check는 줄을 모두, run은 요약 한 줄(걸리면
+    줄까지), verify는 걸릴 때만 찍는다.
 
 종료 코드
-    0 = 통과, 1 = 어긋남(검증에 걸렸거나 결과 파일이 다시 만든 것과 다름), 2 = 읽지 못함(재료·결과 파일이
-    없거나 형식이 틀림, 저장소 폴더가 아님, 결과를 쓰지 못함)이거나 잘못된 사용. 읽기 오류(`SourceError`)와
-    위 경우만 잡고, 그 밖의 예외는 잡지 않는다: 버그는 흔적(추적 출력)과 함께 실패해야 하고, 실패했는데
-    0으로 끝나는 길이 없어야 한다.
+    0 = 통과, 1 = 어긋남(검증에 걸렸거나 기록값이 재현되지 않았거나 결과 파일이 다시 만든 것과 다름), 2 =
+    읽지 못함(재료·결과 파일이 없거나 형식이 틀림, 저장소 폴더가 아님, 결과를 쓰지 못함)이거나 잘못된 사용.
+    읽기 오류(`SourceError`)와 위 경우만 잡고, 그 밖의 예외는 잡지 않는다: 버그는 흔적(추적 출력)과 함께
+    실패해야 하고, 실패했는데 0으로 끝나는 길이 없어야 한다.
 
 출력
     표준 출력·오류는 시작할 때 UTF-8과 LF 줄 끝으로 다시 연다(한국어 Windows의 파이썬은 파이프나 파일로 나가는
@@ -26,9 +37,10 @@
 import argparse
 import itertools
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-from . import join, report, sources
+from . import join, recorded, report, sources
 
 # 이 파일은 <저장소>/evaluation/asr/src/asr_compare/cli.py에 있다. parents[0] = asr_compare, [1] = src, [2]
 # = asr, [3] = evaluation, [4] = 저장소 뿌리.
@@ -70,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "종료 코드: 0 = 통과, "
-            "1 = 어긋남(짝짓기 검증에 걸렸거나 결과 파일이 다시 만든 것과 다름), "
+            "1 = 어긋남(짝짓기 검증에 걸렸거나 기록값이 재현되지 않았거나 결과 파일이 다시 만든 것과 다름), "
             "2 = 읽지 못함(재료나 결과 파일이 없거나 형식이 틀림, 저장소 폴더가 아님, "
             "결과를 쓰지 못함)이거나 잘못된 사용."
         ),
@@ -80,9 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
     repo_help = "저장소 뿌리(기본: 이 도구가 든 저장소)"
     check = commands.add_parser(
         "check",
-        help="재료를 읽고 짝짓기 검증을 돌립니다",
+        help="재료를 읽고 짝짓기 검증과 기록값 재현을 돌립니다",
         description=(
             "저장소의 재료 열아홉 개를 읽고 짝짓기 검증 여덟 가지를 돌립니다. "
+            "검증이 통과하면 구성 요소가 이미 기록한 값을 저장된 가설에서 다시 세어 "
+            "묶음마다 한 줄씩 찍습니다. "
             "어긋남 줄을 모두 찍고 끝 줄에 묶음·발화 수와 어긋남 수를 적습니다. 아무것도 쓰지 않습니다."
         ),
     )
@@ -91,11 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser(
         "run",
-        help="검증이 통과하면 채점해서 결과 파일 둘을 씁니다",
+        help="검증과 기록값 재현이 통과하면 채점해서 결과 파일 둘을 씁니다",
         description=(
-            "check와 같은 검증이 통과하면 채점해서 --out 폴더에 "
+            "check와 같은 관문(짝짓기 검증과 기록값 재현)이 통과하면 채점해서 --out 폴더에 "
             "fleurs-ko-test.json과 fleurs-ko-test.md를 씁니다. "
-            "검증이 실패하면 어긋남 줄을 찍고 아무 파일도 만들지 않습니다."
+            "관문에 걸리면 어긋남 줄을 찍고 아무 파일도 만들지 않습니다."
         ),
     )
     run.add_argument("--repo", type=Path, default=DEFAULT_REPO, help=repo_help)
@@ -111,8 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
         "verify",
         help="커밋된 결과 파일이 다시 만든 것과 같은지 견줍니다",
         description=(
+            "check와 같은 관문(짝짓기 검증과 기록값 재현)을 지난 뒤, "
             "저장소의 evaluation/asr/results/ 아래 결과 파일 둘을 "
             "지금 재료에서 다시 만든 글과 글자까지 견줍니다. "
+            "관문에 걸리면 견주지 않고 그 줄을 찍습니다. "
             "결과 파일의 줄 끝이 CRLF여도 LF로 보고 견줍니다. "
             "다르면 파일 이름과 처음 다른 줄 번호를 찍습니다."
         ),
@@ -122,38 +138,69 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _read_and_check(repo: Path) -> tuple[sources.Loaded, list[str]]:
-    """재료를 읽고(읽지 못하면 SourceError) 짝짓기 검증의 어긋남 줄을 돌려준다."""
+@dataclass(frozen=True)
+class _Gate:
+    """읽기, 짝짓기 검증, 기록값 재현을 지난 결과. `check`·`run`·`verify`가 같은 관문의 결과를 쓴다.
+
+    loaded      읽은 재료.
+    lines       찍을 줄. 짝짓기 검증이 어긋났으면 그 어긋남 줄들(상한이 없다), 통과했으면 묶음마다 재현 줄
+                하나다.
+    mismatches  요약 줄의 어긋남 수: 검증의 어긋남 줄 수와 재현이 다른 묶음 수의 합이다. 검증이 어긋나면
+                재현은 돌리지 않으므로 둘 가운데 하나만 0이 아니다. 0이면 관문을 통과한 것이다.
+    """
+
+    loaded: sources.Loaded
+    lines: list[str]
+    mismatches: int
+
+    @property
+    def summary(self) -> str:
+        loaded = self.loaded
+        hangul_only = sum(1 for flag in loaded.hangul if flag)
+        return (
+            f"묶음 {len(loaded.systems)}개, 발화 {len(loaded.hangul)}개(한글 전용 {hangul_only}개), "
+            f"어긋남 {self.mismatches}개"
+        )
+
+    def show(self, *, lines: bool, summary: bool) -> None:
+        """줄과 요약 줄을 고른 대로 찍는다. 줄은 요약 앞에 온다."""
+        if lines:
+            for line in self.lines:
+                print(line)
+        if summary:
+            print(self.summary)
+
+
+def _pass_gate(repo: Path) -> _Gate:
+    """재료를 읽고(읽지 못하면 SourceError) 검증을 돌리고, 통과하면 기록값을 다시 센다. 아무것도 찍지 않는다.
+
+    세 명령이 모두 이 함수를 지난다. 재현이 다른데 결과 파일을 쓰거나 견주는 길을 따로 만들지 않으려는 것이다.
+    """
     loaded = sources.load_repository(repo)
-    return loaded, join.verify(list(loaded.systems), loaded.hangul, loaded.twins)
-
-
-def _summary(loaded: sources.Loaded, problems: list[str]) -> str:
-    hangul_only = sum(1 for flag in loaded.hangul if flag)
-    return (
-        f"묶음 {len(loaded.systems)}개, 발화 {len(loaded.hangul)}개(한글 전용 {hangul_only}개), "
-        f"어긋남 {len(problems)}개"
+    problems = join.verify(list(loaded.systems), loaded.hangul, loaded.twins)
+    if problems:
+        return _Gate(loaded, problems, len(problems))
+    reproductions = recorded.reproduce(loaded)
+    return _Gate(
+        loaded,
+        [item.line for item in reproductions],
+        sum(1 for item in reproductions if not item.matches),
     )
 
 
-def _print_problems(loaded: sources.Loaded, problems: list[str]) -> None:
-    """어긋남 줄을 모두 찍고(상한이 없다) 끝 줄에 요약을 적는다."""
-    for line in problems:
-        print(line)
-    print(_summary(loaded, problems))
-
-
 def _check(args: argparse.Namespace) -> int:
-    loaded, problems = _read_and_check(args.repo)
-    _print_problems(loaded, problems)
-    return 1 if problems else 0
+    gate = _pass_gate(args.repo)
+    gate.show(lines=True, summary=True)
+    return 1 if gate.mismatches else 0
 
 
 def _run(args: argparse.Namespace) -> int:
-    loaded, problems = _read_and_check(args.repo)
-    _print_problems(loaded, problems)
-    if problems:
+    gate = _pass_gate(args.repo)
+    # 통과하면 요약 한 줄만 찍고 넘어가고, 걸리면 어느 묶음이 왜 걸렸는지 줄까지 찍는다.
+    gate.show(lines=bool(gate.mismatches), summary=True)
+    if gate.mismatches:
         return 1
+    loaded = gate.loaded
     # 글 둘을 모두 만든 뒤에 쓴다: 채점이나 글 만들기가 실패해도 반쯤 쓴 결과 폴더가 남지 않는다.
     result = report.build(loaded.systems, loaded.hangul, loaded.inputs)
     texts = {
@@ -195,10 +242,11 @@ def _verify(args: argparse.Namespace) -> int:
         # 견줄 것이 없는데 통과로 끝나면 안 된다.
         print(f"결과 파일이 없다: {', '.join(missing)} ({folder.as_posix()})", file=sys.stderr)
         return 2
-    loaded, problems = _read_and_check(args.repo)
-    if problems:
-        _print_problems(loaded, problems)
+    gate = _pass_gate(args.repo)
+    if gate.mismatches:
+        gate.show(lines=True, summary=True)
         return 1
+    loaded = gate.loaded
     result = report.build(loaded.systems, loaded.hangul, loaded.inputs)
     expected = {
         report.RESULT_JSON: report.render_json(result),

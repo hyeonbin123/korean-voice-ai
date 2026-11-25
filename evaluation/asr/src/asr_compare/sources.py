@@ -27,6 +27,12 @@
     음성 길이까지 같은 쌍도 있어(실제 재료에 하나) 길이로도 구별되지 않는다. 그런 쌍이 전제에 남기는 틈은
     `join`의 머리 설명 '이 검사들로도 잡지 못하는 것'에 적었다.
 
+리포트가 스스로 적어 둔 채점 값
+    whisper-ko-ft의 리포트는 발화마다 `edits`와 `length`, 앞쪽 `summary`에 `error_rate`를 적어 둔다. 구성
+    요소가 이미 기록한 값이라서 이 도구가 저장된 가설에서 다시 세어 같은 값이 나오는지 볼 수 있다(`recorded`
+    모듈). `load_stored`가 그 값만 읽고(`Stored`), `load_repository`가 열 묶음 모두에 대해 같은 바이트에서
+    함께 읽어 `Loaded.stored`에 싣는다. 파일을 다시 열지 않는다.
+
 줄바꿈과 글자 코드에 흔들리지 않는 읽기
     줄바꿈 변환을 켠 채 받은 복제본에서는 같은 파일이 CRLF로 들어온다. 그래서 읽을 때는 언제나 바이트에서
     줄 끝의 CRLF를 LF로 바꾼 뒤 `utf-8-sig`(앞의 BOM은 버린다)로 푼다. 재료의 sha256(`digest`)도 같은 방식으로
@@ -46,7 +52,7 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -112,6 +118,18 @@ class System:
     also: tuple[str, ...]
     utterances: tuple[Utterance, ...]
     ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Stored:
+    """whisper-ko-ft 리포트가 스스로 적어 둔 채점 값. 이 도구가 다시 세어 볼 기록값이다.
+
+    error_rate  `summary.error_rate`(글자 오류율. 소수 다섯째 자리까지 적힌다).
+    counts      발화마다 (`edits`, `length`). 리포트의 `utterances` 안 차례이고 그 차례가 행 번호다.
+    """
+
+    error_rate: float
+    counts: tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
@@ -339,6 +357,24 @@ def load_whisper(data: bytes, key: str, path: str) -> System:
     return System(key, WHISPER, path, (), tuple(utterances), tuple(ids))
 
 
+def load_stored(data: bytes, path: str) -> Stored:
+    """whisper-ko-ft 리포트가 스스로 적어 둔 채점 값을 읽는다.
+
+    읽는 것은 `summary.error_rate`와 발화마다의 `edits`, `length`다. `load_whisper`가 읽는 것과 같은 파일이고,
+    그것이 읽지 않는 키만 읽는다. 값이 없거나 자료형이 틀리면 SourceError다. 값이 서로 맞는지(다시 센 값과
+    같은지)는 여기서 보지 않는다. 그것은 `recorded`가 한다.
+    """
+    document = _parse_json(_decode(data, path), path)
+    summary = _member(document, "summary", "최상위", path)
+    error_rate = _number(summary, "error_rate", "summary", path)
+    items = _as_list(_member(document, "utterances", "최상위", path), "utterances", path)
+    counts = []
+    for row, item in enumerate(items):
+        where = f"utterances[{row}]"
+        counts.append((_integer(item, "edits", where, path), _integer(item, "length", where, path)))
+    return Stored(error_rate, tuple(counts))
+
+
 class _Entry(NamedTuple):
     """stt-scratch 매니페스트 한 줄에서 읽은 값."""
 
@@ -436,12 +472,15 @@ class Loaded:
     hangul    한글 전용 표시(행 번호 순).
     inputs    읽은 재료 파일 열아홉 개의 (저장소 뿌리 기준 경로, sha256), 경로 순. sha256의 정의는
               `digest`에 있다.
+    stored    whisper-ko-ft 묶음 열 개의 리포트가 스스로 적어 둔 값(키는 묶음의 키). 같은 바이트에서
+              `systems`와 함께 읽는다. 형제 리포트는 읽지 않는다(가설이 같다는 것은 `join.verify`가 본다).
     """
 
     systems: tuple[System, ...]
     twins: dict[str, System]
     hangul: tuple[bool, ...]
     inputs: tuple[tuple[str, str], ...]
+    stored: dict[str, Stored] = field(default_factory=dict)
 
 
 def _read_file(root: Path, path: str) -> bytes:
@@ -457,7 +496,8 @@ def _read_file(root: Path, path: str) -> bytes:
 def load_repository(root: Path) -> Loaded:
     """저장소 뿌리(`root`)에서 재료 파일 열아홉 개를 읽어 `Loaded`로 돌려준다.
 
-    읽는 쪽 오류는 모두 SourceError다. 두 stt-scratch 묶음이 같은 매니페스트에서 읽은 한글 전용 표시가 서로
+    읽는 쪽 오류는 모두 SourceError다. whisper-ko-ft 열 묶음은 같은 바이트에서 리포트가 스스로 적어 둔 값
+    (`Loaded.stored`)도 함께 읽는다. 두 stt-scratch 묶음이 같은 매니페스트에서 읽은 한글 전용 표시가 서로
     다르면(같은 파일에서 나왔으니 달라질 수 없다) 어느 한쪽을 고르지 않고 SourceError로 멈춘다. 이 함수는
     발화가 서로 맞는지(`join.verify`의 일)는 보지 않는다.
     """
@@ -470,13 +510,16 @@ def load_repository(root: Path) -> Loaded:
         return data
 
     systems: list[System] = []
+    stored: dict[str, Stored] = {}
     manifest: bytes | None = None
     hangul: tuple[bool, ...] | None = None
     for spec in SYSTEMS:
         if spec.component == VOICE:
             system = load_voice(read(spec.path), spec.key, spec.path)
         elif spec.component == WHISPER:
-            system = load_whisper(read(spec.path), spec.key, spec.path)
+            data = read(spec.path)
+            system = load_whisper(data, spec.key, spec.path)
+            stored[spec.key] = load_stored(data, spec.path)
         else:
             if manifest is None:
                 manifest = read(STT_MANIFEST)
@@ -496,4 +539,5 @@ def load_repository(root: Path) -> Loaded:
         twins=twins,
         hangul=hangul if hangul is not None else (),
         inputs=tuple(sorted(digests.items())),
+        stored=stored,
     )

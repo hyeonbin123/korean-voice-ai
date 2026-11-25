@@ -10,7 +10,9 @@
     - voice-translator(파일 2개): 최상위가 길이 1인 리스트이고, 정답·가설은 공백과 문장부호를 뺀 정규화된
       글이다.
     - whisper-ko-ft(파일 14개): 발화의 id는 문장 번호이고 같은 문장의 둘째 녹음부터 `<번호>#<n>`이다. 글은
-      원문이다. 같은 가설을 가진 형제 리포트(`turbo-n-d1a` 등) 네 개가 이 14개에 들어 있다.
+      원문이다. 같은 가설을 가진 형제 리포트(`turbo-n-d1a` 등) 네 개가 이 14개에 들어 있다. 발화마다 `edits`와
+      `length`, 파일 앞쪽 `summary`에 `error_rate`를 적고, 값은 그 파일의 글에서 이 파일의 따로 짠 계산으로 센
+      것이다(구현의 채점을 쓰지 않는다).
     - stt-scratch(파일 3개): 발화의 id는 `fleurs/test/<문장>/<행>`이고, 파일 안 차례는 행 번호 순이 아니라
       id 글자의 사전순이다. 가설 파일 둘은 CRLF 줄 끝으로 저장돼 있다. 정답은 한글·라틴 문자·숫자·공백만
       남기는 학습용 정규화를 거쳐 있어서, 악센트가 붙은 글자(ó)가 든 정답은 공통 정답과 달라진다.
@@ -36,7 +38,7 @@ import json
 import random
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -135,6 +137,35 @@ def stt_style(text: str) -> str:
     return " ".join(_STT_NON_TEXT.sub(" ", text).split())
 
 
+def edit_distance(first: str, second: str) -> int:
+    """글자 단위 편집 거리(치환·삭제·삽입 비용 1). 표를 처음부터 끝까지 채우는 가장 단순한 꼴이다.
+
+    구현의 편집 거리(앞뒤 같은 글자를 먼저 걷어 낸다)와 일부러 다르게 짠 것이다. 시험이 기대값을 구현과 같은
+    실수로 만들지 않게 한다.
+    """
+    previous = list(range(len(second) + 1))
+    for row, char in enumerate(first, start=1):
+        current = [row]
+        for column, other in enumerate(second, start=1):
+            current.append(
+                min(previous[column] + 1, current[column - 1] + 1, previous[column - 1] + (char != other))
+            )
+        previous = current
+    return previous[-1]
+
+
+def own_counts(reference: str, hypothesis: str) -> tuple[int, int]:
+    """(편집 수, 정규화한 정답 글자 수): 정답과 가설을 `plain`으로 맞춘 글자열에서 센다."""
+    normalized = plain(reference)
+    return edit_distance(normalized, plain(hypothesis)), len(normalized)
+
+
+def sum_counts(counts) -> tuple[int, int]:
+    """(편집 수, 글자 수) 쌍들의 합."""
+    pairs = list(counts)
+    return sum(edits for edits, _ in pairs), sum(length for _, length in pairs)
+
+
 def make_hypotheses(key: str, references: list[str], seed: int) -> tuple[str, ...]:
     """묶음 하나의 가설: 정답을 묶음마다 다른 정도로 틀리게 하고 행 번호 꼬리표를 붙인다."""
     rng = random.Random(f"hypothesis:{seed}:{key}")
@@ -199,6 +230,11 @@ class Synthetic:
     hypotheses: dict[str, tuple[str, ...]]
     hangul: tuple[bool, ...]
     differences: tuple[int, ...]
+    # 묶음 키 -> 발화별 (편집 수, 글자 수). 한 번 센 것을 되풀이해 세지 않으려는 저장 자리일 뿐이다(비교에
+    # 쓰지 않는다).
+    counts_cache: dict[str, list[tuple[int, int]]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     def stored_texts(self, key: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """묶음의 리포트 파일에 저장된 (정답, 가설) 글. 구성 요소마다 저장하는 꼴이 다르다."""
@@ -208,6 +244,48 @@ class Synthetic:
         if key in STT_FILES:
             return self.stt_references, hypotheses
         return self.references, hypotheses
+
+    def stored_counts(self, key: str) -> list[tuple[int, int]]:
+        """묶음의 리포트에 저장된 글로 발화마다 센 (편집 수, 정규화한 정답 글자 수).
+
+        그 구성 요소가 저장한 자기 정답으로 센다(공통 정답이 아니다). 행 번호 순이다. 같은 가설을 가진 형제
+        리포트는 그 묶음과 같은 값이다. 한 번 센 값은 되풀이해 세지 않고 저장해 둔다.
+        """
+        main = TWIN_OF.get(key, key)
+        if main not in self.counts_cache:
+            references, hypotheses = self.stored_texts(main)
+            self.counts_cache[main] = [
+                own_counts(reference, hypothesis)
+                for reference, hypothesis in zip(references, hypotheses, strict=True)
+            ]
+        return list(self.counts_cache[main])
+
+    def recorded_values(self) -> dict[str, dict[str, tuple[int, int]]]:
+        """묶음 열네 개의 기록값: 자기 정답으로 센 편집 수의 합과 정규화한 정답 글자 수의 합.
+
+        키 차례는 구현의 고정 목록과 같다(voice-translator 둘, whisper-ko-ft 열, stt-scratch 둘). 한글 전용은
+        stt-scratch 묶음에만 있다(다른 구성 요소는 기록하지 않는 범위다). 값은 이 파일의 따로 짠 계산으로 센
+        것이다.
+        """
+        values: dict[str, dict[str, tuple[int, int]]] = {}
+        for key in (*VOICE_FILES, *WHISPER_REPORTS, *STT_FILES):
+            counts = self.stored_counts(key)
+            entry = {"all": sum_counts(counts)}
+            if key in STT_FILES:
+                entry["hangul_only"] = sum_counts(
+                    pair for pair, flag in zip(counts, self.hangul, strict=True) if flag
+                )
+            values[key] = entry
+        return values
+
+    def expected_values(self) -> dict[str, dict[str, tuple[int, int]]]:
+        """구현의 기록값 사전(`recorded.EXPECTED`)과 같은 꼴의, 이 합성 저장소의 값.
+
+        구현의 사전과 같은 묶음(voice-translator 둘, whisper-large-v3-turbo, stt-scratch 둘)만 담는다. 나머지
+        whisper-ko-ft 묶음의 기록은 리포트 파일 안에 있다. 명령줄 시험이 구현의 실제 기록값 대신 끼워 넣는다.
+        """
+        values = self.recorded_values()
+        return {key: values[key] for key in (*VOICE_FILES, "whisper-large-v3-turbo", *STT_FILES)}
 
 
 def write_text(path: Path, text: str, *, crlf: bool) -> None:
@@ -295,9 +373,12 @@ def write_repository(
         document = [{"model": "synthetic", "variant": key, "languages": {"ko": korean, "en": english}}]
         write_text(root / path, json.dumps(document, ensure_ascii=False, indent=2) + "\n", crlf=all_crlf)
 
-    # whisper-ko-ft: 형제 리포트는 같은 가설을 가진 별도 파일이다. edits·length 같은 키는 자리표시다.
+    # whisper-ko-ft: 형제 리포트는 같은 가설을 가진 별도 파일이다. 발화마다 edits·length와 summary의
+    # error_rate는 그 파일의 글에서 이 파일의 따로 짠 계산으로 센 값이다(실제 리포트가 스스로 적어 두는 값).
     ids = whisper_ids(sentences)
     for name in [*WHISPER_REPORTS, *TWIN_OF]:
+        counts = synthetic.stored_counts(name)
+        edits_sum, length_sum = sum_counts(counts)
         rows = [
             {
                 "id": ids[row],
@@ -305,13 +386,18 @@ def write_repository(
                 "seconds": seconds[row],
                 "reference": references[row],
                 "hypothesis": hypotheses[name][row],
-                "edits": 0,
-                "length": 0,
+                "edits": counts[row][0],
+                "length": counts[row][1],
                 "has_digit": any(char.isdigit() for char in references[row]),
             }
             for row in range(utterances)
         ]
-        document = {"summary": {"model": "synthetic", "set": "fleurs-ko-test"}, "utterances": rows}
+        summary = {
+            "model": "synthetic",
+            "set": "fleurs-ko-test",
+            "error_rate": round(edits_sum / length_sum, 5),
+        }
+        document = {"summary": summary, "utterances": rows}
         path = root / f"whisper-ko-ft/reports/{name}/fleurs-ko-test.json"
         write_text(path, json.dumps(document, ensure_ascii=False, indent=2) + "\n", crlf=all_crlf)
 
