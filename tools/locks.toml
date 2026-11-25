@@ -85,3 +85,9 @@ path = "e2e/uv.lock"
 added = "aaf62b00a1464466dbec1ccf46655fff88427c6d"
 base = "1792695d2959ddc20ab84b8884f00291be33ad6f"
 what = "e2e(통화 한 건 배선 시연)의 파이썬 잠금(uv). 옮겨 온 것이 아니라 이 저장소에서 처음 만든 잠금"
+
+[[lock]]
+path = "evaluation/asr/uv.lock"
+added = "ea6110d9163501954ef1f9c33d0f0a982b3dd819"
+base = "dcabde554c5885925f02f731075cd81e4cc4a510"
+what = "evaluation/asr(같은 발화 인식 비교 도구)의 파이썬 잠금(uv). 옮겨 온 것이 아니라 이 저장소에서 처음 만든 잠금"

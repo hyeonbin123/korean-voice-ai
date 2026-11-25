@@ -25,3 +25,8 @@ evaluation/asr/results/fleurs-ko-test.json:generic-api-key:158
 evaluation/asr/results/fleurs-ko-test.json:generic-api-key:304
 evaluation/asr/results/fleurs-ko-test.json:generic-api-key:330
 evaluation/asr/results/fleurs-ko-test.json:generic-api-key:356
+# 바로 위 넷과 같은 줄의 커밋 뒤 지문이다. 이력을 훑는 스캔은 결과 파일을 커밋한 커밋의 해시를 앞에 붙인 "커밋:파일:규칙:줄" 꼴로 찾는다.
+9bae1c70a5d188d6615096871158518313ea3b0f:evaluation/asr/results/fleurs-ko-test.json:generic-api-key:158
+9bae1c70a5d188d6615096871158518313ea3b0f:evaluation/asr/results/fleurs-ko-test.json:generic-api-key:304
+9bae1c70a5d188d6615096871158518313ea3b0f:evaluation/asr/results/fleurs-ko-test.json:generic-api-key:330
+9bae1c70a5d188d6615096871158518313ea3b0f:evaluation/asr/results/fleurs-ko-test.json:generic-api-key:356

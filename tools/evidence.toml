@@ -449,3 +449,10 @@ rule = "3dc3a1b"
 result = "df73059"
 where = "stt-scratch/docs/experiments.md"
 what = "stt-scratch 주 모델 학습(2026-10-11 시작): 선택 임계의 계산을 담아 측정 전에 커밋한 sweep 스크립트 → 주 모델 학습을 시작한 코드 커밋"
+
+[[pair]]
+id = "asr-comparison-rules-before-result"
+rule = "97efa37"
+result = "9bae1c7"
+where = "docs/asr-comparison.md"
+what = "같은 발화 인식 비교(2026-11-25): 규칙을 적은 문서 커밋 → 한 번 잰 결과 커밋"

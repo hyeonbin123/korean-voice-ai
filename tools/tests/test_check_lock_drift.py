@@ -11,7 +11,7 @@
     4. 잠금 읽기: lock_versions, 읽을 수 없는 잠금, package-lock.json, 작업 트리와 무관함, git 설정(log.follow)과 무관함.
     5. 등록 파일의 꼴: 읽을 수 없으면 멈추고, 항목의 꼴 오류는 그 항목의 문제로 알린다.
     6. 명령줄: 종료 코드와 출력 꼴, 파이프로 나가는 UTF-8 출력, 읽기만 한다는 것.
-    7. 이 저장소의 실제 등록: 등록한 base가 합치기 전 저장소의 잠금과 같고, 이 저장소의 잠금 일곱이 등록과 맞는다.
+    7. 이 저장소의 실제 등록: 등록한 base가 합치기 전 저장소의 잠금과 같고, 이 저장소의 잠금 여덟이 등록과 맞는다.
 
 시험용 저장소는 잠금 파일을 들인 커밋 → 판을 올린 커밋 → 무관한 커밋을 쌓아 만든다(build_world). git으로 저장소를 만드는
 일이 시험 시간의 대부분이라, 같은 잠금 글로 만드는 저장소는 모듈 범위로 한 번만 만들어 두고(Prototypes) 시험마다 쓴다.
@@ -1333,8 +1333,8 @@ def test_output_is_utf8_when_piped(shared_world):
 # (actions/checkout의 fetch-depth: 0).
 
 # 등록한 잠금 → (합치기 전 저장소의 이름, 그 저장소 안의 옛 경로). 이름은 태그 archive/<이름>과 같다: 그 태그가 합친 시점의 그
-# 저장소 마지막 커밋이다. 구성 요소 다섯의 잠금 여섯이다. e2e/uv.lock은 이 저장소에서 처음 만든 잠금이라 합치기 전 저장소가
-# 없어 이 표에 없다.
+# 저장소 마지막 커밋이다. 구성 요소 다섯의 잠금 여섯이다. e2e/uv.lock과 evaluation/asr/uv.lock은 이 저장소에서 처음 만든
+# 잠금이라 합치기 전 저장소가 없어 이 표에 없다.
 ORIGINAL_LOCKS = {
     "whisper-ko-ft/uv.lock": ("whisper-ko-ft", "uv.lock"),
     "stt-scratch/uv.lock": ("stt-scratch", "uv.lock"),
@@ -1365,10 +1365,10 @@ def test_registry_bases_are_the_original_locks():
 
 
 def test_repository_locks_match_the_registry(capsys):
-    # 이 저장소의 HEAD에서 추적되는 잠금 일곱이 등록과 맞는다: 등록하지 않은 잠금이나 변경이 없고, 등록한 갱신의 판 변경이
+    # 이 저장소의 HEAD에서 추적되는 잠금 여덟이 등록과 맞는다: 등록하지 않은 잠금이나 변경이 없고, 등록한 갱신의 판 변경이
     # 실제와 같다. 인자 없이 도구를 돌릴 때와 같은 검사다(기본 저장소 뿌리와 기본 등록). 이력을 읽을 수 없으면 종료 코드 2가
     # 나와 이 시험이 실패한다. 새 잠금을 등록하면 아래 개수도 함께 고친다.
     code = main(["--repo", str(REPO)])
     captured = capsys.readouterr()
     assert code == 0, captured.out + captured.err
-    assert captured.out.splitlines()[-1] == "잠금 7개, 문제 0개"
+    assert captured.out.splitlines()[-1] == "잠금 8개, 문제 0개"
