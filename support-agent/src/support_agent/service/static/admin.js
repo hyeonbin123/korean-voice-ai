@@ -40,6 +40,10 @@
     ['format', '형식이 맞지 않음'],
     ['not_in_transcript', '대화에 없음'],
   ]);
+  // 후처리 기록 묶음에 그리는 '확인이 필요한 번호'의 최대 개수. 정상 기록의 번호는 몇 개뿐이다. 서버는 그 목록의
+  // 길이를 제한하지 않으므로(답 전체가 1 MiB 안이면 받는다) 화면이 여기서 끊는다: 원소가 수십만 개인 목록을
+  // 다 그리면 브라우저가 멈춘다. 넘는 만큼은 몇 건이 더 있는지만 적는다(전부는 감사 표의 내용 칸에 있다).
+  const MAX_FLAGS_SHOWN = 20;
   // 후처리 기록 만들기의 결과 문구: 성공 문구와, 실패했을 때의 안내(키는 HTTP 상태 코드). 서버가 주는 영어
   // detail은 화면에 옮기지 않고 상태 코드로 문구를 고른다. 401·503은 api()가 이미 로그인 화면으로 처리하므로
   // 여기 없다. 502와 504가 같은 문구인 까닭: 둘 다 후처리 서비스에 닿지 못했거나 제때 답을 받지 못한 경우다.
@@ -494,9 +498,15 @@
     const payload = isObject(event.payload) ? event.payload : {};
     const record = isObject(payload.record) ? payload.record : {};
     const flags = Array.isArray(payload.needs_confirmation) ? payload.needs_confirmation : [];
+    // 번호는 하나씩 붙인다. 목록을 함수 인자로 펼치면(append(...목록)) 원소가 아주 많을 때 엔진의 인자 수 한도에
+    // 걸려 RangeError가 나고, 그러면 openSession 전체가 멈춘다.
     const confirm = el('dd');
     if (flags.length === 0) confirm.textContent = '없음';
-    else confirm.append(...flags.map((flag) => el('div', '', flagLine(flag))));
+    else {
+      for (const flag of flags.slice(0, MAX_FLAGS_SHOWN)) confirm.append(el('div', '', flagLine(flag)));
+      const more = flags.length - MAX_FLAGS_SHOWN;
+      if (more > 0) confirm.append(el('div', 'muted', `… 외 ${more}건`));
+    }
     const when = time(typeof event.at === 'string' ? event.at : '');
     const made = `${when} · ${textOf(payload.by)} · ${textOf(payload.model)}`;
     const facts = el('dl', 'facts');
@@ -573,7 +583,9 @@
     }
     if (notice === null || !token || selectedSession !== id) return;
     await openSession(id);
-    if (selectedSession === id) say(els.summaryResult, notice.text, notice.tone);
+    // 다시 여는 요청이 실패하면 화면에는 그 전에 그려 둔 세션이 그대로 남는다. 그것이 이 세션일 때만 결과를
+    // 쓴다(shownSession은 상세를 실제로 그린 뒤에만 바뀐다). 그 사이 다른 세션의 상세가 그려져 있으면 쓰지 않는다.
+    if (selectedSession === id && shownSession === id) say(els.summaryResult, notice.text, notice.tone);
   }
 
   // ------------------------------------------------------------ 탭과 이벤트 연결 (tabs and wiring)
