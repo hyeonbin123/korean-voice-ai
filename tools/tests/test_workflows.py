@@ -19,9 +19,9 @@
        돌 수 있는 사건인데, 이 워크플로들은 저장소를 읽고 검사만 한다). 글에 비밀값 문맥(`${{ secrets.… }}`)을 쓰지
        않는다(비밀값이 필요 없고, 쓰는 단계는 포크의 pull request에서 값이 비어 다르게 돈다).
     2. repo-checks.yml: main push, pull request, 수동 실행에서 돌고(경로 필터와 주기 실행은 없다), 전체 이력을 받으며
-       (`fetch-depth`가 정수 0), `run`이 있는 단계가 루트 검사 여섯(tools/tests 시험 하나와 검사 도구 다섯)의 명령과
-       차례까지 글자 그대로 같다. 어느 작업이나 단계에도 `continue-on-error`와 `if`가 없다(검사가 실패하면 실행이
-       실패해야 하고, 조건이 붙은 단계는 어떤 사건에서 검사를 건너뛸 수 있다).
+       (`fetch-depth`가 정수 0), `run`이 있는 단계가 일곱(tools/tests 시험 하나, 검사 도구 다섯, 같은 발화 인식 비교
+       도구의 시험과 재계산 한 단계)의 명령과 차례까지 글자 그대로 같다. 어느 작업이나 단계에도 `continue-on-error`와
+       `if`가 없다(검사가 실패하면 실행이 실패해야 하고, 조건이 붙은 단계는 어떤 사건에서 검사를 건너뛸 수 있다).
     3. e2e.yml: 두 오프라인 앱을 띄워 통화 한 건을 흘리고, 나온 리포트를 저장소의 예시와 견준다.
     4. 첫 화면(README.md)의 워크플로 배지가 가리키는 파일이 .github/workflows/에 모두 있다. 없는 워크플로를 가리키면
        화면에 상태가 나오지 않는데 다른 시험은 그것을 잡지 못한다.
@@ -254,7 +254,8 @@ def test_root_workflows_install_a_uv_release_without_the_revoked_root(name):
 
 
 # repo-checks.yml에서 `run`이 있는 단계가 돌려야 하는 명령 전부, 워크플로에 나온 차례 그대로. 첫째가 tools/tests의 시험이고
-# 나머지 다섯이 루트 검사 도구다. `run` 글에 경로가 들어 있는지만 보면 명령 뒤에 `|| true`를 붙여 실패를 지우거나 `echo`로
+# 그 뒤 다섯이 루트 검사 도구이고, 마지막 일곱째가 같은 발화 인식 비교 도구(evaluation/asr)의 시험과 재계산을 도는 여러 줄
+# 단계다. `run` 글에 경로가 들어 있는지만 보면 명령 뒤에 `|| true`를 붙여 실패를 지우거나 `echo`로
 # 바꾸거나 다른 단계를 더해도 통과해서, 검사를 돌리는 척만 하는 워크플로가 된다. 그래서 글자 그대로 견주고 이 목록 밖의
 # `run` 단계도 받지 않는다. 명령을 일부러 바꿀 때(도구 판 올림, 검사 추가·제거)는 워크플로와 이 목록을 함께 고친다.
 # 증거 검사(check_evidence.py)의 `--report-only`는 2026-11-25에 이 검사를 더하며 처음 두 주 동안만 붙여 둔 인자다(문제를
@@ -267,6 +268,15 @@ REPO_CHECKS_COMMANDS = [
     "uv run --no-project tools/check_cross_deps.py",
     "uv run --no-project tools/check_evidence.py --report-only",
     "uv run --no-project tools/check_lock_drift.py",
+    # 같은 발화 인식 비교 도구(evaluation/asr)의 단계: 한 단계의 여러 줄 `run`이다. YAML이 줄 글(`|`)의 끝에 줄바꿈 하나를
+    # 붙여 읽으므로 항목도 끝 `\n`까지 같아야 한다.
+    (
+        "uv sync --frozen --directory evaluation/asr\n"
+        "uv run --frozen --no-sync --directory evaluation/asr ruff check .\n"
+        "uv run --frozen --no-sync --directory evaluation/asr ruff format --check .\n"
+        "uv run --frozen --no-sync --directory evaluation/asr pytest -q\n"
+        "uv run --frozen --no-sync --directory evaluation/asr asr-compare verify\n"
+    ),
 ]
 
 
@@ -303,7 +313,8 @@ def test_repo_checks_runs_every_root_check():
             f"actions/checkout의 fetch-depth가 정수 0이 아니다: {depth!r}"
         )
 
-    # 시험 하나와 검사 도구 다섯을 모두, 정해 둔 명령 그대로 돈다(REPO_CHECKS_COMMANDS 위의 주석).
+    # 시험 하나, 검사 도구 다섯, 인식 비교 도구의 시험·재계산 단계를 모두, 정해 둔 명령 그대로 돈다(REPO_CHECKS_COMMANDS 위의
+    # 주석).
     assert run_commands(workflow) == REPO_CHECKS_COMMANDS, (
         "repo-checks.yml의 run 명령이 정해 둔 목록과 다르다"
     )

@@ -1,5 +1,5 @@
 # 저장소 루트 검사: 구성 요소 하나에 속하지 않는 루트 쪽 검사를 한곳에서 돌린다. 구성 요소마다 있는 워크플로가 자기 폴더를
-# 검사하고, 이 워크플로는 그 바깥(루트의 검사 도구·첫 화면·docs/)을 검사한다. 단계는 여섯이다.
+# 검사하고, 이 워크플로는 그 바깥(루트의 검사 도구·첫 화면·docs/·구성 요소 사이를 잇는 비교 도구)을 검사한다. 단계는 일곱이다.
 #   1. tools/tests의 시험: 루트 검사 도구 다섯의 시험, 루트 문서(README.md, docs/)가 저장소의 파일과 git 이력에 맞는지 보는
 #      시험, 루트 워크플로 둘(이 파일과 e2e.yml)의 규칙과 첫 화면의 워크플로 배지를 읽는 시험.
 #   2. tools/check_root_numbers.py: 첫 화면과 docs/에 옮겨 적은 수치가 구성 요소 README에 기록된 글자와 같은지.
@@ -8,12 +8,15 @@
 #   5. tools/check_evidence.py: 문서와 코드가 근거로 적은 커밋 해시, 기록 파일의 커밋 값, 등록한 '규칙 → 결과' 짝이 이
 #      저장소의 이력과 맞는지(2026-11-25에 더했다. 처음 두 주는 문제를 보고만 한다).
 #   6. tools/check_lock_drift.py: 잠금 파일(uv.lock, package-lock.json)이 등록한 갱신으로만 바뀌었는지.
+#   7. evaluation/asr: 같은 발화 인식 비교 도구의 시험과 린트를 돌리고(그 폴더의 잠금으로 개발 도구를 설치한다), 커밋된 결과
+#      파일을 지금의 코드와 재료로 다시 만들어 글자까지 견준다(asr-compare verify).
 # - 경로 필터를 두지 않는다. 구성 요소 워크플로는 자기 폴더(와 자기 워크플로 파일)가 바뀔 때만 돌지만, 루트 수치의 출처는 구성
 #   요소 README이고 링크와 의존 선언도 구성 요소 안의 파일을 가리켜서 어느 폴더가 바뀌어도 이 검사가 깨질 수 있다. 그래서 main
 #   push와 모든 pull request에서 돌고, Actions 화면에서 수동으로도 돌릴 수 있다(workflow_dispatch).
 # - 주기 실행(schedule)은 넣지 않는다: 저장소에 정기 실행을 만드는 지속 설정이다.
-# - 구성 요소의 환경과 서비스는 설치하지도 띄우지도 않는다. 시험 환경에는 pytest와 PyYAML만 들어가고, 다섯 검사 도구는 내려받을
-#   의존성이 없는 스크립트다. GPU·모델·Docker도 쓰지 않는다.
+# - 구성 요소의 환경과 서비스는 설치하지도 띄우지도 않는다. 첫 단계의 시험 환경에는 pytest와 PyYAML만 들어가고, 다섯 검사 도구는
+#   내려받을 의존성이 없는 스크립트다. 일곱째 단계는 evaluation/asr 폴더의 잠금(uv.lock)에서 그 폴더의 개발 도구(pytest와 ruff)와
+#   도구 자신을 설치한다. GPU·모델·Docker도 쓰지 않는다.
 name: repo-checks
 on:
   push:
@@ -30,7 +33,7 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    # 설치와 여섯 단계를 넉넉히 덮는 상한. 넘으면 GitHub가 작업을 끊는다.
+    # 설치와 일곱 단계를 넉넉히 덮는 상한. 넘으면 GitHub가 작업을 끊는다.
     timeout-minutes: 10
     env:
       # 루트 도구는 파이썬 3.11 이상을 요구한다(각 스크립트 머리의 requires-python, 표준 라이브러리 tomllib). e2e 워크플로와
@@ -85,3 +88,16 @@ jobs:
       # 실패한다.
       - name: Lock files change only through registered updates
         run: uv run --no-project tools/check_lock_drift.py
+      # 같은 발화 인식 비교 도구(evaluation/asr)를 그 폴더의 잠금(uv.lock)으로 설치해 린트와 시험을 돌린 뒤, 커밋된 결과 파일
+      # (evaluation/asr/results/)을 지금의 코드와 재료로 다시 만들어 글자까지 견준다(asr-compare verify). 같은 코드와 재료에서는
+      # 언제나 같은 바이트가 나오게 만든 도구라서, 결과 파일이 바뀌었거나 코드나 재료가 바뀌어 결과가 달라지면 이 단계가 실패한다.
+      # 재료는 구성 요소 폴더의 추적 파일(리포트, 매니페스트)이라 이 체크아웃에 이미 있다. `uv sync --frozen`은 잠금을 고치지 않고
+      # 그대로 설치하고, 뒤의 `uv run --frozen --no-sync`는 설치한 환경을 그대로 쓴다. 파이썬 판은 위 작업 환경의 UV_PYTHON(3.11)을
+      # 따른다.
+      - name: Same-utterance ASR comparison (tests and recomputation)
+        run: |
+          uv sync --frozen --directory evaluation/asr
+          uv run --frozen --no-sync --directory evaluation/asr ruff check .
+          uv run --frozen --no-sync --directory evaluation/asr ruff format --check .
+          uv run --frozen --no-sync --directory evaluation/asr pytest -q
+          uv run --frozen --no-sync --directory evaluation/asr asr-compare verify
