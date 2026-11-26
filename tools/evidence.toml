@@ -456,3 +456,17 @@ rule = "97efa37"
 result = "9bae1c7"
 where = "docs/asr-comparison.md"
 what = "같은 발화 인식 비교(2026-11-25): 규칙을 적은 문서 커밋 → 한 번 잰 결과 커밋"
+
+[[pair]]
+id = "support-agent-zap-17-criteria-before-result"
+rule = "8190ecd"
+result = "b2f9f44"
+where = "support-agent/docs/service.md"
+what = "support-agent ZAP 17차 스캔(2026-11-26): 통과 기준을 적은 단락 커밋 → 결과 행 커밋(통과 아님 — 시간 기반 경보 하나)"
+
+[[pair]]
+id = "support-agent-zap-18-criteria-before-result"
+rule = "713354b"
+result = "32692ab"
+where = "support-agent/docs/service.md"
+what = "support-agent ZAP 18차 스캔(2026-11-26): 통과 기준을 적은 단락 커밋 → 결과 행 커밋(통과)"

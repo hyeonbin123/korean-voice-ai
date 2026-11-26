@@ -17,7 +17,7 @@ flowchart LR
     whisper -.-> voice
     stt -.-> voice
     voice -.-> agent
-    agent -->|"HTTP 시연"| summary
+    agent -->|"HTTP"| summary
     whisper -->|"보고서"| stt
     whisper -->|"모델"| summary
     agent -->|"음성 환경"| summary
